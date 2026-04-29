@@ -145,7 +145,17 @@ def _rotate(backup_root: Path, keep: int) -> int:
 
 @shared_task(name="app.workers.tasks.backup_task.run_backup", bind=True, max_retries=1)
 def run_backup(self, label: str = "scheduled") -> dict:
-    """Full pg_dump backup with manifest, checksums, and rotation."""
+    """Full pg_dump backup with manifest, checksums, and rotation.
+
+    F284 (closes F143) — releases the ``scan_lock:backup`` Redis
+    lock in the outermost ``finally`` so back-to-back manual +
+    nightly backups are possible once one finishes. The endpoint
+    in monitoring.py acquires the lock before queueing; if this
+    task crashes before reaching the release, the lock's TTL (10
+    min) is the safety valve.
+    """
+    from app.utils.scan_lock import release_scan_lock
+
     started = datetime.now(timezone.utc)
     ts      = started.strftime("%Y%m%d_%H%M%S")
     dest    = BACKUP_ROOT / ts
@@ -247,6 +257,12 @@ def run_backup(self, label: str = "scheduled") -> dict:
         )
         db.add(log_entry)
         db.commit()
+
+    # F284: release the lock unconditionally — success, failure,
+    # AND the early-return path implicit in any future refactor.
+    # ``release_scan_lock`` is a no-op on a non-existent key so a
+    # double-release is safe.
+    release_scan_lock("backup")
 
     return {
         "timestamp":   ts,
