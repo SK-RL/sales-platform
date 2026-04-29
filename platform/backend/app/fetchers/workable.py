@@ -9,7 +9,28 @@ from app.fetchers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
-API_URL = "https://apply.workable.com/api/v1/widget/accounts/{slug}"
+# F296 (closes F121, Workable side) — request descriptions inline.
+#
+# Pre-fix the URL didn't carry ``?details=true&full_description=true``,
+# so the widget endpoint returned only the listing-level keys (no
+# ``description`` / ``full_description`` field). F97's
+# ``extract_description`` helper then had nothing to map onto, and
+# every Workable job in the DB had empty ``JobDescription`` rows.
+# Live verified at F121 filing: 247 Workable jobs, 0/247 had any
+# description text.
+#
+# With these query params Workable inlines a ``description`` field
+# (~5KB per job) so the scan-time write to ``JobDescription``
+# populates the column AND the resume scorer's keyword extraction
+# has actual JD content to work with. The trade-off is response
+# size: empirically ~5KB per job × 25 jobs/board × 200 boards =
+# ~25MB extra per scan-cycle, which the scan loop already buffers
+# fine (each board is a separate HTTP call, not a single 25MB
+# fetch).
+API_URL = (
+    "https://apply.workable.com/api/v1/widget/accounts/{slug}"
+    "?details=true&full_description=true"
+)
 
 
 class WorkableFetcher(BaseFetcher):
