@@ -25,6 +25,28 @@ logger = logging.getLogger(__name__)
 # Thread pool for running async fetchers from sync Celery context
 _executor = ThreadPoolExecutor(max_workers=4)
 
+
+def _approved_roles_set_from_config(cluster_config: dict | None) -> set[str]:
+    """F307 helper — build a flat lowercase ``approved_roles`` set
+    from the admin's DB-stored ``RoleClusterConfig`` rows.
+
+    Mirrors the construction in
+    ``maintenance_task.rescore_jobs`` / ``reclassify_and_rescore``
+    so scan-time scoring uses the SAME role superset that the
+    rescore tasks use. Without this, a freshly-ingested job's
+    score diverged from what the next nightly rescore would
+    produce — admin-configured ``approved_roles`` were silently
+    ignored at scan time.
+    """
+    if not cluster_config:
+        return set()
+    out: set[str] = set()
+    for cfg in cluster_config.values():
+        for role in (cfg.get("approved_roles") or []):
+            if role:
+                out.add(role.lower())
+    return out
+
 # Regression finding 7 (auto-deactivation): after this many *clean*
 # zero-job scans in a row, flip the board's `is_active` to False.
 # "Clean" = fetcher returned [] with no exception, so we know the slug
@@ -193,8 +215,30 @@ def _get_fetcher_for_platform(platform: str):
     return fetcher_cls()
 
 
-def _upsert_job(session: Session, company: Company, board: CompanyATSBoard, raw_job: dict, cluster_config: dict | None = None) -> str:
-    """Upsert a single job record. Returns 'new', 'updated', or 'skipped'."""
+def _upsert_job(
+    session: Session,
+    company: Company,
+    board: CompanyATSBoard,
+    raw_job: dict,
+    cluster_config: dict | None = None,
+    approved_roles_set: set[str] | None = None,
+) -> str:
+    """Upsert a single job record. Returns 'new', 'updated', or 'skipped'.
+
+    F307 (data-reliability fix): pre-fix the scan-time scoring path
+    called ``compute_relevance_score`` WITHOUT ``approved_roles_set``,
+    so the scorer fell back to the hardcoded ``INFRA_ROLES +
+    SECURITY_ROLES + QA_ROLES`` superset. Meanwhile
+    ``rescore_jobs`` / ``reclassify_and_rescore`` build
+    ``approved_roles_set`` from the admin's DB-stored
+    ``RoleClusterConfig.approved_roles`` and pass it through.
+    Net effect: a freshly-ingested job's score diverged from what
+    the next nightly rescore would compute — admin-configured
+    approved-role lists were silently ignored at scan time. F307
+    threads ``approved_roles_set`` through ``_upsert_job`` and on
+    into ``compute_relevance_score`` so scan-time scores match
+    reclassify-time scores.
+    """
     external_id = raw_job.get("external_id", "")
     if not external_id:
         return "skipped"
@@ -382,6 +426,9 @@ def _upsert_job(session: Session, company: Company, board: CompanyATSBoard, raw_
             existing.raw_json = raw_merged
 
         # Recalculate relevance score
+        # F307: pass approved_roles_set so the scorer sees the
+        # admin's DB config rather than falling back to the
+        # hardcoded role superset.
         existing.relevance_score = compute_relevance_score(
             title=title,
             matched_role=matched_role,
@@ -391,6 +438,7 @@ def _upsert_job(session: Session, company: Company, board: CompanyATSBoard, raw_
             remote_scope=remote_scope,
             platform=board.platform,
             posted_at=existing.posted_at,
+            approved_roles_set=approved_roles_set,
         )
         job_id_for_desc = existing.id
         action = "updated"
@@ -428,6 +476,8 @@ def _upsert_job(session: Session, company: Company, board: CompanyATSBoard, raw_
             raw_json=raw_job.get("raw_json", {}),
         )
         # Compute relevance score
+        # F307: pass approved_roles_set — see the existing-job
+        # branch above for the rationale.
         job.relevance_score = compute_relevance_score(
             title=title,
             matched_role=matched_role,
@@ -437,6 +487,7 @@ def _upsert_job(session: Session, company: Company, board: CompanyATSBoard, raw_
             remote_scope=remote_scope,
             platform=board.platform,
             posted_at=posted_at,
+            approved_roles_set=approved_roles_set,
         )
         session.add(job)
         job_id_for_desc = job.id
@@ -467,8 +518,21 @@ def _upsert_job(session: Session, company: Company, board: CompanyATSBoard, raw_
     return action
 
 
-def _scan_board(session: Session, board: CompanyATSBoard, cluster_config: dict | None = None) -> dict:
-    """Scan a single ATS board and return scan statistics."""
+def _scan_board(
+    session: Session,
+    board: CompanyATSBoard,
+    cluster_config: dict | None = None,
+    approved_roles_set: set[str] | None = None,
+) -> dict:
+    """Scan a single ATS board and return scan statistics.
+
+    F307 (data-reliability fix): ``approved_roles_set`` flows from
+    the caller (built once per scan from
+    ``RoleClusterConfig.approved_roles`` in the DB) into every
+    ``_upsert_job`` call so scan-time scores use the admin's
+    configured role list — same source of truth that
+    ``rescore_jobs`` uses.
+    """
     stats = {"jobs_found": 0, "new_jobs": 0, "updated_jobs": 0, "skipped_jobs": 0, "errors": 0, "error_message": ""}
 
     fetcher = _get_fetcher_for_platform(board.platform)
@@ -604,7 +668,10 @@ def _scan_board(session: Session, board: CompanyATSBoard, cluster_config: dict |
                 # the error for observability, but the rest of the
                 # batch survives.
                 with session.begin_nested():
-                    result = _upsert_job(session, job_company, board, raw_job, cluster_config)
+                    result = _upsert_job(
+                        session, job_company, board, raw_job, cluster_config,
+                        approved_roles_set=approved_roles_set,
+                    )
                 if result == "new":
                     stats["new_jobs"] += 1
                 elif result == "updated":
@@ -661,6 +728,9 @@ def scan_all_platforms(self):
     session = SyncSession()
     try:
         cluster_config = load_cluster_config_sync(session)
+        # F307: build approved_roles_set once per scan and thread
+        # through to _scan_board → _upsert_job → compute_relevance_score
+        approved_roles_set = _approved_roles_set_from_config(cluster_config)
 
         boards = session.execute(
             select(CompanyATSBoard).where(CompanyATSBoard.is_active.is_(True))
@@ -678,7 +748,10 @@ def scan_all_platforms(self):
             session.flush()
 
             board_start = time.time()
-            stats = _scan_board(session, board, cluster_config)
+            stats = _scan_board(
+                session, board, cluster_config,
+                approved_roles_set=approved_roles_set,
+            )
             board_duration = int((time.time() - board_start) * 1000)
 
             scan_log.completed_at = datetime.now(timezone.utc)
@@ -727,6 +800,9 @@ def scan_platform(self, platform_name: str):
     session = SyncSession()
     try:
         cluster_config = load_cluster_config_sync(session)
+        # F307: build approved_roles_set once per scan and thread
+        # through to _scan_board → _upsert_job → compute_relevance_score
+        approved_roles_set = _approved_roles_set_from_config(cluster_config)
 
         boards = session.execute(
             select(CompanyATSBoard).where(
@@ -751,7 +827,10 @@ def scan_platform(self, platform_name: str):
             session.flush()
 
             board_start = time.time()
-            stats = _scan_board(session, board, cluster_config)
+            stats = _scan_board(
+                session, board, cluster_config,
+                approved_roles_set=approved_roles_set,
+            )
             board_duration = int((time.time() - board_start) * 1000)
 
             scan_log.completed_at = datetime.now(timezone.utc)
@@ -796,6 +875,9 @@ def scan_single_board(self, board_id: str):
     session = SyncSession()
     try:
         cluster_config = load_cluster_config_sync(session)
+        # F307: build approved_roles_set once per scan and thread
+        # through to _scan_board → _upsert_job → compute_relevance_score
+        approved_roles_set = _approved_roles_set_from_config(cluster_config)
 
         board = session.execute(
             select(CompanyATSBoard).where(CompanyATSBoard.id == board_id)
@@ -813,7 +895,10 @@ def scan_single_board(self, board_id: str):
         session.add(scan_log)
         session.flush()
 
-        stats = _scan_board(session, board, cluster_config)
+        stats = _scan_board(
+            session, board, cluster_config,
+            approved_roles_set=approved_roles_set,
+        )
         duration = int((time.time() - start_time) * 1000)
 
         scan_log.completed_at = datetime.now(timezone.utc)
@@ -855,6 +940,9 @@ def scan_single_company(self, company_id: str):
     session = SyncSession()
     try:
         cluster_config = load_cluster_config_sync(session)
+        # F307: build approved_roles_set once per scan and thread
+        # through to _scan_board → _upsert_job → compute_relevance_score
+        approved_roles_set = _approved_roles_set_from_config(cluster_config)
 
         boards = session.execute(
             select(CompanyATSBoard).where(
@@ -879,7 +967,10 @@ def scan_single_company(self, company_id: str):
             session.flush()
 
             board_start = time.time()
-            stats = _scan_board(session, board, cluster_config)
+            stats = _scan_board(
+                session, board, cluster_config,
+                approved_roles_set=approved_roles_set,
+            )
             board_duration = int((time.time() - board_start) * 1000)
 
             scan_log.completed_at = datetime.now(timezone.utc)
