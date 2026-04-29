@@ -555,12 +555,23 @@ async def company_jobs(
     jobs = result.scalars().all()
     items = [JobOut.model_validate(j) for j in jobs]
 
+    # F299 (closes F212) — emit canonical envelope keys to match
+    # every other paginated list endpoint in the API. Pre-fix this
+    # endpoint emitted ``per_page`` + ``pages`` while ``/companies``,
+    # ``/jobs``, ``/reviews``, ``/applications`` etc. all emit
+    # ``page_size`` + ``total_pages``. The drift broke any frontend
+    # ``<Pagination>`` component keyed on the canonical names —
+    # 5-of-7 items rendered as "page 1 of 1" because the
+    # ``total_pages`` field it read was undefined. The query param
+    # name ``per_page`` stays for backwards compat with existing
+    # callers (changing the input would break clients); only the
+    # response keys flip to canonical names.
     return {
         "items": items,
         "total": total,
         "page": page,
-        "per_page": per_page,
-        "pages": (total + per_page - 1) // per_page,
+        "page_size": per_page,
+        "total_pages": (total + per_page - 1) // per_page,
     }
 
 
