@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -92,8 +93,16 @@ class FeedbackUpdate(BaseModel):
     # quietly accepting defensive-in-depth bypasses like `__proto__`.
     model_config = ConfigDict(extra="forbid")
 
-    status: str | None = None
-    priority: str | None = None
+    # F292 (closes F162 b/c) — Literal-typed status + priority so
+    # generic PATCH can't smuggle non-canonical values past the
+    # handler's VALID_STATUSES / VALID_PRIORITIES check. Pre-fix
+    # ``status: str | None`` accepted any string at the schema
+    # layer; the handler's set check (line 411 / 416 / 518) caught
+    # it but only AFTER the schema parsed, and only on endpoints
+    # that explicitly checked. The Literal makes the contract
+    # enforced at parse time across every PATCH path.
+    status: Literal["open", "in_progress", "resolved", "closed"] | None = None
+    priority: Literal["low", "medium", "high", "critical"] | None = None
     admin_notes: str | None = Field(default=None, max_length=_LONG_TEXT_MAX)
 
     @field_validator("admin_notes")
