@@ -43,6 +43,11 @@ _ANSWER_MAX = 8000
 class AnswerCreate(BaseModel):
     """Body of POST /api/v1/answer-book."""
 
+    # F306 (sweep continuation) — same defense pattern as
+    # AnswerUpdate. A typoed field name on POST should 422, not
+    # silently drop.
+    model_config = ConfigDict(extra="forbid")
+
     category: ANSWER_CATEGORY_LITERALS
     question: str = Field(..., min_length=1, max_length=_QUESTION_MAX)
     answer: str = Field(default="", max_length=_ANSWER_MAX)
