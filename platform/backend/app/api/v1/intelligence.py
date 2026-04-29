@@ -149,9 +149,33 @@ async def skill_gaps(
     # `first_seen_at` defaults to `datetime.now(utc)` on insert so it
     # should never be NULL in practice, but the nulls-last clause
     # protects against a future import path that forgets the default.
+    # F301 (closes F109): pre-fix the query did an INNER JOIN
+    # against JobDescription, so jobs whose ``JobDescription`` row
+    # was empty/missing (~80% of historical rows pre-F101) contributed
+    # zero to the skill-demand counter. Skill Gaps page rendered as
+    # ``jobs_analyzed=0`` even with thousands of relevant jobs in
+    # the DB.
+    #
+    # The fix mirrors the resume-scorer fallback (F97): SELECT BOTH
+    # the rendered ``text_content`` AND the raw JSON, then call
+    # ``extract_description(platform, raw_json)`` per row when
+    # ``text_content`` is empty so the platform-keyed fallback fills
+    # in. Same shared helper used by /jobs/{id}/description (F291)
+    # and the score task — single source of truth for "what counts
+    # as a job description".
+    #
+    # Switched to LEFT OUTER JOIN so jobs WITHOUT a JobDescription
+    # row at all still appear in the result set (the fallback can
+    # extract from raw_json directly). Pre-fix INNER JOIN dropped
+    # them silently.
     query = (
-        select(JobDescription.text_content, Job.role_cluster)
-        .join(Job, JobDescription.job_id == Job.id)
+        select(
+            JobDescription.text_content,
+            Job.role_cluster,
+            Job.platform,
+            Job.raw_json,
+        )
+        .outerjoin(JobDescription, JobDescription.job_id == Job.id)
         .where(Job.relevance_score > 0)
     )
     if role_cluster:
@@ -161,11 +185,25 @@ async def skill_gaps(
     result = await db.execute(query)
     rows = result.all()
 
-    # Aggregate skill demand across all job descriptions
+    # Aggregate skill demand across all job descriptions.
+    # F301: ``raw_text`` is now sourced from JobDescription
+    # ``text_content`` if present, else extracted on-the-fly from
+    # ``Job.raw_json`` via the shared helper. Tracks how many rows
+    # actually had usable text so the response distinguishes
+    # "no jobs in scope" from "had jobs but all empty descriptions".
+    from app.utils.job_description import extract_description
+
     demand: Counter = Counter()
-    job_count = len(rows)
-    for raw_text, _ in rows:
+    job_count = 0
+    for text_content, _cluster, platform, raw_json in rows:
+        raw_text = text_content or ""
+        if not raw_text and raw_json:
+            _, fallback_text = extract_description(
+                platform or "", raw_json or {}
+            )
+            raw_text = fallback_text or ""
         if raw_text:
+            job_count += 1
             skills = _extract_skills_from_text(raw_text)
             for skill in skills:
                 demand[skill] += 1
