@@ -47,10 +47,26 @@ def score_resume_task(self, resume_id: str):
 
         relevant_clusters = _get_relevant_clusters_sync(session)
 
-        # Get all relevant jobs with descriptions
+        # F310 (data correctness): filter to ACTIVE job statuses only.
+        # Pre-fix the rescore included every job in the relevant
+        # cluster regardless of status, so EXPIRED + ARCHIVED rows
+        # got scored too — wasted compute, and the user's "Top
+        # Matches" panel could surface jobs they couldn't actually
+        # apply to. Same active-statuses set that
+        # ``maintenance_task.rescore_jobs`` and
+        # ``reclassify_and_rescore`` use for their streaming loop.
+        # Combined with F300's UPSERT-then-clean, the cleanup pass
+        # also drops stale ResumeScore rows for jobs that flipped
+        # to expired/archived since the last run.
+        _ACTIVE_STATUSES = ("new", "under_review", "accepted")
+
+        # Get all relevant + active jobs
         jobs = session.execute(
             select(Job)
-            .where(Job.role_cluster.in_(relevant_clusters))
+            .where(
+                Job.role_cluster.in_(relevant_clusters),
+                Job.status.in_(_ACTIVE_STATUSES),
+            )
             .order_by(Job.relevance_score.desc())
         ).scalars().all()
 
