@@ -11,7 +11,18 @@ class ScanLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String(300), nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    # F277 — indexed because /monitoring activity_24h, the F272 prune
+    # task, and /platforms last_scan all filter or order by this column.
+    # Migration ``i5j6k7l8m9n0`` adds the index as DESC (matching the
+    # dominant most-recent-first access pattern); ``index=True`` here
+    # so a future ``Base.metadata.create_all()`` (test bootstrap, fresh
+    # dev DB) gets a btree(started_at) too instead of silently going
+    # back to seq-scan-on-every-monitoring-render.
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     jobs_found: Mapped[int] = mapped_column(Integer, default=0)
     new_jobs: Mapped[int] = mapped_column(Integer, default=0)
