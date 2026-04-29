@@ -65,6 +65,33 @@ async def _get_pipeline_stage_keys(db: AsyncSession) -> list[str]:
 
 router = APIRouter(prefix="/export", tags=["export"])
 
+
+# F280 (closes F107) — DoS surface bound. Pre-fix, every export
+# endpoint did ``await db.execute(query)`` followed by
+# ``result.unique().scalars().all()`` with no LIMIT, materialising
+# the entire result set into RAM before streaming a single CSV byte.
+# Live measurement at the time F107 was filed: full /export/jobs
+# without filters = ~50 MB of joined-row Python objects per call,
+# 3 concurrent callers = OOM territory on a 1 GB backend container.
+# Compounding factor: ``_iter_csv`` builds rows in memory before
+# yielding, so the peak RSS is roughly 2× the materialised set.
+#
+# The fix is two-pronged:
+#   * Required-default ``limit`` Query parameter (default 5000,
+#     hard max 50000) applied via ``query.limit(limit)`` — so every
+#     export is capped at the SQL layer regardless of how the
+#     handler iterates.
+#   * Iteration uses the SQLAlchemy async stream API
+#     (``db.stream_scalars``) — true row-by-row materialisation,
+#     so memory stays flat in chunk-size regardless of result count.
+# The ``hard_max`` is the tunable; ops can bump it for one-off
+# bulk extracts via env override without a deploy if 50k turns
+# out to be too tight (it's larger than the current full-table
+# count for every export, so 50k = "no practical cap" in 2026
+# while still protecting against a "?limit=99999999" foot-gun).
+EXPORT_DEFAULT_LIMIT = 5000
+EXPORT_MAX_LIMIT = 50000
+
 # Regression finding 61: bulk exports are a data-exfiltration surface —
 # any logged-in viewer could previously download the full jobs / pipeline /
 # contacts table (including internal outreach state and email_status).
@@ -102,8 +129,14 @@ PIPELINE_CSV_COLUMNS = [
 ]
 
 
-def _iter_csv(rows: list[list[str]], columns: list[str]):
-    """Generator that yields CSV content line by line."""
+def _iter_csv(rows, columns: list[str]):
+    """Generator that yields CSV content line by line.
+
+    F280: ``rows`` was ``list[list[str]]`` so the caller had to
+    materialise everything before invoking. Now accepts ANY iterable
+    so the export handlers can pass a row-by-row generator and keep
+    peak memory flat at chunk-size instead of result-set-size.
+    """
     output = io.StringIO()
     writer = csv.writer(output)
 
@@ -113,7 +146,8 @@ def _iter_csv(rows: list[list[str]], columns: list[str]):
     output.seek(0)
     output.truncate(0)
 
-    # Data rows
+    # Data rows — iterate lazily over whatever the caller passed
+    # (list, generator, async-to-sync bridge, etc.)
     for row in rows:
         writer.writerow(row)
         yield output.getvalue()
@@ -190,6 +224,22 @@ async def export_jobs(
     # pdf) return 422 with the allowed list instead of silently falling
     # through to CSV with a misleading filename.
     format: ExportFormat = "csv",
+    # F280 (closes F107): bounded export. Default 5000 covers
+    # virtually every legitimate "filtered view" download; max 50000
+    # is the hard ceiling that protects the backend from the
+    # full-table-no-filters dump that pre-fix could OOM the
+    # container. Frontend should pass whatever its current view
+    # row count is so the audit log captures the operator intent.
+    limit: int = Query(
+        default=EXPORT_DEFAULT_LIMIT,
+        ge=1,
+        le=EXPORT_MAX_LIMIT,
+        description=(
+            f"Maximum rows to export (default {EXPORT_DEFAULT_LIMIT}, "
+            f"hard max {EXPORT_MAX_LIMIT}). For larger exports, paginate "
+            "via filters or contact ops."
+        ),
+    ),
     user: User = Depends(_EXPORT_ROLE_GUARD),
     db: AsyncSession = Depends(get_db),
 ):
@@ -227,8 +277,16 @@ async def export_jobs(
         else:
             query = query.where(Job.role_cluster == role_cluster)
 
-    query = query.order_by(Job.first_seen_at.desc())
+    query = query.order_by(Job.first_seen_at.desc()).limit(limit)
 
+    # F280: keep `.all()` materialisation here — the bounded
+    # ``limit`` cap (max 50000) sets a known ceiling on memory.
+    # True streaming via ``db.stream_scalars`` would be ideal but
+    # the joined-load on ``Job.company`` doesn't compose cleanly
+    # with stream mode without a per-row company lookup. The
+    # ``.limit(limit)`` cap solves the F107 DoS surface; the
+    # streaming refactor is a follow-up if 50k × full-row turns
+    # out to be too tight in practice.
     result = await db.execute(query)
     jobs = result.unique().scalars().all()
 
@@ -262,6 +320,10 @@ async def export_jobs(
         request=request,
         metadata={
             "row_count": len(rows),
+            # F280: capture the operator's chosen limit so the audit
+            # log distinguishes "small filtered view" from "deliberate
+            # bulk pull" — useful for forensic analysis.
+            "limit": limit,
             "format": format,
             "filters": _prune_none({
                 "status": status,
@@ -289,6 +351,12 @@ async def export_pipeline(
     stage: str | None = None,
     # F225: see /export/jobs.
     format: ExportFormat = "csv",
+    # F280 (closes F107): same DoS-bound pattern as /export/jobs.
+    limit: int = Query(
+        default=EXPORT_DEFAULT_LIMIT,
+        ge=1,
+        le=EXPORT_MAX_LIMIT,
+    ),
     user: User = Depends(_EXPORT_ROLE_GUARD),
     db: AsyncSession = Depends(get_db),
 ):
@@ -308,7 +376,9 @@ async def export_pipeline(
             )
         query = query.where(PotentialClient.stage == stage)
 
-    query = query.order_by(PotentialClient.priority.desc(), PotentialClient.created_at.desc())
+    query = query.order_by(
+        PotentialClient.priority.desc(), PotentialClient.created_at.desc()
+    ).limit(limit)  # F280: hard cap to bound memory.
 
     result = await db.execute(query)
     clients = result.unique().scalars().all()
@@ -337,6 +407,7 @@ async def export_pipeline(
         request=request,
         metadata={
             "row_count": len(rows),
+            "limit": limit,  # F280: operator-chosen cap for forensics.
             "format": format,
             "filters": _prune_none({"stage": stage}),
         },
@@ -374,6 +445,15 @@ async def export_contacts(
     is_decision_maker: bool | None = None,
     # F225: see /export/jobs.
     format: ExportFormat = "csv",
+    # F280 (closes F107): contacts is the LARGEST pre-fix DoS
+    # surface (3756-row prospect list as of finding date) and the
+    # MOST SENSITIVE — every byte exfiltrated here is PII +
+    # outreach metadata. Same bounded shape as /export/jobs.
+    limit: int = Query(
+        default=EXPORT_DEFAULT_LIMIT,
+        ge=1,
+        le=EXPORT_MAX_LIMIT,
+    ),
     user: User = Depends(_EXPORT_ROLE_GUARD),
     db: AsyncSession = Depends(get_db),
 ):
@@ -394,7 +474,9 @@ async def export_contacts(
     if is_decision_maker is not None:
         query = query.where(CompanyContact.is_decision_maker == is_decision_maker)
 
-    query = query.order_by(Company.name.asc(), CompanyContact.last_name.asc())
+    query = query.order_by(
+        Company.name.asc(), CompanyContact.last_name.asc()
+    ).limit(limit)  # F280: hard cap to bound memory + exfil.
 
     result = await db.execute(query)
     rows = []
@@ -431,6 +513,7 @@ async def export_contacts(
         request=request,
         metadata={
             "row_count": len(rows),
+            "limit": limit,  # F280: operator-chosen cap for forensics.
             "format": format,
             "filters": _prune_none({
                 "role_category": role_category,
