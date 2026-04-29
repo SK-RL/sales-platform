@@ -256,12 +256,57 @@ async def get_vm_health():
     return get_vm_metrics()
 
 
+_BACKUP_LABEL_MAX_LEN = 64
+
+
+def _sanitize_backup_label(raw: str) -> str:
+    """F284: Strip control bytes (NUL, CR, LF, TAB, etc.) from the
+    label and trim. The label flows verbatim into ``manifest.json``
+    and the access-log line; control bytes there cause log-injection
+    (e.g. forged ``\\nERROR`` lines that confuse log parsers) and
+    JSON corruption (a literal ``\\n`` in a value breaks
+    line-delimited JSON consumers).
+
+    Empty after strip → ``"manual"`` to keep the task contract
+    happy. Per-byte filter rather than a regex so we drop any
+    control char in the 0x00-0x1F range (plus 0x7F DEL).
+    """
+    cleaned = "".join(
+        ch for ch in (raw or "")
+        if 32 <= ord(ch) < 127 or ord(ch) > 159
+    ).strip()
+    return cleaned or "manual"
+
+
 @router.post("/backup", dependencies=[Depends(require_role("admin"))])
-async def trigger_backup(label: str = "manual"):
+async def trigger_backup(
+    # F284 (closes F143): cap label length, sanitize control bytes,
+    # acquire the "backup" scan-lock before queueing so concurrent
+    # triggers don't race on ``BACKUP_ROOT/<ts>/`` directory creation
+    # under multi-worker Celery (which would corrupt manifests).
+    label: str = Query(default="manual", max_length=_BACKUP_LABEL_MAX_LEN),
+):
     """Trigger an on-demand database backup (admin only)."""
+    from app.utils.scan_lock import acquire_scan_lock
     from app.workers.tasks.backup_task import run_backup
-    task = run_backup.delay(label=label)
-    return {"task_id": task.id, "status": "queued", "label": label}
+
+    safe_label = _sanitize_backup_label(label)
+
+    # Atomic lock acquisition. The task's ``finally`` block releases
+    # ``scan_lock:backup`` so back-to-back manual + nightly backups
+    # are possible once one finishes. TTL is the safety valve if a
+    # task dies before releasing.
+    if not await acquire_scan_lock("backup"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A backup is already in progress. Wait for it to "
+                "finish before triggering another."
+            ),
+        )
+
+    task = run_backup.delay(label=safe_label)
+    return {"task_id": task.id, "status": "queued", "label": safe_label}
 
 
 @router.post("/reclassify-jobs", dependencies=[Depends(require_role("admin"))])
