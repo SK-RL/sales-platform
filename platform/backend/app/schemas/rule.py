@@ -1,7 +1,7 @@
 """Pydantic schemas for Role Rule endpoints."""
 
 from typing import Annotated
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from datetime import datetime
 from uuid import UUID
 
@@ -72,6 +72,12 @@ class RoleRuleCreate(BaseModel):
     # F128: match DB column sizes + ban empty strings up front so the
     # "empty base_role" footgun (indistinguishable from "no rule at
     # all" in the matching code) is impossible.
+    # F305: ``extra="forbid"`` so admin-side typos like ``custer``
+    # 422 instead of silently dropping. Same defense pattern as
+    # F130 (review), F131 (company), F162 (feedback), F268 (role
+    # cluster), F287 (board).
+    model_config = ConfigDict(extra="forbid")
+
     cluster: str = Field(..., min_length=1, max_length=_CLUSTER_MAX_LEN)
     base_role: str = Field(..., min_length=1, max_length=_BASE_ROLE_MAX_LEN)
     keywords: list[_Keyword] = Field(..., max_length=_KEYWORDS_MAX_COUNT)
@@ -87,6 +93,9 @@ class RoleRuleUpdate(BaseModel):
     # F128: same caps on the PATCH path. Every field is optional so
     # partial updates work, but any value that IS provided must pass
     # the same shape check as POST.
+    # F305: ``extra="forbid"`` mirrored from RoleRuleCreate.
+    model_config = ConfigDict(extra="forbid")
+
     cluster: str | None = Field(default=None, min_length=1, max_length=_CLUSTER_MAX_LEN)
     base_role: str | None = Field(default=None, min_length=1, max_length=_BASE_ROLE_MAX_LEN)
     keywords: list[_Keyword] | None = Field(default=None, max_length=_KEYWORDS_MAX_COUNT)
