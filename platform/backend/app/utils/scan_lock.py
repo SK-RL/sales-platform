@@ -43,6 +43,15 @@ _TTL_BY_SCOPE: dict[str, int] = {
     "discover": 7200,      # discovery probes unknown slugs — 2 hours
     "platform": 1800,      # single platform (subset of all) — 30 min
     "board": 300,          # single board — 5 min
+    # F284 (closes F143) — admin-triggered DB backup. The backup
+    # task copies a Postgres dump + alembic snapshot into
+    # ``BACKUP_ROOT/<ts>/``; concurrent triggers race on the
+    # timestamp directory and corrupt manifests under multi-worker
+    # Celery. 10 min TTL covers the worst-case dump on the
+    # documented prod scale (~50 MB pgdump + ~5 MB schema export);
+    # the task's ``finally`` releases the lock on completion either
+    # way.
+    "backup": 600,
 }
 
 
