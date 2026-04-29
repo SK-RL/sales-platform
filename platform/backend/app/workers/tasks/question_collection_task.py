@@ -27,6 +27,18 @@ def collect_questions():
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
+        # F314 (data correctness, sibling to F313): use the
+        # admin-configured RELEVANT clusters list instead of the
+        # naive "any non-empty cluster" predicate. Pre-fix the
+        # collector wasted Anthropic-quota / external-API calls
+        # fetching questions for jobs in non-relevant clusters
+        # (e.g. an admin-added ``data`` cluster marked
+        # ``is_relevant=False``). Now matches the same
+        # relevant-set used by /jobs?role_cluster=relevant +
+        # /companies/scores + auto_target_companies (F313).
+        from app.workers.tasks._role_matching import get_relevant_clusters_sync
+        relevant_clusters = get_relevant_clusters_sync(session)
+
         # Find recent jobs on supported platforms that have no cached questions
         existing_job_ids = select(JobQuestion.job_id).distinct()
 
@@ -36,7 +48,7 @@ def collect_questions():
                 Job.first_seen_at >= cutoff,
                 Job.status.in_(["new", "under_review", "accepted"]),
                 Job.id.notin_(existing_job_ids),
-                Job.role_cluster != "",  # Only relevant jobs
+                Job.role_cluster.in_(relevant_clusters),  # F314
             ).order_by(Job.relevance_score.desc()).limit(MAX_PER_CYCLE)
         ).scalars().all()
 
