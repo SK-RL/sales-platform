@@ -806,29 +806,30 @@ async def get_job_description(job_id: UUID, user: User = Depends(get_current_use
             raw_text=sanitize_html(jd.text_content or jd.html_content or ""),
         )
 
-    # Fallback: extract description from raw_json
-    import html as html_mod
+    # F291 (closes F122): the inline raw_json fallback used to live
+    # right here and had drifted from the shared
+    # ``app.utils.job_description.extract_description`` helper that
+    # the scan pipeline + ``maintenance_task.backfill_job_descriptions``
+    # use. The drift meant: smartrecruiters jobs (with structured
+    # ``jobAd.sections``) returned empty; workable's ``full_description``
+    # was missed; bamboohr's ``jobOpeningDescription`` was missed;
+    # career-page rows didn't render. Single source of truth now —
+    # the helper handles per-platform key mapping + the structured
+    # sections branches that the inline fallback never knew about.
+    from app.utils.job_description import extract_description
+
     job_result = await db.execute(select(Job).where(Job.id == job_id))
     job = job_result.scalar_one_or_none()
     raw_text = ""
     if job and job.raw_json:
         raw = job.raw_json if isinstance(job.raw_json, dict) else {}
-        # Platform-specific field mapping
-        raw_text = (
-            raw.get("content")           # greenhouse
-            or raw.get("descriptionHtml")  # ashby
-            or raw.get("description")      # lever, himalayas, remoteok, remotive
-            or raw.get("descriptionPlain")  # lever/ashby plaintext fallback
-            or raw.get("descriptionBody")   # lever additional
-            or ""
+        html_content, text_content = extract_description(
+            job.platform or "", raw,
         )
-        # Lever stores lists of requirements — join if the additional field has more
-        additional = raw.get("additional") or raw.get("additionalPlain") or ""
-        if additional and len(additional) > len(raw_text):
-            raw_text = additional
-        # Unescape HTML entities (raw_json may store &lt; as escaped)
-        if raw_text and "&lt;" in raw_text:
-            raw_text = html_mod.unescape(raw_text)
+        # Prefer the rendered text. Both come back already
+        # entity-unescaped; the sanitize_html below strips dangerous
+        # tags before the frontend's dangerouslySetInnerHTML render.
+        raw_text = text_content or html_content or ""
 
     # Sanitize before returning — frontend renders via dangerouslySetInnerHTML.
     return JobDescriptionOut(raw_text=sanitize_html(raw_text))
