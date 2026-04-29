@@ -20,7 +20,7 @@ unrelated schema modules.
 
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 # Supported credential platforms — must stay in sync with
@@ -70,6 +70,11 @@ class CredentialCreate(BaseModel):
     it creates a new row. `password` is optional so the caller can
     update `email` or `profile_url` without re-submitting the password.
     """
+
+    # F306: ``extra="forbid"`` so a typoed field name (``passowrd``)
+    # 422s instead of silently dropping. Same defense pattern as
+    # F128/F130/F162/F268/F305.
+    model_config = ConfigDict(extra="forbid")
 
     platform: SUPPORTED_PLATFORM_LITERALS
     email: EmailStr
