@@ -238,8 +238,19 @@ async def register(
     if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Role must be one of: {', '.join(VALID_ROLES)}")
 
-    if len(body.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    # F297 (closes F153 b): bump from 6 → 8 to match the schema-
+    # layer floor (PASSWORD_MIN_LEN in schemas/user.py, F290) AND
+    # the /change-password + /reset-password/confirm handlers
+    # below. Pre-fix /auth/register accepted 6-char passwords
+    # while every other handler required 8 — locked-out admins
+    # who got reset to a 6-char password couldn't change it
+    # without hitting the higher floor. The schema's
+    # ``min_length=PASSWORD_MIN_LEN`` already 422s shorter
+    # passwords at parse time so this branch is unreachable
+    # post-F290; kept as defense-in-depth in case the schema is
+    # ever relaxed.
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
