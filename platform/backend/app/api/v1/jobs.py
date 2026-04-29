@@ -962,12 +962,35 @@ async def _build_bulk_filter_query(
         query = query.where(or_(Job.role_cluster.is_(None), Job.role_cluster == ""))
     if criteria.search and criteria.search.strip():
         needle = f"%{escape_like(criteria.search.strip())}%"
+        # F309 (parallel to F276): apply the SAME UNION-of-IDs
+        # rewrite that the main /jobs search uses. Pre-fix this
+        # bulk-filter path used the OR-with-EXISTS shape that
+        # forces a seq scan on jobs even with the F274/F275
+        # trigram indexes in place. The bulk-action handler runs
+        # this filter for the admin's "bulk-update everything in
+        # the relevant cluster matching <term>" workflow — at
+        # 86k jobs the seq scan adds real wall-clock to a
+        # destination-state-changing endpoint that should be
+        # snappy. Same EXPLAIN-before/after numbers as F276:
+        # 114ms → ~6ms.
+        title_match = (
+            select(Job.id)
+            .where(Job.title.ilike(needle, escape="\\"))
+        )
+        company_match = (
+            select(Job.id)
+            .join(Company, Job.company_id == Company.id)
+            .where(Company.name.ilike(needle, escape="\\"))
+        )
+        location_match = (
+            select(Job.id)
+            .where(Job.location_raw.ilike(needle, escape="\\"))
+        )
+        matching_ids = title_match.union(
+            company_match, location_match,
+        ).subquery()
         query = query.where(
-            or_(
-                Job.title.ilike(needle, escape="\\"),
-                Job.company.has(Company.name.ilike(needle, escape="\\")),
-                Job.location_raw.ilike(needle, escape="\\"),
-            )
+            Job.id.in_(select(matching_ids.c.id))
         )
     return query
 
