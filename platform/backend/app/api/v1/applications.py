@@ -94,6 +94,44 @@ class ApplicationAnswer(BaseModel):
     answer: str | None = Field(default=None, max_length=5000)
 
 
+# F298 — Pydantic schemas for the last two ``body: dict`` handlers
+# in this file. Same F128/F194 motivation as ApplicationUpdate
+# above: untyped ``dict`` lets typos sail through (``jb_id``
+# instead of ``job_id``) and unknown fields silently drop, masking
+# admin keystroke errors as no-op responses.
+class PrepareApplicationRequest(BaseModel):
+    """Body for ``POST /applications/prepare``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: UUID
+
+
+class SyncAnswerItem(BaseModel):
+    """One ``{question_key, answer}`` row for ``/sync-answers``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Same caps as ``PreparedAnswer`` above so the two pathways
+    # share a single contract for "what fits in an answer cell".
+    question_key: str = Field(..., min_length=1, max_length=200)
+    answer: str = Field(default="", max_length=5000)
+
+
+class SyncAnswersRequest(BaseModel):
+    """Body for ``POST /applications/{id}/sync-answers``.
+
+    ``answers`` is the list of edits to fold back into the
+    answer_book. The 200-item cap matches the worst-case ATS form
+    we've observed (~120 questions); anything larger is a DoS
+    payload, not legitimate data.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    answers: list[SyncAnswerItem] = Field(default_factory=list, max_length=200)
+
+
 class ApplicationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -202,7 +240,7 @@ async def get_apply_readiness(
 
 @router.post("/prepare")
 async def prepare_application(
-    body: dict,
+    body: PrepareApplicationRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -211,10 +249,15 @@ async def prepare_application(
     Fetches the actual ATS form questions from the platform, matches
     them against the user's answer book, and returns a structured list
     of fields with pre-filled answers.
+
+    F298: ``body: dict`` was the F128 pattern — typos like ``jb_id``
+    silently dropped and the handler returned 400 "job_id is
+    required". Pydantic now 422s the bad input at parse time with
+    a useful field-level error.
     """
-    job_id = body.get("job_id")
-    if not job_id:
-        raise HTTPException(status_code=400, detail="job_id is required")
+    # F298: pydantic enforces presence + UUID type at parse time;
+    # the manual ``if not job_id`` guard is no longer needed.
+    job_id = body.job_id
 
     if not user.active_resume_id:
         raise HTTPException(status_code=400, detail="No active resume selected. Please switch to a resume first.")
@@ -355,7 +398,7 @@ async def prepare_application(
 @router.post("/{app_id}/sync-answers")
 async def sync_answers_to_book(
     app_id: UUID,
-    body: dict,
+    body: SyncAnswersRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -363,6 +406,12 @@ async def sync_answers_to_book(
 
     Accepts a list of {question_key, answer} and updates matching
     AnswerBookEntry records, preferring resume-specific entries.
+
+    F298: ``body: dict`` + ``item.get(...)`` pattern was untyped.
+    Now uses ``SyncAnswersRequest`` with ``extra="forbid"``,
+    bounded list size, and per-item field validation. Empty
+    question_keys 422 at parse time instead of being silently
+    skipped.
     """
     app = (await db.execute(
         select(Application).where(Application.id == app_id, Application.user_id == user.id)
@@ -370,14 +419,13 @@ async def sync_answers_to_book(
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    answers = body.get("answers", [])
-    if not answers:
+    if not body.answers:
         return {"synced": 0}
 
     synced = 0
-    for item in answers:
-        qk = item.get("question_key", "").strip()
-        answer_text = item.get("answer", "")
+    for item in body.answers:
+        qk = item.question_key.strip()
+        answer_text = item.answer
         if not qk:
             continue
 
