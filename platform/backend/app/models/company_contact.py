@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, Boolean, DateTime, ForeignKey, Index, Text
+from sqlalchemy import String, Float, Boolean, DateTime, ForeignKey, Index, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -54,6 +54,22 @@ class CompanyContact(Base):
         Index("idx_contacts_company", "company_id"),
         Index("idx_contacts_email", "email"),
         Index("idx_contacts_role_cat", "role_category"),
+        # F282 (closes F160) — partial expression unique index. Empty
+        # ``email`` is exempt (multiple no-email contacts per company
+        # are legitimately separate people). Match must be
+        # case-insensitive + whitespace-trimmed to mirror the handler's
+        # ``_email_already_exists`` helper. Migration ``l8m9n0o1p2q3``
+        # owns the actual DDL — declared here so a fresh
+        # ``Base.metadata.create_all()`` (test bootstrap, dev DB)
+        # creates the same partial index instead of silently allowing
+        # the race.
+        Index(
+            "uq_company_contacts_company_email",
+            "company_id",
+            func.lower(func.trim(email)),
+            unique=True,
+            postgresql_where=(func.trim(email) != ""),
+        ),
     )
 
 
