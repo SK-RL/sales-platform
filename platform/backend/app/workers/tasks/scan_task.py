@@ -13,6 +13,8 @@ from app.workers.celery_app import celery_app
 from app.workers.tasks._db import SyncSession
 from app.workers.tasks._scoring import compute_relevance_score
 from app.workers.tasks._role_matching import match_role, match_role_with_config, classify_geography, load_cluster_config_sync
+from app.workers.tasks._feedback import get_feedback_adjustment
+from app.models.scoring_signal import ScoringSignal
 from app.models.company import Company, CompanyATSBoard
 from app.models.job import Job, JobDescription
 from app.models.scan import ScanLog
@@ -24,6 +26,27 @@ logger = logging.getLogger(__name__)
 
 # Thread pool for running async fetchers from sync Celery context
 _executor = ThreadPoolExecutor(max_workers=4)
+
+
+def _load_signals_cache_sync(session: Session) -> dict:
+    """F308 helper — load the global ``ScoringSignal`` table into a
+    flat ``signal_key -> weight`` dict, mirroring the pattern in
+    ``maintenance_task.rescore_jobs``.
+
+    Used at scan time so newly-ingested jobs get the same
+    feedback-adjusted score the next nightly rescore would compute.
+    Without this, scan-time scores diverge from rescore-time scores
+    in the window between scan and the next rescore — a freshly
+    inserted job from a heavily-downvoted company would score high
+    until the rescore caught it.
+
+    Caller invokes this ONCE per scan-task entrypoint; the dict is
+    threaded through ``_scan_board`` → ``_upsert_job``. Cheap query
+    (signals table is small — one row per (cluster, geo, level,
+    company) signal_key), so the per-scan load is fine.
+    """
+    rows = session.execute(select(ScoringSignal)).scalars().all()
+    return {s.signal_key: s.weight for s in rows}
 
 
 def _approved_roles_set_from_config(cluster_config: dict | None) -> set[str]:
@@ -222,6 +245,7 @@ def _upsert_job(
     raw_job: dict,
     cluster_config: dict | None = None,
     approved_roles_set: set[str] | None = None,
+    signals_cache: dict | None = None,
 ) -> str:
     """Upsert a single job record. Returns 'new', 'updated', or 'skipped'.
 
@@ -429,6 +453,15 @@ def _upsert_job(
         # F307: pass approved_roles_set so the scorer sees the
         # admin's DB config rather than falling back to the
         # hardcoded role superset.
+        # F308: also include feedback_adjustment so the scan-time
+        # score matches what the next nightly rescore would compute.
+        # ``existing`` already has company_id / role_cluster /
+        # geography_bucket / title — all the signals
+        # ``get_feedback_adjustment`` needs.
+        feedback_adj_existing = (
+            get_feedback_adjustment(existing, signals_cache)
+            if signals_cache else 0.0
+        )
         existing.relevance_score = compute_relevance_score(
             title=title,
             matched_role=matched_role,
@@ -439,6 +472,7 @@ def _upsert_job(
             platform=board.platform,
             posted_at=existing.posted_at,
             approved_roles_set=approved_roles_set,
+            feedback_adjustment=feedback_adj_existing,
         )
         job_id_for_desc = existing.id
         action = "updated"
@@ -478,6 +512,14 @@ def _upsert_job(
         # Compute relevance score
         # F307: pass approved_roles_set — see the existing-job
         # branch above for the rationale.
+        # F308: pass feedback_adjustment so a fresh job from a
+        # heavily-downvoted (cluster, company, geo, level)
+        # combination starts with the right score, not an inflated
+        # one that gets corrected only at the next rescore.
+        feedback_adj_new = (
+            get_feedback_adjustment(job, signals_cache)
+            if signals_cache else 0.0
+        )
         job.relevance_score = compute_relevance_score(
             title=title,
             matched_role=matched_role,
@@ -488,6 +530,7 @@ def _upsert_job(
             platform=board.platform,
             posted_at=posted_at,
             approved_roles_set=approved_roles_set,
+            feedback_adjustment=feedback_adj_new,
         )
         session.add(job)
         job_id_for_desc = job.id
@@ -523,6 +566,7 @@ def _scan_board(
     board: CompanyATSBoard,
     cluster_config: dict | None = None,
     approved_roles_set: set[str] | None = None,
+    signals_cache: dict | None = None,
 ) -> dict:
     """Scan a single ATS board and return scan statistics.
 
@@ -671,6 +715,7 @@ def _scan_board(
                     result = _upsert_job(
                         session, job_company, board, raw_job, cluster_config,
                         approved_roles_set=approved_roles_set,
+                        signals_cache=signals_cache,
                     )
                 if result == "new":
                     stats["new_jobs"] += 1
@@ -731,6 +776,10 @@ def scan_all_platforms(self):
         # F307: build approved_roles_set once per scan and thread
         # through to _scan_board → _upsert_job → compute_relevance_score
         approved_roles_set = _approved_roles_set_from_config(cluster_config)
+        # F308: load signals cache once per scan so feedback signals
+        # apply to fresh ingest without waiting for the next nightly
+        # rescore. Cheap query (small table) — single round trip.
+        signals_cache = _load_signals_cache_sync(session)
 
         boards = session.execute(
             select(CompanyATSBoard).where(CompanyATSBoard.is_active.is_(True))
@@ -751,6 +800,7 @@ def scan_all_platforms(self):
             stats = _scan_board(
                 session, board, cluster_config,
                 approved_roles_set=approved_roles_set,
+                signals_cache=signals_cache,
             )
             board_duration = int((time.time() - board_start) * 1000)
 
@@ -803,6 +853,10 @@ def scan_platform(self, platform_name: str):
         # F307: build approved_roles_set once per scan and thread
         # through to _scan_board → _upsert_job → compute_relevance_score
         approved_roles_set = _approved_roles_set_from_config(cluster_config)
+        # F308: load signals cache once per scan so feedback signals
+        # apply to fresh ingest without waiting for the next nightly
+        # rescore. Cheap query (small table) — single round trip.
+        signals_cache = _load_signals_cache_sync(session)
 
         boards = session.execute(
             select(CompanyATSBoard).where(
@@ -830,6 +884,7 @@ def scan_platform(self, platform_name: str):
             stats = _scan_board(
                 session, board, cluster_config,
                 approved_roles_set=approved_roles_set,
+                signals_cache=signals_cache,
             )
             board_duration = int((time.time() - board_start) * 1000)
 
@@ -878,6 +933,10 @@ def scan_single_board(self, board_id: str):
         # F307: build approved_roles_set once per scan and thread
         # through to _scan_board → _upsert_job → compute_relevance_score
         approved_roles_set = _approved_roles_set_from_config(cluster_config)
+        # F308: load signals cache once per scan so feedback signals
+        # apply to fresh ingest without waiting for the next nightly
+        # rescore. Cheap query (small table) — single round trip.
+        signals_cache = _load_signals_cache_sync(session)
 
         board = session.execute(
             select(CompanyATSBoard).where(CompanyATSBoard.id == board_id)
@@ -898,6 +957,7 @@ def scan_single_board(self, board_id: str):
         stats = _scan_board(
             session, board, cluster_config,
             approved_roles_set=approved_roles_set,
+            signals_cache=signals_cache,
         )
         duration = int((time.time() - start_time) * 1000)
 
@@ -943,6 +1003,10 @@ def scan_single_company(self, company_id: str):
         # F307: build approved_roles_set once per scan and thread
         # through to _scan_board → _upsert_job → compute_relevance_score
         approved_roles_set = _approved_roles_set_from_config(cluster_config)
+        # F308: load signals cache once per scan so feedback signals
+        # apply to fresh ingest without waiting for the next nightly
+        # rescore. Cheap query (small table) — single round trip.
+        signals_cache = _load_signals_cache_sync(session)
 
         boards = session.execute(
             select(CompanyATSBoard).where(
@@ -970,6 +1034,7 @@ def scan_single_company(self, company_id: str):
             stats = _scan_board(
                 session, board, cluster_config,
                 approved_roles_set=approved_roles_set,
+                signals_cache=signals_cache,
             )
             board_duration = int((time.time() - board_start) * 1000)
 
