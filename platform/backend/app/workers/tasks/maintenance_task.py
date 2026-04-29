@@ -544,14 +544,26 @@ def auto_target_companies():
     session = SyncSession()
 
     try:
-        # Find companies with 2+ clustered active jobs
+        # F313 (data correctness): filter to RELEVANT clusters only
+        # rather than treating "any non-empty cluster" as relevant.
+        # Pre-fix the WHERE clause was ``role_cluster != "" AND
+        # role_cluster IS NOT NULL`` — counting any classified job.
+        # Admins who add a cluster like ``data`` with
+        # ``is_relevant=False`` (just for analytics tracking) had
+        # those jobs flip companies to ``is_target=True`` against
+        # intent. Now matches the same relevant-cluster set used
+        # by the user-facing /jobs?role_cluster=relevant filter and
+        # the /companies/scores leaderboard.
+        from app.workers.tasks._role_matching import get_relevant_clusters_sync
+        relevant_clusters = get_relevant_clusters_sync(session)
+
+        # Find companies with 2+ relevant-cluster active jobs
         active_statuses = ["new", "under_review", "accepted"]
         result = session.execute(
             select(Job.company_id, func.count(Job.id))
             .where(
                 Job.status.in_(active_statuses),
-                Job.role_cluster != "",
-                Job.role_cluster.isnot(None),
+                Job.role_cluster.in_(relevant_clusters),
             )
             .group_by(Job.company_id)
             .having(func.count(Job.id) >= 2)

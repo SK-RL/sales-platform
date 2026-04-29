@@ -541,6 +541,35 @@ def load_cluster_config_sync(session) -> dict:
     return config
 
 
+def get_relevant_clusters_sync(session) -> list[str]:
+    """Sync mirror of ``api.v1.jobs._get_relevant_clusters`` for
+    use inside Celery tasks (which run sync sessions).
+
+    Returns the list of cluster names where ``is_relevant=True``
+    AND ``is_active=True``. Falls back to the hardcoded
+    ``["infra", "security"]`` pair if no rows match — same fallback
+    contract as the async helper, so async/sync callers see the
+    same set.
+
+    F313: auto_target_companies and any future task that wants
+    "is this company hiring for RELEVANT roles?" should use this
+    helper instead of treating "any non-empty cluster" as relevant.
+    Pre-F313 ``auto_target_companies`` over-counted — admins who
+    added a non-relevant cluster (like ``data`` for analytics-only
+    tracking) had those jobs flip companies to ``is_target=True``
+    against intent.
+    """
+    from app.models.role_config import RoleClusterConfig
+    sa = __import__("sqlalchemy")
+    rows = session.execute(
+        sa.select(RoleClusterConfig.name).where(
+            RoleClusterConfig.is_relevant.is_(True),
+            RoleClusterConfig.is_active.is_(True),
+        )
+    ).scalars().all()
+    return list(rows) if rows else ["infra", "security"]
+
+
 def match_role_from_config(title: str, cluster_config: dict) -> dict:
     """Match a job title using DB-driven cluster config.
 
