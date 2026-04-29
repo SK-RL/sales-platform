@@ -15,19 +15,16 @@ from app.models.job import Job, JobDescription
 from app.models.role_config import RoleClusterConfig
 from app.models.user import User
 from app.utils.job_description import extract_description
+# F315 (consolidation): re-use the canonical sync helper from
+# ``_role_matching.get_relevant_clusters_sync`` (shipped in F313).
+# Pre-fix this file had its own duplicate ``_get_relevant_clusters_sync``
+# — same query shape, but two sources of truth meant a future
+# tweak to the fallback contract (e.g. expanding the default pair
+# beyond ``["infra", "security"]``) had to be applied in two places.
+# Now there's one helper and the rest of the codebase imports it.
+from app.workers.tasks._role_matching import get_relevant_clusters_sync
 
 logger = logging.getLogger(__name__)
-
-
-def _get_relevant_clusters_sync(session) -> list[str]:
-    result = session.execute(
-        select(RoleClusterConfig.name).where(
-            RoleClusterConfig.is_relevant == True,
-            RoleClusterConfig.is_active == True,
-        )
-    )
-    clusters = result.scalars().all()
-    return list(clusters) if clusters else ["infra", "security"]
 
 
 @celery_app.task(name="app.workers.tasks.resume_score_task.score_resume_task", bind=True, max_retries=1)
@@ -45,7 +42,7 @@ def score_resume_task(self, resume_id: str):
         if resume.status != "ready":
             return {"error": "Resume not ready", "jobs_scored": 0}
 
-        relevant_clusters = _get_relevant_clusters_sync(session)
+        relevant_clusters = get_relevant_clusters_sync(session)
 
         # F310 (data correctness): filter to ACTIVE job statuses only.
         # Pre-fix the rescore included every job in the relevant
