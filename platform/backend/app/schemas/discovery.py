@@ -1,6 +1,7 @@
 """Pydantic schemas for Discovery endpoints."""
 
-from pydantic import BaseModel
+from typing import Literal
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from uuid import UUID
 
@@ -32,4 +33,13 @@ class DiscoveredCompanyOut(BaseModel):
 
 
 class DiscoveredCompanyUpdate(BaseModel):
-    status: str  # added | ignored
+    # F306: ``extra="forbid"`` to catch admin-side typos like
+    # ``stauts`` instead of silently ignoring them.
+    # Status is also Literal-typed — the handler at
+    # ``api/v1/discovery.py::update_discovered_status`` validates
+    # against ``("added", "ignored")`` at runtime; lifting that
+    # constraint to the schema means non-canonical values 422 at
+    # parse time before reaching the DB.
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["added", "ignored"]

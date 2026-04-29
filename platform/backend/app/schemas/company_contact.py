@@ -40,7 +40,7 @@ client-side `sanitizeUrl()` helper is a separate round of work.
 from typing import Literal
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.utils.sanitize import strip_html_tags
 
@@ -152,6 +152,11 @@ class CompanyContactOut(BaseModel):
 
 
 class CompanyContactCreate(BaseModel):
+    # F306: ``extra="forbid"`` so a typoed field name (``frist_name``)
+    # 422s instead of silently dropping. Same F128 defense pattern
+    # as the rest of the platform's *Create / *Update schemas.
+    model_config = ConfigDict(extra="forbid")
+
     # F133(3): max_length mirrors DB column widths in models/company_contact.py.
     first_name: str = Field(default="", max_length=200)
     last_name: str = Field(default="", max_length=200)
@@ -203,6 +208,9 @@ class CompanyContactCreate(BaseModel):
 
 
 class CompanyContactUpdate(BaseModel):
+    # F306: ``extra="forbid"`` mirrored from CompanyContactCreate.
+    model_config = ConfigDict(extra="forbid")
+
     # F133(3): same max_length mirrors as Create — PATCH can 500 the
     # same way if an oversize field slips through.
     first_name: str | None = Field(default=None, max_length=200)
@@ -249,6 +257,10 @@ class CompanyContactUpdate(BaseModel):
 
 
 class OutreachUpdate(BaseModel):
+    # F306: ``extra="forbid"`` — same defense pattern as the
+    # other *Update schemas in this module.
+    model_config = ConfigDict(extra="forbid")
+
     # F289: also Literal-typed so the dedicated /outreach endpoint
     # gets schema-level validation in addition to the handler's
     # ``_VALID_OUTREACH`` check (defense in depth — the handler
