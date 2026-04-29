@@ -8,7 +8,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.models.discovery import DiscoveryRun, DiscoveredCompany
@@ -20,8 +20,29 @@ from app.schemas.discovery import DiscoveryRunOut, DiscoveredCompanyOut, Discove
 logger = logging.getLogger(__name__)
 
 
+# F286 (closes F137 a+b) — bounded + UUID-typed bulk request.
+#
+# Pre-fix the schema accepted ``list[str]`` with no length cap, so:
+#   (a) Malformed UUIDs flowed straight into the ORM and bubbled
+#       ``psycopg.DataError`` as an opaque HTTP 500. F126 pattern
+#       recurrence — the fix is the same as everywhere else: type
+#       the field as ``UUID`` so Pydantic 422s the bad input at parse
+#       time before any DB work.
+#   (b) Unbounded list → DoS surface: 1000 IDs ran 1000 individual
+#       SELECT round-trips because the handler looped per id, not a
+#       single ``WHERE id IN (...)``. The schema cap below pairs with
+#       a batched IN-clause query in the handlers — keeps a single
+#       admin click bounded at ``BULK_IDS_MAX = 200`` so the worst
+#       case is ~one DB round-trip with a 200-element ANY-array.
+BULK_IDS_MAX = 200
+
+
 class BulkIdsRequest(BaseModel):
-    ids: list[str]
+    # ``UUID`` so Pydantic 422s non-UUID strings at parse time.
+    # ``max_length`` caps the DoS surface — 200 IDs is well above any
+    # legitimate "select all visible on screen" admin click (the
+    # UI's discovery list page is 50/page).
+    ids: list[UUID] = Field(..., min_length=1, max_length=BULK_IDS_MAX)
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
@@ -282,32 +303,67 @@ async def bulk_import_discovered(
     user: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Bulk import discovered companies into the main companies table."""
+    """Bulk import discovered companies into the main companies table.
+
+    F286 (closes F137 b): replaced the per-id loop with a single
+    ``WHERE id IN (...)`` query. Pre-fix N IDs = N DB round-trips;
+    now N IDs = 2 round-trips (one to fetch all candidates, one to
+    pre-check existing slugs). Bounded at ``BULK_IDS_MAX = 200`` by
+    the schema so the IN-array stays small.
+    """
+    # 1. Single batched fetch of all candidates by id.
+    candidates = (
+        await db.execute(
+            select(DiscoveredCompany).where(DiscoveredCompany.id.in_(body.ids))
+        )
+    ).scalars().all()
+
+    # 2. Build the slug set for the candidates so we can pre-check
+    #    existing Company rows in ONE query rather than per-iteration.
+    candidate_by_id = {dc.id: dc for dc in candidates}
+    desired_slugs = {
+        (dc.slug or dc.name.lower().replace(" ", "-")): dc.id
+        for dc in candidates
+        if dc.status != "added"
+    }
+    existing_slugs: set[str] = set()
+    if desired_slugs:
+        existing_slugs = set(
+            (await db.execute(
+                select(Company.slug).where(Company.slug.in_(desired_slugs.keys()))
+            )).scalars().all()
+        )
+
     imported = 0
     skipped = 0
+    # 3. Walk the input order so the response counts match the
+    #    caller's expectation. Missing-by-id (unknown UUIDs) and
+    #    already-imported (status="added") both bucket as skipped.
     for dc_id in body.ids:
-        result = await db.execute(select(DiscoveredCompany).where(DiscoveredCompany.id == dc_id))
-        dc = result.scalar_one_or_none()
+        dc = candidate_by_id.get(dc_id)
         if not dc or dc.status == "added":
             skipped += 1
             continue
-
         slug = dc.slug or dc.name.lower().replace(" ", "-")
-        existing = await db.execute(select(Company).where(Company.slug == slug))
-        if existing.scalar_one_or_none():
+        if slug in existing_slugs:
             dc.status = "added"
             skipped += 1
             continue
-
         company = Company(name=dc.name, slug=slug, website=dc.careers_url, is_target=False)
         db.add(company)
-
         if dc.platform and dc.slug:
-            board = CompanyATSBoard(company_id=company.id, platform=dc.platform, slug=dc.slug, is_active=True)
+            board = CompanyATSBoard(
+                company_id=company.id,
+                platform=dc.platform,
+                slug=dc.slug,
+                is_active=True,
+            )
             db.add(board)
-
         dc.status = "added"
         imported += 1
+        # Track the slug so a duplicate slug in the SAME batch
+        # (e.g. "data-co" in two discovered rows) skips the second.
+        existing_slugs.add(slug)
 
     await db.commit()
     return {"imported": imported, "skipped": skipped}
@@ -319,13 +375,22 @@ async def bulk_ignore_discovered(
     user: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Bulk ignore discovered companies."""
-    updated = 0
-    for dc_id in body.ids:
-        result = await db.execute(select(DiscoveredCompany).where(DiscoveredCompany.id == dc_id))
-        dc = result.scalar_one_or_none()
-        if dc and dc.status != "ignored":
-            dc.status = "ignored"
-            updated += 1
+    """Bulk ignore discovered companies.
+
+    F286 (closes F137 b): one batched UPDATE replaces the
+    per-id SELECT-then-mutate loop. Cuts N round-trips down to 1.
+    """
+    # Single UPDATE filters by id-list AND status to skip rows
+    # already ignored — the rowcount is exactly "rows actually
+    # changed", which matches the response semantics.
+    from sqlalchemy import update as sa_update
+    result = await db.execute(
+        sa_update(DiscoveredCompany)
+        .where(
+            DiscoveredCompany.id.in_(body.ids),
+            DiscoveredCompany.status != "ignored",
+        )
+        .values(status="ignored")
+    )
     await db.commit()
-    return {"updated": updated}
+    return {"updated": result.rowcount or 0}
