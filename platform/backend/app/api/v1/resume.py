@@ -969,13 +969,21 @@ async def customize_resume_for_job(
     # 200+error shape here; use the dependency for future endpoints
     # that don't have the same "render the error inline" UI.
     if not settings.anthropic_api_key.get_secret_value():
-        # Count quota for the response usage block (reads only, no
-        # write). Zero delta — the quota stays where it was.
+        # F312 (data correctness): scope the quota count to the
+        # ``customize`` feature specifically. Pre-F312 the count
+        # had NO feature filter, so it summed customize +
+        # cover_letter + interview_prep usage and returned a
+        # number larger than the per-feature limit. Inconsistent
+        # with the ``check_ai_quota`` path below (line ~1014)
+        # which uses the proper feature-scoped count via the
+        # F236 ``AICustomizationLog.feature`` column.
+        from app.models.resume import AI_FEATURE_CUSTOMIZE
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         used_today_ro = (await db.execute(
             select(func.count(AICustomizationLog.id))
             .where(
                 AICustomizationLog.user_id == user.id,
+                AICustomizationLog.feature == AI_FEATURE_CUSTOMIZE,
                 AICustomizationLog.created_at >= today_start,
                 AICustomizationLog.success == True,  # noqa: E712
             )
