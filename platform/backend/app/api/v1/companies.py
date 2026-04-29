@@ -150,13 +150,38 @@ async def company_scores(
     # treat as relevant.
     relevant = await _get_relevant_clusters(db)
 
-    # Subquery: for each company, count relevant jobs, global remote jobs, avg score
+    # Subquery: for each company, count relevant jobs, global remote
+    # jobs WITHIN THE RELEVANT CLUSTERS, and avg score.
+    #
+    # F295 (closes F213): pre-fix the ``remote_jobs`` count was
+    # ``CASE WHEN geography_bucket='global_remote' THEN 1 ELSE 0``
+    # over ALL the company's jobs — so a company with 9 in-cluster
+    # jobs and 46 global-remote-but-OUT-OF-CLUSTER jobs (Supabase
+    # at the F213 verification time) had ``remote=46, relevant=9``,
+    # which then drove ``remote_ratio = (46/9)*20 = 102.22`` —
+    # blowing past the 20-point cap and giving the company a
+    # 151.9 ``company_score`` against a documented max of 100.
+    # The semantic intent of the metric is "what fraction of this
+    # company's *relevant* jobs is global-remote?" so the right fix
+    # is to count remote-only-within-relevant. Bonus side-effect:
+    # the (relevant_jobs > 0) WHERE clause downstream means
+    # remote_jobs <= relevant_jobs by construction, so the ratio
+    # is naturally ≤ 1.0.
     scores_q = (
         select(
             Job.company_id,
             func.count(Job.id).label("total_jobs"),
             func.sum(case((Job.role_cluster.in_(relevant), 1), else_=0)).label("relevant_jobs"),
-            func.sum(case((Job.geography_bucket == "global_remote", 1), else_=0)).label("remote_jobs"),
+            # F295: AND-the-cluster-filter. Asymmetric denominators
+            # were the F213 bug.
+            func.sum(case(
+                (
+                    (Job.geography_bucket == "global_remote") &
+                    (Job.role_cluster.in_(relevant)),
+                    1,
+                ),
+                else_=0,
+            )).label("remote_jobs"),
             func.avg(case((Job.relevance_score > 0, Job.relevance_score), else_=None)).label("avg_score"),
         )
         .group_by(Job.company_id)
@@ -186,9 +211,17 @@ async def company_scores(
 
         # Company score: weighted combination
         # 40% relevant job count (capped at 20), 25% avg relevance, 20% remote ratio, 15% target bonus
+        # F295 (closes F213): the SQL change above already enforces
+        # ``remote <= relevant`` by AND-ing the cluster filter, so
+        # the ratio is structurally ≤ 1.0. Wrapping in ``min(...)``
+        # here is defense-in-depth against any future SQL refactor
+        # that breaks the invariant — the documented 100-point
+        # ceiling stays load-bearing for downstream filters
+        # ("show me companies scoring ≥90") and shouldn't depend on
+        # SQL semantics being preserved across edits.
         job_component = min(relevant / 20, 1.0) * 40
         score_component = (avg_score / 100) * 25
-        remote_ratio = (remote / max(relevant, 1)) * 20
+        remote_ratio = min(remote / max(relevant, 1), 1.0) * 20
         target_bonus = 15 if is_target else 0
         company_score = round(job_component + score_component + remote_ratio + target_bonus, 1)
 
