@@ -733,12 +733,26 @@ async def get_resume_scores(
 
     from app.models.company import Company
 
+    # F311 (data correctness, companion to F310): filter the visible
+    # resume-scores list to ACTIVE job statuses so users don't see
+    # scores against expired or archived jobs they can't apply to.
+    # Same status set the rescore task uses
+    # (``"new", "under_review", "accepted"``) so the user-visible
+    # list stays consistent with what was scored. Stale rows for
+    # jobs that were active when scored and have since flipped to
+    # expired/archived are filtered here, and the next rescore's
+    # F300 cleanup pass deletes the underlying rows.
+    _ACTIVE_JOB_STATUSES = ("new", "under_review", "accepted")
+
     # Build query with joins for filtering (join Company for search/sort)
     base_query = (
         select(ResumeScore, Job, Company.name.label("co_name"))
         .join(Job, ResumeScore.job_id == Job.id)
         .join(Company, Job.company_id == Company.id)
-        .where(ResumeScore.resume_id == resume.id)
+        .where(
+            ResumeScore.resume_id == resume.id,
+            Job.status.in_(_ACTIVE_JOB_STATUSES),
+        )
     )
 
     # Apply filters
