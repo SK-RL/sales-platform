@@ -90,6 +90,25 @@ _URL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     # Workable — apply.workable.com/{slug}/j/{id} and the older
     # {slug}.workable.com/jobs/{id}. `{id}` is alphanumeric.
+    #
+    # F293 (closes F229): there's a third flavour observed in 100%
+    # of our DB at F229 verification time —
+    # ``apply.workable.com/j/{id}`` (no slug segment). The scanner
+    # reads ``url`` / ``application_url`` straight off the
+    # Workable API response, which always supplies this short
+    # form. Pre-F293 the long-form-only regex rejected EVERY URL
+    # the user could copy from our dashboard with the misleading
+    # "URL host is not a recognized ATS" error.
+    #
+    # Short-form URLs can't be ingested directly because the
+    # Workable widget API used by ``WorkableFetcher.fetch(slug)``
+    # is keyed on the company slug — we can't look up the company
+    # from a bare job-id. The targeted fix is in ``parse_job_url``
+    # below: detect the short-form pattern after the main loop and
+    # raise a SPECIFIC error message that tells the user to use
+    # the long-form URL or contact admin to add the board, instead
+    # of the generic "not a recognized ATS" that hid which platform
+    # was actually involved.
     (
         re.compile(
             r"^https?://apply\.workable\.com/(?P<slug>[^/]+)/j/(?P<external_id>[A-Z0-9]+)",
@@ -198,6 +217,30 @@ def parse_job_url(url: str) -> ParsedJobUrl:
                 # downstream code (fetchers, upsert) relies on.
                 continue
             return ParsedJobUrl(platform=platform, slug=slug, external_id=external_id)
+
+    # F293 (closes F229): replace the generic "not a recognized ATS"
+    # error with a targeted message when the user pasted a Workable
+    # short-form URL. Short-form is ``apply.workable.com/j/{id}``
+    # (2 path segments, no slug). The Workable widget API is keyed
+    # on slug so we can't actually ingest a slug-less URL today,
+    # but the user deserves to know WHY the URL was rejected
+    # ("Workable IS in your supported list!") instead of the
+    # confusing generic error. The frontend uses this detail to
+    # render an actionable hint.
+    if re.match(
+        r"^https?://apply\.workable\.com/j/[A-Za-z0-9]+/?$",
+        url,
+        flags=re.IGNORECASE,
+    ):
+        raise UnsupportedJobUrlError(
+            "Workable short-form URLs (``apply.workable.com/j/<id>``) "
+            "can't be imported directly because they don't carry the "
+            "company-slug needed for the Workable API. Please use "
+            "the long-form URL "
+            "(``apply.workable.com/<company-slug>/j/<id>``) — you can "
+            "find it on the company's careers page — or ask an admin "
+            "to add the company's Workable board to the platform."
+        )
 
     raise UnsupportedJobUrlError(
         f"URL host '{parsed.netloc}' is not a recognized ATS. "
