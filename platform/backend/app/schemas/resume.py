@@ -77,6 +77,12 @@ class CustomizeRequest(BaseModel):
 class ResumeLabelUpdate(BaseModel):
     """Body of PATCH /api/v1/resume/{resume_id}/label."""
 
+    # F306c (sweep follow-up): ``extra="forbid"`` so a typoed
+    # field like ``labl`` 422s instead of silently dropping.
+    # Same defense pattern as every other *Create/*Update schema
+    # post-F306.
+    model_config = ConfigDict(extra="forbid")
+
     label: str = Field(
         ...,
         min_length=1,
