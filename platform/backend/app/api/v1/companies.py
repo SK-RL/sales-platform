@@ -5,6 +5,7 @@ from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import select, func, or_, case, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -808,7 +809,34 @@ async def create_contact(
         **body.model_dump(),
     )
     db.add(contact)
-    await db.commit()
+    # F282 (closes F160) — translate the partial-UNIQUE-violation race
+    # into a clean 409. The handler check above is TOCTOU-vulnerable
+    # under concurrent POSTs (two callers both pass the SELECT, both
+    # insert), so we ALSO catch the IntegrityError that the
+    # ``uq_company_contacts_company_email`` partial index raises and
+    # surface it as the same 409 the handler check would have produced.
+    # Other IntegrityErrors (e.g. FK to a deleted Company) re-raise so
+    # the original 500 surfaces with full traceback for ops debugging.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        constraint = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(constraint, "constraint_name", "") if constraint else ""
+        if "uq_company_contacts_company_email" in (constraint_name or "") \
+                or "uq_company_contacts_company_email" in str(exc).lower():
+            # Re-fetch the winning row's id so the response can point
+            # the UI at the existing contact, matching the handler-
+            # check 409 shape.
+            existing_id = await _email_already_exists(db, company_id, body.email)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "A contact with this email already exists at this company",
+                    "existing_contact_id": str(existing_id) if existing_id else None,
+                },
+            )
+        raise
     await db.refresh(contact)
     return CompanyContactOut.model_validate(contact)
 
