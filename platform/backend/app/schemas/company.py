@@ -6,6 +6,23 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, computed_f
 from datetime import datetime
 from uuid import UUID
 
+from app.utils.sanitize import strip_html_tags
+
+
+# F304 — HTML-strip helper for Company text fields. Pre-fix
+# ``CompanyCreate`` / ``CompanyUpdate`` accepted ``name``,
+# ``description``, ``industry``, ``headquarters`` with length caps
+# but no HTML sanitization, so an admin payload like
+# ``description="<script>alert(1)</script>About us…"`` could be
+# persisted and rendered verbatim in the company UI. Same vector
+# as F162 (feedback title), F285 (role-cluster display_name),
+# F287 (board company_name), F289 (contact name fields). This
+# helper applies the same defense across the company schemas.
+def _strip_company_text(v):
+    if v is None or v == "":
+        return v
+    return strip_html_tags(v).strip()
+
 
 # Regression finding 131: admin PATCH on /companies/{id} used to let
 # any admin persist a 1 MB description, 10k tags, or a 500-level nested
@@ -235,6 +252,20 @@ class CompanyCreate(BaseModel):
     def _check_metadata(cls, v):
         return _validate_metadata_json(v)
 
+    # F304: strip HTML from text fields that render in the SPA.
+    # Strict-strip rather than sanitize — company names / industry
+    # / headquarters / descriptions are display-text, not rich
+    # content (the rich-text fields are admin-controlled
+    # ``metadata_json``). Same defense feedback (F162),
+    # role-cluster display_name (F285), platforms board company_name
+    # (F287), contact names (F289) use.
+    @field_validator(
+        "name", "industry", "headquarters", "description"
+    )
+    @classmethod
+    def _strip_text_fields(cls, v):
+        return _strip_company_text(v)
+
 
 class CompanyUpdate(BaseModel):
     # F131: every field stays optional (PATCH semantics), but any
@@ -252,6 +283,13 @@ class CompanyUpdate(BaseModel):
     funding_stage: str | None = Field(default=None, max_length=100)
     headquarters: str | None = Field(default=None, max_length=300)
     description: str | None = Field(default=None, max_length=_DESCRIPTION_MAX_LEN)
+
+    # F304: mirror the create-side HTML strip on the PATCH path
+    # so an admin can't update a clean company to inject a payload
+    # in name/description/industry/headquarters.
+    _strip_text_fields_update = field_validator(
+        "name", "industry", "headquarters", "description"
+    )(lambda cls, v: _strip_company_text(v))
     is_target: bool | None = None
     tags: list[_CompanyTag] | None = Field(default=None, max_length=_TAGS_MAX_COUNT)
     metadata_json: dict | None = None
