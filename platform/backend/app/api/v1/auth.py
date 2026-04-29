@@ -455,6 +455,32 @@ async def get_me(user: User = Depends(get_current_user)):
 
 @router.post("/logout")
 async def logout():
-    response = RedirectResponse(url=settings.app_url)
-    response.delete_cookie("session")
+    """Clear the session cookie.
+
+    F302 (closes F210): pre-fix this returned an HTTP 307 redirect
+    to ``$APP_URL`` and ``response.delete_cookie("session")`` with
+    no args. Two issues:
+      (a) An API endpoint should not serve UI navigation. The SPA's
+          ``fetch("/auth/logout", {method:"POST"})`` followed the
+          307, downloaded the entire HTML index, ``res.json()``
+          failed silently, and the round-trip wasted ~500KB.
+          Frontend now reads JSON from this response and handles
+          its own navigation.
+      (b) ``delete_cookie()`` with no args emits a clearing
+          ``Set-Cookie`` header WITHOUT the ``Secure; HttpOnly``
+          attributes login set at line 223-227. The mismatch is a
+          security-scanner lint flag (Burp, OWASP ZAP) and
+          theoretically weakens the cookie clearing under
+          mixed-content / downgrade scenarios. Pass the same
+          attribute set as login so the clearing header matches
+          the cookie it's replacing.
+    """
+    response = JSONResponse(content={"ok": True, "message": "Logged out"})
+    response.delete_cookie(
+        key="session",
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
     return response
