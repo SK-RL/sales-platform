@@ -554,6 +554,16 @@ async def list_jobs(
 @router.get("/review-queue")
 async def review_queue(
     limit: int = Query(20, ge=1, le=100),
+    # F294 (closes F230): pre-fix the handler declared only ``limit``
+    # and silently dropped every other query param. Adding the
+    # filter axes (role_cluster, platform) closes F230(a). Adding
+    # ``page`` + applying it to the SQL offset closes F230(b) — the
+    # response envelope used to advertise ``page=1, total_pages=N``
+    # but the handler never read ``?page=`` so ``?page=2`` returned
+    # the same 20 items. Now genuinely paginates.
+    page: int = Query(1, ge=1),
+    role_cluster: str | None = None,
+    platform: str | None = None,
     user: User = Depends(require_role("admin", "reviewer")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -618,16 +628,30 @@ async def review_queue(
         Review.reviewer_id == user.id,
     )
 
+    # F294: build the WHERE chain once and reuse for both the
+    # main query and the stats so they reconcile under the same
+    # filter scope. Pre-fix stats counted the unfiltered table
+    # while the items list (theoretically) could have been filtered
+    # — the new filter params would have produced misleading stats
+    # without this shared shape.
+    base_filters = [Job.status == "new", ~reviewer_decided]
+    if role_cluster:
+        base_filters.append(Job.role_cluster == role_cluster)
+    if platform:
+        base_filters.append(Job.platform == platform)
+
     query = (
         select(Job, my_score_sq.c.my_score)
         .options(joinedload(Job.company))
         .outerjoin(my_score_sq, Job.id == my_score_sq.c.rs_job_id)
-        .where(Job.status == "new", ~reviewer_decided)
+        .where(*base_filters)
         .order_by(
             func.date(Job.first_seen_at).desc(),
             func.coalesce(my_score_sq.c.my_score, literal(-1.0)).desc(),
             Job.relevance_score.desc(),
+            Job.id.asc(),  # F271 stable-pagination tiebreaker
         )
+        .offset((page - 1) * limit)
         .limit(limit)
     )
     result = await db.execute(query)
@@ -635,15 +659,15 @@ async def review_queue(
 
     # Queue stats — tile counts by discovery-date bucket so the UI can
     # render "12 today · 8 yesterday · 47 older" chips alongside the
-    # prioritized list. Uses the same NOT EXISTS + status filter as the
-    # main query so the numbers reconcile 1:1 with what's actually
-    # being surfaced.
+    # prioritized list. F294: stats use the SAME filter chain as the
+    # items list so the numbers reconcile 1:1 with what's actually
+    # being surfaced under the current role_cluster/platform filter.
     stats_q = select(
         func.count(Job.id).label("total"),
         func.sum(case((func.date(Job.first_seen_at) == today, 1), else_=0)).label("today_count"),
         func.sum(case((func.date(Job.first_seen_at) == yesterday, 1), else_=0)).label("yesterday_count"),
         func.sum(case((func.date(Job.first_seen_at) < yesterday, 1), else_=0)).label("older_count"),
-    ).where(Job.status == "new", ~reviewer_decided)
+    ).where(*base_filters)
     stats_row = (await db.execute(stats_q)).one()
 
     items = []
@@ -663,12 +687,16 @@ async def review_queue(
         items.append(d)
 
     total = int(stats_row.total or 0)
+    # F294: total_pages reflects the actual paginate-able shape now
+    # that ``page`` is honoured. ``ceil(total / limit)`` with a
+    # minimum of 1 so an empty queue still renders sensibly.
+    total_pages = 1 if total == 0 else (total + limit - 1) // limit
     return {
         "items": items,
         "total": total,
-        "page": 1,
+        "page": page,
         "page_size": limit,
-        "total_pages": 1 if total <= limit else (total + limit - 1) // limit,
+        "total_pages": total_pages,
         "stats": {
             "today": int(stats_row.today_count or 0),
             "yesterday": int(stats_row.yesterday_count or 0),
