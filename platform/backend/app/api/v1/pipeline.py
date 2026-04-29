@@ -3,7 +3,7 @@
 from uuid import UUID
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -52,22 +52,54 @@ class PipelineCreateRequest(BaseModel):
     notes: str = Field(default="", max_length=PIPELINE_MAX_NOTES_LENGTH)
 
 
+_STAGE_KEY_MAX = 50
+_STAGE_LABEL_MAX = 100
+_STAGE_COLOR_MAX = 60
+
+
 class StageCreate(BaseModel):
     # F268 — strict on stage CRUD too.
     model_config = ConfigDict(extra="forbid")
 
-    key: str
-    label: str
-    color: str = "bg-gray-500"
+    # F288 (closes F149 b) — cap + HTML-strip on key/label so an
+    # admin payload like ``label="<img src=x onerror=alert(1)>"``
+    # can't be persisted and rendered verbatim in the Kanban
+    # column header. ``key`` is also restricted to a slug-safe
+    # pattern so it can't carry markup or whitespace; ``label`` is
+    # allowed mixed-case + spaces but stripped of any tags. Same
+    # ``strip_html_tags`` defense feedback (F162), role-cluster
+    # display_name (F285), and platforms board company_name (F287)
+    # use.
+    key: str = Field(..., min_length=1, max_length=_STAGE_KEY_MAX, pattern=r"^[a-z0-9_\-]+$")
+    label: str = Field(..., min_length=1, max_length=_STAGE_LABEL_MAX)
+    color: str = Field(default="bg-gray-500", max_length=_STAGE_COLOR_MAX)
     sort_order: int = 0
+
+    @field_validator("label")
+    @classmethod
+    def _strip_html_label(cls, v: str) -> str:
+        from app.utils.sanitize import strip_html_tags
+        return strip_html_tags(v).strip()
 
 
 class StageUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None = None
-    color: str | None = None
+    label: str | None = Field(default=None, min_length=1, max_length=_STAGE_LABEL_MAX)
+    color: str | None = Field(default=None, max_length=_STAGE_COLOR_MAX)
     sort_order: int | None = None
+
+    @field_validator("label")
+    @classmethod
+    def _strip_html_label_update(cls, v):
+        # F288: same defense as StageCreate. PATCH path was a
+        # parallel XSS vector — pre-fix you could create a clean
+        # stage and then PATCH the label to a payload, bypassing
+        # the create-side guard.
+        if v is None:
+            return v
+        from app.utils.sanitize import strip_html_tags
+        return strip_html_tags(v).strip()
 
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
