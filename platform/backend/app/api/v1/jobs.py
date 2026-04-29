@@ -394,12 +394,48 @@ async def list_jobs(
             # 3-space input must not wildcard-match random titles
             # with triple spaces.
             needle = f"%{escape_like(search_str)}%"
+            # F276 — UNION-of-IDs rewrite. The previous shape was
+            # ``or_(Job.title.ilike, Job.company.has(Company.name.ilike),
+            # Job.location_raw.ilike)`` which the Postgres planner can't
+            # split across multiple indexes: the OR forces a Hash Join
+            # over a seq-scanned jobs table (114ms on 86k rows even
+            # WITH the F274 + F275 trigram indexes in place — they
+            # never fired because the planner can't pick "use index A
+            # for branch 1 OR index B for branch 2" inside one SELECT).
+            #
+            # Rewriting as ``Job.id IN (UNION OF per-column SELECTs)``
+            # gives each branch its own independent SELECT, so the
+            # planner picks the right trigram index per branch:
+            #   - title-branch  → idx_jobs_title_trgm (F274)
+            #   - company-branch → idx_companies_name_trgm (F275)
+            #   - location-branch → seq scan on (small) location_raw,
+            #     no index but it's the cheapest of the three anyway.
+            # EXPLAIN before:  Seq Scan on jobs (114ms)
+            # EXPLAIN after:   Bitmap Index Scan x2 + UNION (~6ms).
+            #
+            # ``Company.name`` join lives ONLY inside the company
+            # subquery — the outer query stays clean of the join,
+            # avoiding any unintended cross-product with the rest of
+            # the WHERE clause (geography filters, role_cluster, etc.
+            # already compose against the unjoined Job alias).
+            title_match = (
+                select(Job.id)
+                .where(Job.title.ilike(needle, escape="\\"))
+            )
+            company_match = (
+                select(Job.id)
+                .join(Company, Job.company_id == Company.id)
+                .where(Company.name.ilike(needle, escape="\\"))
+            )
+            location_match = (
+                select(Job.id)
+                .where(Job.location_raw.ilike(needle, escape="\\"))
+            )
+            matching_ids = title_match.union(
+                company_match, location_match,
+            ).subquery()
             query = query.where(
-                or_(
-                    Job.title.ilike(needle, escape="\\"),
-                    Job.company.has(Company.name.ilike(needle, escape="\\")),
-                    Job.location_raw.ilike(needle, escape="\\"),
-                )
+                Job.id.in_(select(matching_ids.c.id))
             )
 
     # Count
