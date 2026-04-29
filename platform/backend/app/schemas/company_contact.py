@@ -37,9 +37,44 @@ validation is the right place to cut this off — a defense-in-depth
 client-side `sanitizeUrl()` helper is a separate round of work.
 """
 
+from typing import Literal
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.utils.sanitize import strip_html_tags
+
+
+# F289 (closes F148 a+c) additional hardening on the contact
+# schemas:
+#   (a) ``first_name`` / ``last_name`` / ``title`` flow into the
+#       admin UI; pre-F289 they accepted unsanitized HTML so a
+#       payload like ``first_name="<script>alert(1)</script>"``
+#       rendered verbatim in the SPA. Defense: ``strip_html_tags``
+#       on both create + update paths via the shared
+#       ``_strip_html_tag`` helper.
+#   (c) ``outreach_status`` had a length cap but NO Literal
+#       constraint. The dedicated /outreach endpoint enforces
+#       ``_VALID_OUTREACH`` in the handler, but the generic PATCH
+#       /contacts/{id} bypassed that. The Literal below is the
+#       single source of truth, mirrored in the handler's
+#       ``_VALID_OUTREACH`` constant.
+_OUTREACH_STATUSES = (
+    "not_contacted", "emailed", "replied", "meeting_scheduled", "not_interested",
+)
+_OutreachStatus = Literal[
+    "not_contacted", "emailed", "replied", "meeting_scheduled", "not_interested",
+]
+
+
+def _strip_html(v):
+    """Pydantic field-validator helper: strip HTML tags from
+    text fields that flow into the admin UI. ``None`` and empty
+    pass through unchanged.
+    """
+    if v is None or v == "":
+        return v
+    return strip_html_tags(v).strip()
 
 
 # URL schemes permitted on any user-writable URL field rendered by
@@ -144,6 +179,15 @@ class CompanyContactCreate(BaseModel):
     def _check_email(cls, v):
         return _validate_optional_email(v)
 
+    # F289 (closes F148 a): strip HTML from name/title/department
+    # fields that render in the admin UI. Same defense pattern
+    # applied across feedback (F162), role-cluster display_name
+    # (F285), platforms board company_name (F287).
+    @field_validator("first_name", "last_name", "title", "department")
+    @classmethod
+    def _strip_html_fields(cls, v):
+        return _strip_html(v)
+
     # F133(2): reject POST {} (ghost-row DoS). At least one identifying
     # field must be present — first_name, last_name, or email. Callers
     # importing a partially-scraped contact (e.g. "found a linkedin URL
@@ -173,7 +217,12 @@ class CompanyContactUpdate(BaseModel):
     twitter_url: str | None = Field(default=None, max_length=500)
     telegram_id: str | None = Field(default=None, max_length=200)
     is_decision_maker: bool | None = None
-    outreach_status: str | None = Field(default=None, max_length=50)
+    # F289 (closes F148 c): Literal so generic PATCH can't smuggle
+    # a non-canonical outreach_status past the dedicated /outreach
+    # endpoint's ``_VALID_OUTREACH`` check. Source of truth lives
+    # at module scope (``_OutreachStatus``) — keep the handler
+    # constant in sync.
+    outreach_status: _OutreachStatus | None = None
     # F133(4): outreach_note DB column is Text (unbounded). Cap at 2000
     # chars at the app layer — longer than any sane recruiter note,
     # short enough that a flood of them can't DoS the table.
@@ -189,9 +238,22 @@ class CompanyContactUpdate(BaseModel):
     def _check_email(cls, v):
         return _validate_optional_email(v)
 
+    # F289 (closes F148 a): mirror the create-side HTML strip on
+    # the PATCH path. Pre-fix you could create a clean contact and
+    # PATCH the name fields to a payload, bypassing the create-side
+    # guard.
+    @field_validator("first_name", "last_name", "title", "department")
+    @classmethod
+    def _strip_html_fields_update(cls, v):
+        return _strip_html(v)
+
 
 class OutreachUpdate(BaseModel):
-    outreach_status: str = Field(..., max_length=50)
+    # F289: also Literal-typed so the dedicated /outreach endpoint
+    # gets schema-level validation in addition to the handler's
+    # ``_VALID_OUTREACH`` check (defense in depth — the handler
+    # check stays as a comment-friendly second layer).
+    outreach_status: _OutreachStatus = Field(...)
     # F133(4): same 2000-char cap as CompanyContactUpdate.outreach_note.
     outreach_note: str = Field(default="", max_length=2000)
 
