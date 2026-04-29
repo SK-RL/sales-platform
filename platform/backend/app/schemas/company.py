@@ -120,8 +120,31 @@ class ATSBoardOut(BaseModel):
 
 
 class ATSBoardCreate(BaseModel):
-    platform: str
-    slug: str
+    """``POST /companies/{id}/ats-boards`` body.
+
+    F303: pre-fix this was bare ``platform: str`` + ``slug: str``
+    with no length cap, no ``extra="forbid"``, no slug pattern.
+    F128 pattern recurrence — typos like ``platfrm`` silently
+    dropped, oversized values crashed the underlying ``String(N)``
+    column writer with HTTP 500. The handler in ``companies.py``
+    does runtime platform validation against ``FETCHER_MAP``, but
+    that fires AFTER schema parsing — adding the schema-layer
+    constraints here means malformed input 422s at parse time
+    with a useful field-level error instead of 500'ing later.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    # Platform is one of ~10 hardcoded fetchers. The handler
+    # validates against ``FETCHER_MAP`` so we don't pin a Literal
+    # here (a fetcher addition would require updating both); the
+    # length cap matches the runtime check's expectation.
+    platform: str = Field(..., min_length=1, max_length=50)
+    # Slug is the company-handle on the ATS provider's URL. ASCII-
+    # safe, kebab/snake-case in practice. The 200-char cap matches
+    # the ``CompanyATSBoard.slug`` column width; the pattern is
+    # generous enough for real-world slugs (Workable allows mixed-
+    # case alphanumerics with dashes/underscores).
+    slug: str = Field(..., min_length=1, max_length=200)
     is_active: bool = True
 
 
