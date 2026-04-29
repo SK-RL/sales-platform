@@ -615,12 +615,33 @@ async def applications_by_platform(user: User = Depends(get_current_user), db: A
     return {"platforms": sorted(platform_data.values(), key=lambda x: x["total"], reverse=True)}
 
 
+_CANONICAL_REVIEW_DECISIONS = ("accepted", "rejected", "skipped")
+
+
 @router.get("/review-insights")
 async def review_insights(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Insights from review decisions: rejection reasons, acceptance by platform."""
-    # Total counts
+    # F110/F279 — analytics divergence fix. Pre-fix this endpoint did
+    # ``GROUP BY decision`` over EVERY distinct value in the column,
+    # so legacy verb-form rows (``"accept"``, ``"reject"``, ``"skip"``
+    # written before the F73 normalization shipped) inflated
+    # ``total_reviewed``. Meanwhile ``/analytics/overview.reviewed_count``
+    # uses ``status IN ("accepted","rejected")`` which excludes them —
+    # net effect was the same prod data showing 11 reviews on one
+    # panel and 41 on another, breaking trust in the acceptance-rate
+    # signal that's the platform's primary review-loop metric.
+    #
+    # Defensive shape: filter the GROUP BY to canonical past-tense
+    # values before aggregating. The admin's ``decision_map`` in
+    # ``reviews.py`` writes only canonical forms going forward, but
+    # this query still has to coexist with whatever legacy rows are
+    # already in the DB. Filtering here means new dashboards always
+    # converge on the canonical taxonomy regardless of when the
+    # cleanup script runs (or whether it runs at all).
     result = await db.execute(
-        select(Review.decision, func.count(Review.id)).group_by(Review.decision)
+        select(Review.decision, func.count(Review.id))
+        .where(Review.decision.in_(_CANONICAL_REVIEW_DECISIONS))
+        .group_by(Review.decision)
     )
     decision_counts = {row[0]: row[1] for row in result}
 
