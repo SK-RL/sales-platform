@@ -3,6 +3,7 @@
 from typing import get_args
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +14,40 @@ from app.models.scan import ScanLog
 from app.models.user import User
 from app.api.deps import get_current_user, require_role
 from app.utils.company_name import looks_like_junk_company_name
+from app.utils.sanitize import strip_html_tags
 from app.utils.scan_lock import acquire_scan_lock, release_scan_lock
+
+
+# F287 (closes F147 a-d) — Pydantic schema for POST /boards.
+#
+# Pre-fix the handler took ``body: dict`` and pulled fields with
+# ``body.get(...)`` directly. That meant:
+#   (a) ``extra="forbid"`` couldn't fire — extra fields silently
+#       dropped (F128 pattern).
+#   (b) ``company_name`` had no length cap — 5KB names persisted
+#       and crashed the underlying Postgres ``String(N)`` column
+#       writer with HTTP 500.
+#   (c) HTML in ``company_name`` flowed through to the DB and
+#       rendered verbatim in the admin UI (stored XSS).
+#   (d) ``slug``/``platform`` had no validation — though platform
+#       was at least allow-listed in the handler body.
+# Re-shaping as a real Pydantic model lets the schema layer reject
+# bad input at parse time, and ``strip_html_tags`` on company_name
+# closes the XSS vector at the only chokepoint.
+class _BoardCreateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    company_name: str = Field(..., min_length=1, max_length=200)
+    platform: str = Field(..., min_length=1, max_length=50)
+    slug: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("company_name")
+    @classmethod
+    def _strip_html_company_name(cls, v: str) -> str:
+        # F147(c): strict-strip rather than sanitize — display names
+        # have no legitimate HTML use. Same helper feedback uses
+        # (F162) and role-cluster display_name uses (F285).
+        return strip_html_tags(v).strip()
 
 # Regression finding 191 (re-exported from schemas.job in F218): `?platform=`
 # on the list endpoints wasn't validated, so typos (`GREENHOUSE`,
@@ -257,7 +291,7 @@ async def toggle_board(
 
 @router.post("/boards")
 async def add_board(
-    body: dict,
+    body: _BoardCreateBody,
     user: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -266,12 +300,13 @@ async def add_board(
     import uuid as _uuid
     from datetime import datetime, timezone
 
-    company_name = body.get("company_name", "").strip()
-    platform = body.get("platform", "").strip().lower()
-    slug = body.get("slug", "").strip()
-
-    if not company_name or not platform or not slug:
-        raise HTTPException(status_code=400, detail="company_name, platform, and slug are required")
+    # F287: schema validation already enforced presence + length +
+    # strip_html_tags on company_name. Local trim + lowercase on
+    # platform stays — the platform allow-list check below relies on
+    # the canonical lowercased form.
+    company_name = body.company_name
+    platform = body.platform.strip().lower()
+    slug = body.slug.strip()
 
     # F246(b) follow-up: read the allow-list from the canonical
     # ``FETCHER_MAP`` rather than hardcoding it here. Pre-fix, this
