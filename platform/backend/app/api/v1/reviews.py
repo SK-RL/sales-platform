@@ -4,6 +4,7 @@ from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -101,7 +102,38 @@ async def submit_review(
         # sweep) but stopped writing to it so future data doesn't drift
         # further.
 
-    await db.commit()
+    # F281 (closes F156) — surface the UNIQUE(job_id, reviewer_id)
+    # constraint as a clean 409 instead of leaking the underlying
+    # IntegrityError as a 500. The handler does no pre-check: a
+    # check-then-write would still race because two parallel
+    # requests can both pass the check before either commits. The
+    # DB constraint is the only race-safe gate; we just translate
+    # its violation to a useful client error here. ``rollback()`` is
+    # required so the session is reusable for the audit log /
+    # response path that follows. Note: the constraint is enforced
+    # by ``uq_reviews_job_reviewer`` (migration ``k7l8m9n0o1p2``);
+    # falling back to a substring-on-error-message check would be
+    # fragile, so we test for the unique-violation specifically.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        # Heuristic: any ``UniqueViolation`` whose constraint matches
+        # the reviews-pair constraint name is the F156 race. Other
+        # IntegrityErrors (FK to a deleted Job, etc.) re-raise so the
+        # original 500 surfaces with full traceback for ops debugging.
+        constraint = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(constraint, "constraint_name", "") if constraint else ""
+        if "uq_reviews_job_reviewer" in (constraint_name or "") or "uq_reviews_job_reviewer" in str(exc).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "You've already reviewed this job. To change your "
+                    "decision, edit or delete the existing review first."
+                ),
+            )
+        raise
+
     await db.refresh(review)
 
     # Regression finding 113: audit trail for review actions

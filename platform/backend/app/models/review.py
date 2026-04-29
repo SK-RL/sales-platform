@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, ARRAY, Index
+from sqlalchemy import String, DateTime, ForeignKey, ARRAY, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -20,6 +20,24 @@ class Review(Base):
     reviewer: Mapped["User"] = relationship()
 
     __table_args__ = (
+        # F281 (closes F156) — exactly one review per (job, reviewer).
+        # The handler does a session-level check and then ``db.add``,
+        # which races under concurrent submissions: two parallel
+        # ``POST /reviews`` for the same (job, reviewer) pair both
+        # passed the check and both committed pre-fix. Live probe
+        # produced 3 review rows from one user for one job, with two
+        # different decisions, each spawning its own
+        # ``PotentialClient`` + ``company.is_target=True`` +
+        # feedback-task — multiplying the side effects.
+        # Migration ``k7l8m9n0o1p2`` dedupes existing rows then adds
+        # the UNIQUE INDEX ``uq_reviews_job_reviewer``. Declaring the
+        # constraint here too means a fresh
+        # ``Base.metadata.create_all()`` (test bootstrap, dev DB)
+        # also gets the constraint, matching prod.
+        UniqueConstraint(
+            "job_id", "reviewer_id",
+            name="uq_reviews_job_reviewer",
+        ),
         # F278 — composite index for the dominant read pattern across
         # ai_insights (per-user, last-30-days), /reviews/queue listing,
         # and audit lookups. ``reviewer_id`` first (equality, most
