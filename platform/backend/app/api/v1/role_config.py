@@ -155,10 +155,15 @@ async def create_role_cluster(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Role cluster '{name}' already exists")
 
+    # F285 (closes F142(b)): strip HTML from ``display_name`` so a
+    # ``<script>alert(1)</script>`` payload can't be persisted and
+    # rendered verbatim in the admin UI. Same helper used by the
+    # PATCH path above and the feedback model (F162).
+    from app.utils.sanitize import strip_html_tags
     cluster = RoleClusterConfig(
         id=uuid.uuid4(),
         name=name,
-        display_name=body.display_name,
+        display_name=strip_html_tags(body.display_name),
         is_relevant=body.is_relevant,
         is_active=True,
         keywords=body.keywords,
@@ -201,8 +206,41 @@ async def update_role_cluster(
     if not cluster:
         raise HTTPException(status_code=404, detail="Role cluster not found")
 
+    # F285 (closes F142(a)): block deactivating built-in clusters
+    # via PATCH. The DELETE handler already guards built-ins (line
+    # 246), but the PATCH path was a one-API-call kill-switch — an
+    # admin could flip ``is_active=False`` or ``is_relevant=False``
+    # on the ``infra``/``security`` clusters and silently break the
+    # entire role-classification pipeline. ``_get_relevant_clusters``
+    # filters on ``is_active=True AND is_relevant=True``, so a
+    # flipped flag means every infra/security job downstream gets
+    # ``relevance_score=0``. Mirror the DELETE guard so the same
+    # protection applies to both mutation paths.
+    _BUILTIN_CLUSTERS = ("infra", "security")
+    deactivation = (
+        body.is_active is False or body.is_relevant is False
+    )
+    if cluster.name in _BUILTIN_CLUSTERS and deactivation:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot disable built-in cluster '{cluster.name}'. "
+                "Built-in clusters are required for the platform's "
+                "core role-classification pipeline. To stop showing "
+                "them in the UI, hide via the admin filter — don't "
+                "disable the cluster itself."
+            ),
+        )
+
     if body.display_name is not None:
-        cluster.display_name = body.display_name
+        # F285 (closes F142(b)): strip HTML from ``display_name``
+        # so a payload like ``<script>alert(1)</script>`` can't be
+        # persisted and rendered into the admin UI verbatim. Same
+        # ``strip_html_tags`` helper used by the feedback model
+        # (F162) — strict-strip not sanitize, since display names
+        # have no legitimate HTML use.
+        from app.utils.sanitize import strip_html_tags
+        cluster.display_name = strip_html_tags(body.display_name)
     if body.is_relevant is not None:
         cluster.is_relevant = body.is_relevant
     if body.is_active is not None:
