@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from authlib.integrations.starlette_client import OAuth
@@ -120,9 +120,24 @@ def _mint_jwt(user: User) -> str:
     )
 
 
+# F290 (closes F153 a) — cap LoginRequest.password at the same
+# ceiling ``ChangePassword`` / ``ResetPasswordConfirm`` use. A
+# 1 MB password in a login attempt held the server connection for
+# ~76s pre-fix (mostly network I/O, but the backend still ran
+# SHA-256 + bcrypt on every byte). Single source of truth for all
+# password-carrying fields lives in ``schemas/user.py``.
+# NB: no min_length here — wrong-credential 401 must look the
+# same whether the password is too short or just wrong, so
+# rejecting "too short" with a 422 would itself be a length-
+# oracle. The handler's ``_verify_password`` constant-time compare
+# handles short passwords as "wrong" and increments the rate-limit
+# counter, which is the correct behaviour.
+from app.schemas.user import PASSWORD_MAX_LEN as _LOGIN_PASSWORD_MAX
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=_LOGIN_PASSWORD_MAX)
 
 
 def _rate_limit_key(request: Request, email: str) -> str:

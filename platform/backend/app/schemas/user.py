@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from datetime import datetime
 from uuid import UUID
 
@@ -55,20 +55,48 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
 
 
+# F290 (closes F153 a) — bound every password-carrying field at
+# the schema layer.
+#
+# Pre-fix ``password: str`` had no length cap, so a 1 MB password
+# in a login attempt held the server's connection for ~76s
+# (mostly network I/O, but the backend still ran SHA-256 + bcrypt
+# on every byte). 128 chars is well above any reasonable
+# passphrase (the longest practical xkcd-936 four-word passphrase
+# is ~50 chars) and well under the bcrypt 72-byte input window
+# that the SHA-256 pre-hash collapses anything longer into. We
+# cap at 128 specifically rather than 72 to leave headroom for
+# future migration to argon2 (which doesn't have the bcrypt
+# 72-byte cap) without breaking existing passwords.
+#
+# Min length comes from the existing /change-password +
+# /reset-password/confirm handler (F43: 8 chars per OWASP/NIST
+# SP 800-63B). Hoisting that to the schema layer means a future
+# refactor that drops the handler check still has the floor.
+PASSWORD_MIN_LEN = 8
+PASSWORD_MAX_LEN = 128
+
+
 class UserCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: EmailStr
-    name: str
-    password: str
+    name: str = Field(..., min_length=1, max_length=200)
+    password: str = Field(..., min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN)
     role: str = "viewer"
 
 
 class ChangePassword(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    current_password: str
-    new_password: str
+    # F290: cap current_password at the same ceiling — even though
+    # we only ever check it via constant-time bcrypt compare, a 1MB
+    # ``current_password`` in the request body still has to be
+    # parsed by Pydantic + sent through the SHA-256 pre-hash, which
+    # is gratuitous server work for an attacker who knows their
+    # current password is wrong anyway.
+    current_password: str = Field(..., max_length=PASSWORD_MAX_LEN)
+    new_password: str = Field(..., min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN)
 
 
 class ResetPasswordRequest(BaseModel):
@@ -80,5 +108,7 @@ class ResetPasswordRequest(BaseModel):
 class ResetPasswordConfirm(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    token: str
-    new_password: str
+    # F290: tokens are 32-byte URL-safe random; a generous 256-char
+    # cap is plenty even with future token-format changes.
+    token: str = Field(..., min_length=10, max_length=256)
+    new_password: str = Field(..., min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN)
