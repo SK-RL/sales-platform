@@ -60,13 +60,27 @@ def score_resume_task(self, resume_id: str):
         total = len(jobs)
         self.update_state(state="PROGRESS", meta={"current": 0, "total": total})
 
-        # Delete old scores
-        old_scores = session.execute(
-            select(ResumeScore).where(ResumeScore.resume_id == resume.id)
-        ).scalars().all()
-        for old in old_scores:
-            session.delete(old)
-        session.flush()
+        # F300 (closes F105): switched from delete-old-then-rescore
+        # to UPSERT-then-clean. Pre-fix every rescore deleted ALL
+        # existing ResumeScore rows up-front, leaving the UI showing
+        # ``jobs_scored=0`` for the full ~90s rescore window — the
+        # user's "Best Score" / "Top Matches" panels went blank.
+        # The new shape:
+        #   1. Score each job → UPSERT (line 125 below already does
+        #      this via ``on_conflict_do_update``).
+        #   2. Track the set of job_ids we touched.
+        #   3. After the loop, DELETE any ResumeScore rows for THIS
+        #      resume whose job_id is NOT in the touched set —
+        #      cleanup of jobs that were relevant in the old run
+        #      but aren't anymore (e.g. expired, role-cluster
+        #      changed).
+        # Result: users see old scores (slightly stale) THROUGHOUT
+        # the rescore window, gradually overwritten with new
+        # numbers — no blank-screen UX. Worker crash mid-rescore
+        # leaves the user with old-scores + partial-new-scores
+        # which is strictly better than the pre-fix all-blank +
+        # partial-new behaviour.
+        scored_job_ids: set = set()
 
         # Load descriptions in bulk
         job_ids = [j.id for j in jobs]
@@ -149,6 +163,7 @@ def score_resume_task(self, resume_id: str):
                 },
             )
             session.execute(stmt)
+            scored_job_ids.add(job.id)  # F300: track for final cleanup
             scored += 1
 
             # Update progress every 50 jobs
@@ -156,12 +171,35 @@ def score_resume_task(self, resume_id: str):
                 self.update_state(state="PROGRESS", meta={"current": scored, "total": total})
                 session.flush()
 
+        # F300 (closes F105): final cleanup pass — drop ResumeScore
+        # rows for THIS resume whose job_id wasn't touched in the
+        # current run. These are jobs that were relevant under the
+        # old criteria but aren't anymore (expired, role_cluster
+        # changed, etc.). Done as a single batched DELETE so the
+        # transaction stays small.
+        stale_deleted = 0
+        if scored_job_ids:
+            from sqlalchemy import delete as sa_delete
+            stale_result = session.execute(
+                sa_delete(ResumeScore).where(
+                    ResumeScore.resume_id == resume.id,
+                    ResumeScore.job_id.notin_(scored_job_ids),
+                )
+            )
+            stale_deleted = stale_result.rowcount or 0
+
         session.commit()
         logger.info(
-            "score_resume_task: resume=%s total=%d scored=%d raw_json_fallback=%d",
-            resume_id, total, scored, fallback_used,
+            "score_resume_task: resume=%s total=%d scored=%d "
+            "raw_json_fallback=%d stale_pruned=%d",
+            resume_id, total, scored, fallback_used, stale_deleted,
         )
-        return {"jobs_scored": scored, "total": total, "raw_json_fallback": fallback_used}
+        return {
+            "jobs_scored": scored,
+            "total": total,
+            "raw_json_fallback": fallback_used,
+            "stale_pruned": stale_deleted,
+        }
 
     except Exception as exc:
         session.rollback()
