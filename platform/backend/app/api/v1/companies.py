@@ -766,17 +766,47 @@ async def enrichment_status(
 async def list_contacts(
     company_id: UUID,
     role_category: str | None = None,
+    # F318 (data correctness, DoS bound): pre-fix this returned ALL
+    # contacts unbounded — a company with 5k contacts would dump
+    # 5k × ~30-field dicts in one response (~1.5MB). Same DoS class
+    # as F107 export; bounded here at 200 default / 1000 max which
+    # comfortably covers any real company's contact list while
+    # gating against the unbounded enterprise-import case. Page +
+    # canonical envelope so the frontend doesn't have to special-
+    # case this list vs every other paginated list endpoint.
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=1, le=1000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(CompanyContact).where(CompanyContact.company_id == company_id)
     if role_category:
         query = query.where(CompanyContact.role_category == role_category)
-    query = query.order_by(CompanyContact.seniority.asc(), CompanyContact.last_name.asc())
+
+    count_q = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_q)).scalar() or 0
+
+    query = (
+        query.order_by(
+            CompanyContact.seniority.asc(),
+            CompanyContact.last_name.asc(),
+            # F271-style stable tiebreaker so paged traversal
+            # doesn't shift rows between pages.
+            CompanyContact.id.asc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
 
     result = await db.execute(query)
     contacts = result.scalars().all()
-    return {"items": [CompanyContactOut.model_validate(c) for c in contacts]}
+    return {
+        "items": [CompanyContactOut.model_validate(c) for c in contacts],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size if total else 1,
+    }
 
 
 # Regression finding 160: company contacts had no (company_id, email)
