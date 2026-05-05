@@ -33,6 +33,7 @@ from fastapi import (
 )
 from fastapi.responses import Response
 from sqlalchemy import select, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_role
@@ -177,9 +178,9 @@ async def create_profile(
     kind of operation that should require an explicit admin decision).
     """
     # Check for dupe before insert so we return 409, not a raw
-    # IntegrityError 500. Race condition between this check and the
-    # insert is harmless — the DB unique constraint still catches it
-    # and we translate to 409 in the except.
+    # IntegrityError 500. The lookup is the fast path for serial
+    # callers — the SAVEPOINT below closes the TOCTOU race when two
+    # admins POST the same email simultaneously.
     existing = (await db.execute(
         select(Profile).where(func.lower(Profile.email) == body.email.lower())
     )).scalar_one_or_none()
@@ -207,7 +208,39 @@ async def create_profile(
         created_by_user_id=user.id,
     )
     db.add(profile)
-    await db.commit()
+    # F325 (race-safe): the lookup-then-insert above is TOCTOU-
+    # vulnerable to two admins POSTing the same email at the same
+    # instant — both pass the lookup, both INSERT, and the second
+    # blows up with an unhandled ``IntegrityError`` that escapes as
+    # a bare HTTP 500. The Profile model declares the named
+    # constraint ``UniqueConstraint("email", name="uq_profiles_email")``
+    # so we can match on the constraint name and raise the same 409
+    # the lookup-check produces — user-visible outcome identical
+    # regardless of timing. Other IntegrityErrors (FK violation,
+    # check-constraint failure, etc.) propagate as 500 so genuinely-
+    # different bugs aren't hidden behind this translation.
+    #
+    # Same shape as F281 (reviews), F282 (contacts), F316 (jobs),
+    # F320 (potential-clients), F322 (answer-book), F323 (routine-
+    # targets), F324 (work-time pending): SAVEPOINT-wrapped INSERT
+    # + named-constraint IntegrityError catch.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        diag = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = (
+            getattr(diag, "constraint_name", "") if diag else ""
+        ) or ""
+        if (
+            "uq_profiles_email" in constraint_name
+            or "uq_profiles_email" in str(exc).lower()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=f"A profile with email {body.email!r} already exists.",
+            )
+        raise
     await db.refresh(profile)
 
     # F238(b) regression fix: NEVER put PII values (email / PAN / UAN)
