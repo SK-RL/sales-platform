@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from authlib.integrations.starlette_client import OAuth
 from jose import jwt
@@ -267,7 +268,54 @@ async def register(
         created_at=datetime.now(timezone.utc),
     )
     db.add(new_user)
-    await db.commit()
+    # F326 (race-safe): the lookup-then-insert above is TOCTOU-
+    # vulnerable. Two concurrent registrations with the same email
+    # both pass the lookup, both INSERT, and the second blows up
+    # with an unhandled IntegrityError on the ``users.email`` UNIQUE
+    # that escapes as a bare HTTP 500. Real-world trigger: the
+    # public ``/auth/register`` form double-submitted on slow
+    # connections, or a script-kiddie POSTing duplicate registrations
+    # in a tight loop hoping to hit the race and crash the worker.
+    #
+    # The User model declares ``email: Mapped[str] = mapped_column(
+    # String(255), unique=True, ...)`` — no explicit constraint name,
+    # so Postgres auto-generates ``users_email_key`` per the
+    # ``<table>_<column>_key`` convention. We match on that name AND
+    # on the column substring as backstop in case a future migration
+    # ever renames the constraint. Other IntegrityErrors (FK to a
+    # role that doesn't exist, etc.) propagate as 500 so genuinely-
+    # different bugs aren't hidden behind the 409 translation.
+    #
+    # Same shape as F325 (profiles), F324 (work-time pending), F323
+    # (routine-targets), F322 (answer-book), F321 (applications),
+    # F320 (potential-clients), F316 (jobs), F282 (contacts), F281
+    # (reviews): SAVEPOINT-equivalent commit wrap + named-constraint
+    # IntegrityError catch + race-recovery 409 with message-byte-
+    # identical to the lookup-check 409.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        diag = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = (
+            getattr(diag, "constraint_name", "") if diag else ""
+        ) or ""
+        err_text = str(exc).lower()
+        # Postgres default for unnamed UNIQUE on a single column is
+        # ``<table>_<column>_key``. The substring check on
+        # ``users_email`` covers both that default and any future
+        # migration that names it ``uq_users_email`` etc. — the
+        # important property is that we DON'T translate non-email
+        # IntegrityErrors to 409.
+        if (
+            "users_email" in constraint_name
+            or "users_email" in err_text
+            or "users_email_key" in err_text
+        ):
+            raise HTTPException(
+                status_code=409, detail="Email already registered"
+            )
+        raise
     await db.refresh(new_user)
 
     return {
