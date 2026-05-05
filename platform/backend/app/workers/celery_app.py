@@ -71,11 +71,25 @@ celery_app.autodiscover_tasks(["app.workers.tasks"])
 
 # Beat schedule for recurring tasks
 if SCAN_MODE == "aggressive":
-    # Aggressive: scan every 30 min, career pages every hour, discovery daily
+    # Aggressive: scan thrice daily (was every 30 min). F317 rationale:
+    # the 30-min cadence was contributing to the F316 duplicate-jobs
+    # problem — every cycle re-fetched the full 786-board catalog and
+    # any dedup-edge (case/whitespace title variants, missing
+    # title_normalized on unclassified roles, concurrent-worker race
+    # past the F88 lookup) became more frequent. 48 cycles/day amplified
+    # those edges into a noticeable dup count user-side. Operator
+    # feedback ("we are having duplicate jobs", "lets run the scrape
+    # jobs thrice a day") says: 3 evenly-spaced scans are enough for
+    # this product (job postings don't appear/disappear at sub-hour
+    # granularity meaningfully, and stale_threshold_days=14 covers any
+    # gap between scans). 0/8/16 UTC is the same shape ``normal`` mode
+    # uses but spread to 3 instead of 2. Stays "aggressive" relative to
+    # ``normal`` (3/day vs 2/day) so the SCAN_MODE flag's semantics
+    # don't invert.
     celery_app.conf.beat_schedule = {
         "scan_all_platforms": {
             "task": "app.workers.tasks.scan_task.scan_all_platforms",
-            "schedule": crontab(minute="*/30"),  # Every 30 minutes
+            "schedule": crontab(minute=0, hour="0,8,16"),  # F317: thrice daily (00:00, 08:00, 16:00 UTC)
         },
         "check_career_pages": {
             "task": "app.workers.tasks.career_page_task.check_career_pages",
@@ -199,11 +213,15 @@ if SCAN_MODE == "aggressive":
         },
     }
 else:
-    # Normal: scan twice daily, career pages every 4h, discovery weekly
+    # Normal: scan thrice daily (was 2x), career pages every 4h, discovery weekly.
+    # F317: aligned to the same 3-per-day cadence as aggressive mode
+    # (0/8/16 UTC) so the SCAN_MODE flag still matters for everything
+    # ELSE (career-pages/discovery/etc.) but the headline "how often
+    # do we scrape jobs" answer is consistent: thrice daily, both modes.
     celery_app.conf.beat_schedule = {
         "scan_all_platforms": {
             "task": "app.workers.tasks.scan_task.scan_all_platforms",
-            "schedule": crontab(minute=0, hour="8,20"),  # 8am and 8pm UTC
+            "schedule": crontab(minute=0, hour="0,8,16"),  # F317: thrice daily
         },
         "check_career_pages": {
             "task": "app.workers.tasks.career_page_task.check_career_pages",
