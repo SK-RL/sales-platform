@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -171,7 +172,50 @@ async def create_role_cluster(
         sort_order=body.sort_order,
     )
     db.add(cluster)
-    await db.commit()
+    # F328 (race-safe): the lookup-then-insert above is TOCTOU-
+    # vulnerable. Two concurrent admin POSTs with the same
+    # normalized name (e.g. both typing "data" in different tabs)
+    # both pass the lookup, both INSERT, and the second blows up
+    # with an unhandled IntegrityError on the
+    # ``role_cluster_configs.name`` UNIQUE constraint that escapes
+    # as a bare HTTP 500. Lower exposure than the public-facing
+    # F325/F326 fixes (this endpoint is admin-gated and clusters
+    # are added rarely) but completes the race-safe sweep so the
+    # full set of CREATE handlers behaves consistently.
+    #
+    # ``RoleClusterConfig.name`` is declared as ``mapped_column(
+    # String(100), unique=True, ...)`` — no explicit constraint
+    # name, so Postgres auto-generates
+    # ``role_cluster_configs_name_key`` per the
+    # ``<table>_<column>_key`` convention. We match on the
+    # substring ``role_cluster_configs_name`` so any future
+    # rename to ``uq_role_cluster_configs_name`` still triggers
+    # the translation. Other IntegrityErrors propagate as 500 so
+    # genuinely-different bugs aren't hidden.
+    #
+    # Same shape as F325 (profiles), F326 (auth register), F327
+    # (pipeline stages), F324 (work-time pending), F323 (routine-
+    # targets), F322 (answer-book), F321 (applications), F320
+    # (potential-clients), F316 (jobs), F282 (contacts), F281
+    # (reviews).
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        diag = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = (
+            getattr(diag, "constraint_name", "") if diag else ""
+        ) or ""
+        err_text = str(exc).lower()
+        if (
+            "role_cluster_configs_name" in constraint_name
+            or "role_cluster_configs_name" in err_text
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Role cluster '{name}' already exists",
+            )
+        raise
     await db.refresh(cluster)
 
     await log_action(
