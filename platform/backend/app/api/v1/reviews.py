@@ -480,13 +480,32 @@ async def apply_from_review(
             select(Company).where(Company.id == job.company_id)
         )).scalar_one_or_none()
         if company:
+            # F320 (companion to submit_review fix) — race-safe
+            # PotentialClient auto-create. Two reviewers concurrently
+            # applying to jobs from the same company both pass the
+            # SELECT, both add a PotentialClient(company_id=X), and
+            # the second commit gets ``UNIQUE(company_id)`` violation.
+            # Wrap in a SAVEPOINT and on race-loss re-fetch the
+            # winning row, stamping our resume_id/applied_by on top
+            # (matches the existing-client branch below).
             company.is_target = True
-            db.add(PotentialClient(
-                company_id=job.company_id,
-                stage="new_lead",
-                resume_id=resume.id,
-                applied_by=user.id,
-            ))
+            try:
+                async with db.begin_nested():
+                    db.add(PotentialClient(
+                        company_id=job.company_id,
+                        stage="new_lead",
+                        resume_id=resume.id,
+                        applied_by=user.id,
+                    ))
+            except IntegrityError:
+                client = (await db.execute(
+                    select(PotentialClient).where(
+                        PotentialClient.company_id == job.company_id
+                    )
+                )).scalar_one_or_none()
+                if client is not None:
+                    client.resume_id = resume.id
+                    client.applied_by = user.id
     else:
         # Annotate the existing pipeline row with who applied + which
         # resume was used. `resume_id` / `applied_by` on PotentialClient

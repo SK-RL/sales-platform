@@ -78,3 +78,27 @@ def test_is_target_set_unconditionally_on_accept():
         "review is accepted. Auto-targeting based on review "
         "history breaks."
     )
+
+
+def test_apply_handler_also_race_safe():
+    """The /reviews/apply handler has the SAME PotentialClient
+    lookup-then-insert pattern. Both endpoints must be race-safe
+    or 2 users applying to jobs from the same company through
+    different paths can still 500.
+    """
+    src = (_BACKEND / "app" / "api" / "v1" / "reviews.py").read_text()
+    apply_idx = src.find("async def apply_from_review")
+    assert apply_idx > 0
+    end = src.find("@router.", apply_idx + 1)
+    if end < 0:
+        end = len(src)
+    body = src[apply_idx:end]
+    assert "db.begin_nested()" in body, (
+        "F320 regression: /reviews/apply handler no longer wraps "
+        "PotentialClient insert in a SAVEPOINT. Concurrent applies "
+        "from same company will 500 again."
+    )
+    assert "except IntegrityError" in body, (
+        "F320 regression: /reviews/apply no longer catches "
+        "IntegrityError — race-recovery dies."
+    )
