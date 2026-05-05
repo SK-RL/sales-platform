@@ -580,15 +580,45 @@ async def upsert_routine_target(
         existing.intent = body.intent
         existing.note = body.note
         existing.updated_at = datetime.now(timezone.utc)
-    else:
-        existing = RoutineTarget(
-            id=uuid.uuid4(),
-            user_id=user.id,
-            job_id=job_id,
-            intent=body.intent,
-            note=body.note,
-        )
-        db.add(existing)
+        await db.commit()
+        await db.refresh(existing)
+        return _hydrate_target(existing, job, company_name)
+
+    # F323 (race-safe): the lookup-then-INSERT path is TOCTOU-
+    # vulnerable to concurrent POSTs (two tabs queuing the same
+    # job, double-click). Both pass the SELECT, both add a
+    # RoutineTarget(user_id=X, job_id=Y), second hits
+    # ``uq_routine_targets_user_job`` and 500s. Wrap in a
+    # SAVEPOINT and on race-loss re-fetch the winning row, then
+    # apply the same idempotent refresh path the existing-row
+    # branch above does (intent/note from this request wins —
+    # most-recent-write semantics).
+    new_target = RoutineTarget(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        job_id=job_id,
+        intent=body.intent,
+        note=body.note,
+    )
+    db.add(new_target)
+    from sqlalchemy.exc import IntegrityError
+    try:
+        async with db.begin_nested():
+            await db.flush()
+        existing = new_target
+    except IntegrityError:
+        db.expunge(new_target)
+        existing = (await db.execute(
+            select(RoutineTarget).where(
+                RoutineTarget.user_id == user.id,
+                RoutineTarget.job_id == job_id,
+            )
+        )).scalar_one_or_none()
+        if existing is None:
+            raise
+        existing.intent = body.intent
+        existing.note = body.note
+        existing.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(existing)
