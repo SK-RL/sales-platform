@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -355,24 +356,89 @@ async def prepare_application(
         .limit(1)
     )).scalar_one_or_none()
 
-    # Create application record. F261 — denormalise company_id at
-    # apply-time so the team-pipeline feed doesn't pay an
-    # Application⨝Job join on every page-load. The value is immutable
-    # post-apply (the underlying job's company doesn't change), so
-    # snapshotting here is safe.
-    application = Application(
-        id=uuid.uuid4(),
-        user_id=user.id,
-        job_id=job.id,
-        company_id=job.company_id,
-        resume_id=resume.id,
-        status="prepared",
-        apply_method="manual_copy",
-        prepared_answers=prepared_answers,
-    )
-    db.add(application)
-    await db.commit()
-    await db.refresh(application)
+    # F321 (data correctness, idempotent + race-safe): the Application
+    # table has UNIQUE(user_id, job_id) so a second ``/prepare`` click
+    # on the same job pre-fix raised IntegrityError → 500. Two
+    # behaviours to preserve:
+    #
+    #   (a) **Idempotent re-prepare**: a user clicking Prepare twice
+    #       on the same job should NOT 500. Refresh ``prepared_answers``
+    #       + ``resume_id`` on the existing row and return it.
+    #
+    #   (b) **Don't downgrade an already-applied row**: if the user
+    #       had moved past prepared (status='applied'/interview/offer),
+    #       a fresh /prepare click shouldn't reset the lifecycle.
+    #       Return a 409 telling the client to use /status PATCH if
+    #       they want to re-prepare a previously-applied job.
+    #
+    # F261: denormalise company_id at apply-time so the team-pipeline
+    # feed doesn't pay an Application⨝Job join on every page-load.
+    existing = (await db.execute(
+        select(Application).where(
+            Application.user_id == user.id,
+            Application.job_id == job.id,
+        )
+    )).scalar_one_or_none()
+
+    if existing is not None:
+        if existing.status != "prepared":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This job already has a {existing.status!r} "
+                    f"application — use PATCH /applications/{existing.id} "
+                    f"to update or DELETE to withdraw before re-preparing."
+                ),
+            )
+        # (a) idempotent re-prepare path: refresh answers + resume
+        existing.prepared_answers = prepared_answers
+        existing.resume_id = resume.id
+        await db.commit()
+        await db.refresh(existing)
+        application = existing
+    else:
+        application = Application(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            job_id=job.id,
+            company_id=job.company_id,
+            resume_id=resume.id,
+            status="prepared",
+            apply_method="manual_copy",
+            prepared_answers=prepared_answers,
+        )
+        db.add(application)
+        # SAVEPOINT + IntegrityError catch closes the residual race
+        # where two requests pass the SELECT then both reach INSERT.
+        try:
+            async with db.begin_nested():
+                await db.flush()
+        except IntegrityError:
+            # Lost the race; re-fetch the winner and refresh into it
+            # (matches branch (a) semantics).
+            db.expunge(application)
+            existing = (await db.execute(
+                select(Application).where(
+                    Application.user_id == user.id,
+                    Application.job_id == job.id,
+                )
+            )).scalar_one_or_none()
+            if existing is None:
+                raise
+            if existing.status != "prepared":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"This job already has a {existing.status!r} "
+                        f"application — use PATCH /applications/{existing.id} "
+                        f"to update or DELETE to withdraw before re-preparing."
+                    ),
+                )
+            existing.prepared_answers = prepared_answers
+            existing.resume_id = resume.id
+            application = existing
+        await db.commit()
+        await db.refresh(application)
 
     return {
         "id": str(application.id),
