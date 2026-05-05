@@ -603,11 +603,36 @@ def _upsert_job(
                 # branch above does. Skip the relevance-score
                 # recompute (the survivor's score was already
                 # updated by whoever won the race; redundant work).
+                #
+                # F316b: preserve the survivor's existing
+                # ``_also_seen_on`` cross-platform tracking before
+                # the raw_json reassign clobbers it. Same defense
+                # the F88 cross-platform soft-match branch uses on
+                # line ~414. Also stamp the new sighting since this
+                # IntegrityError path IS effectively a cross-
+                # platform observation (whoever won the race
+                # inserted with our intended platform/external_id;
+                # we're now seeing the same role from a sibling
+                # source).
+                carried_also_seen = list(
+                    (survivor.raw_json or {}).get("_also_seen_on", [])
+                )
                 survivor.last_seen_at = now
                 survivor.url = raw_job.get("url", survivor.url)
                 survivor.location_raw = location_raw
                 survivor.remote_scope = remote_scope
                 survivor.raw_json = raw_job.get("raw_json", {})
+                # Re-attach the prior sighting list + record the
+                # current platform:external_id sighting on top.
+                if carried_also_seen or board.platform != survivor.platform:
+                    new_seen = list(carried_also_seen)
+                    sighting = f"{board.platform}:{external_id}"
+                    if sighting not in new_seen and board.platform != survivor.platform:
+                        new_seen.append(sighting)
+                    raw_merged = dict(survivor.raw_json or {})
+                    if new_seen:
+                        raw_merged["_also_seen_on"] = new_seen
+                    survivor.raw_json = raw_merged
                 job_id_for_desc = survivor.id
                 action = "updated"
             else:
