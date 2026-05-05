@@ -6,7 +6,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.workers.celery_app import celery_app
@@ -340,11 +341,26 @@ def _upsert_job(
     # re-score, etc.) and skip the insert entirely. This keeps the DB
     # at one row per logical role without requiring per-platform
     # "is_aggregator" annotations.
+    #
+    # F316 (data correctness) — three changes to the original F88
+    # match:
+    #   (a) Case + whitespace insensitive (``lower(trim(title))``)
+    #       so ``"Senior SRE"`` and ``"senior sre  "`` from two
+    #       ATS sources collapse correctly. Pre-fix exact-string
+    #       equality let case/whitespace variants slip past.
+    #   (b) Filtered to ACTIVE statuses so a previously-rejected
+    #       role being re-listed today legitimately creates a new
+    #       row (admin's reject decision wasn't ours to override).
+    #   (c) Aligns with the partial UNIQUE INDEX
+    #       ``uq_jobs_active_company_title`` shipped in migration
+    #       ``m9n0o1p2q3r4`` — same predicate, so what the handler
+    #       finds matches what the DB constraint enforces.
     if not existing and title:
         existing = session.execute(
             select(Job).where(
                 Job.company_id == company.id,
-                Job.title == title,
+                func.lower(func.trim(Job.title)) == title.strip().lower(),
+                Job.status.in_(("new", "under_review", "accepted")),
             ).limit(1)
         ).scalar_one_or_none()
 
@@ -533,8 +549,72 @@ def _upsert_job(
             feedback_adjustment=feedback_adj_new,
         )
         session.add(job)
-        job_id_for_desc = job.id
-        action = "new"
+
+        # F316 (data correctness, race-safe): the partial UNIQUE
+        # ``uq_jobs_active_company_title`` (migration
+        # ``m9n0o1p2q3r4``) enforces ONE active row per
+        # ``(company_id, lower(trim(title)))``. The lookups above
+        # (external_id, F88 case-insensitive, F88 cross-platform
+        # soft-match) catch dups serially, but a concurrent scan
+        # from a sibling worker can still race past them: both
+        # workers' ``existing`` lookups miss, both reach the
+        # ``session.add`` here, and one of the flushes fails on
+        # the partial UNIQUE.
+        #
+        # Catch that IntegrityError, roll the SAVEPOINT, then
+        # re-fetch the active row by the same key the constraint
+        # enforces and treat it as the existing-row update path.
+        # ``session.flush`` triggers the constraint check now
+        # (rather than at outer commit) so we can recover before
+        # any other side-effects (JobDescription upsert below)
+        # depend on ``job.id`` of a row that won't survive commit.
+        try:
+            with session.begin_nested():
+                session.flush()
+        except IntegrityError as exc:
+            constraint = getattr(getattr(exc, "orig", None), "diag", None)
+            constraint_name = (
+                getattr(constraint, "constraint_name", "") if constraint else ""
+            )
+            raw_msg = str(exc).lower()
+            if (
+                "uq_jobs_active_company_title" in (constraint_name or "")
+                or "uq_jobs_active_company_title" in raw_msg
+            ):
+                # Re-find the active survivor that beat us to the
+                # insert and update IT instead. Same lookup shape
+                # the F88 fallback uses so we land on the canonical
+                # row.
+                session.expunge(job)
+                survivor = session.execute(
+                    select(Job).where(
+                        Job.company_id == company.id,
+                        func.lower(func.trim(Job.title)) == title.strip().lower(),
+                        Job.status.in_(("new", "under_review", "accepted")),
+                    ).limit(1)
+                ).scalar_one_or_none()
+                if survivor is None:
+                    # Constraint fired but the row's gone — re-raise
+                    # so the outer SAVEPOINT in ``scan_all_platforms``
+                    # rolls this one job and the rest of the batch
+                    # survives.
+                    raise
+                # Apply the same metadata refresh the existing-row
+                # branch above does. Skip the relevance-score
+                # recompute (the survivor's score was already
+                # updated by whoever won the race; redundant work).
+                survivor.last_seen_at = now
+                survivor.url = raw_job.get("url", survivor.url)
+                survivor.location_raw = location_raw
+                survivor.remote_scope = remote_scope
+                survivor.raw_json = raw_job.get("raw_json", {})
+                job_id_for_desc = survivor.id
+                action = "updated"
+            else:
+                raise
+        else:
+            job_id_for_desc = job.id
+            action = "new"
 
     # Regression finding 97: populate JobDescription from the upstream
     # raw_json payload. Before this hook the scan pipeline threw the
