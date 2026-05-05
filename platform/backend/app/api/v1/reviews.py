@@ -85,12 +85,41 @@ async def submit_review(
             result = await db.execute(select(Company).where(Company.id == job.company_id))
             company = result.scalar_one_or_none()
             if company:
+                # F320 (data correctness, race-safe): the lookup-then-
+                # insert pattern above is TOCTOU-vulnerable when 2
+                # reviewers concurrently accept jobs from the same
+                # company — both pass the SELECT, both add a
+                # PotentialClient with the same ``company_id``,
+                # ``UNIQUE(company_id)`` fires on commit, second
+                # commit gets IntegrityError → the F281 catch only
+                # matches ``uq_reviews_job_reviewer`` and re-raises
+                # as a 500.
+                #
+                # Wrap the PotentialClient insert in a SAVEPOINT and
+                # catch the constraint violation — if someone else
+                # won the race, just re-fetch the client they
+                # created and continue with that. ``company.is_target
+                # = True`` is idempotent so it's safe to set on both
+                # winning and losing paths. Nothing else in this
+                # branch cares about the just-created client beyond
+                # marking the company as target, so the recovery is
+                # a clean continue.
                 company.is_target = True
-                client = PotentialClient(
-                    company_id=job.company_id,
-                    stage="new_lead",
-                )
-                db.add(client)
+                try:
+                    async with db.begin_nested():
+                        client = PotentialClient(
+                            company_id=job.company_id,
+                            stage="new_lead",
+                        )
+                        db.add(client)
+                except IntegrityError:
+                    # Lost the race; re-fetch the winner.
+                    result = await db.execute(
+                        select(PotentialClient).where(
+                            PotentialClient.company_id == job.company_id
+                        )
+                    )
+                    client = result.scalar_one_or_none()
         # Regression finding 192: deliberately NO `accepted_jobs_count += 1`
         # here. The column was incremented on every accept event but
         # never decremented on reject/flip, so it drifted from reality
