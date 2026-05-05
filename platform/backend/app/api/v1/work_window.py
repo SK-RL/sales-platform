@@ -22,6 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_role
@@ -108,7 +109,33 @@ async def create_my_extension_request(
         status="pending",
     )
     db.add(req)
-    await db.commit()
+    # F324 (race-safe): the lookup-then-insert above is TOCTOU-
+    # vulnerable to concurrent POSTs from the same user (double-
+    # click on a slow connection, two browser tabs). The partial
+    # UNIQUE ``uq_work_time_pending_per_user`` (migration
+    # ``n0o1p2q3r4s5``) closes the race at the DB layer; here we
+    # translate the constraint violation into the same 409 the
+    # handler check produces so the user-visible outcome is
+    # identical regardless of timing. Other IntegrityErrors
+    # (FK to deleted user, etc.) propagate as 500 so genuinely-
+    # different bugs aren't hidden.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        constraint = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = (
+            getattr(constraint, "constraint_name", "") if constraint else ""
+        )
+        if (
+            "uq_work_time_pending_per_user" in (constraint_name or "")
+            or "uq_work_time_pending_per_user" in str(exc).lower()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="You already have a pending extension request.",
+            )
+        raise
     await db.refresh(req)
     return _serialize_request(req, user)
 
