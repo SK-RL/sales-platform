@@ -207,11 +207,21 @@ async def list_reviews(
     # that's what callers are filtering against.
     decision: Literal["accepted", "rejected", "skipped"] | None = None,
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
+    # F319 (closes F108 query-param drift): accept BOTH legacy
+    # ``per_page`` and canonical ``page_size``. ``per_page`` is
+    # honoured when explicitly supplied (back-compat — existing
+    # clients keep working). New callers should use ``page_size``
+    # to match every other paginated endpoint in the API.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(Review).options(joinedload(Review.reviewer))
+
+    # F319: legacy ``per_page`` wins when explicitly supplied;
+    # otherwise we use the canonical ``page_size``.
+    per_page = per_page if per_page is not None else page_size
 
     if job_id:
         query = query.where(Review.job_id == job_id)

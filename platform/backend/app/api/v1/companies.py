@@ -274,10 +274,14 @@ async def list_companies(
     sort_by: CompanySortBy = "name",
     sort_dir: CompanySortDir = "desc",
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
+    # F319 (closes F108): canonical ``page_size`` + legacy ``per_page``.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    per_page = per_page if per_page is not None else page_size
+
     # Build subqueries for filters
     contact_sub = (
         select(CompanyContact.company_id)
@@ -532,10 +536,14 @@ async def company_jobs(
     company_id: UUID,
     status: str | None = None,
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
+    # F319 (closes F108): canonical ``page_size`` + legacy ``per_page``.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    per_page = per_page if per_page is not None else page_size
+
     # Verify company exists
     company_result = await db.execute(select(Company).where(Company.id == company_id))
     if not company_result.scalar_one_or_none():
