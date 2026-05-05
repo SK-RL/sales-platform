@@ -1154,8 +1154,50 @@ async def draft_contact_email(
                     body = "\n".join(lines[i + 1:]).strip()
                     break
         return {"subject": subject, "body": body, "generated_by": "claude"}
-    except Exception:
-        return {"subject": template_subject, "body": template_body, "generated_by": "template"}
+    except Exception as exc:
+        # F329 regression fix: pre-fix, ANY Anthropic-side failure
+        # (rate-limit 429, timeout, content-block, transient
+        # 5xx) silently rolled back to the deterministic template
+        # response with ``generated_by: "template"``. The frontend
+        # rendered the template as if the AI had produced it, the
+        # user (admin composing recruitment outreach) believed
+        # they were sending a personalised AI-customised email,
+        # and the recipient got an obvious form letter — credibility
+        # and reply-rate damage with no operator signal.
+        #
+        # Now: still return 200 with the template body so the
+        # admin always has SOMETHING to send (UX continuity), but
+        # surface ``error: True`` + ``error_message`` so the
+        # frontend can render a clear "AI failed, this is the
+        # fallback template — edit before sending" notice. The
+        # ``generated_by: "template_fallback"`` discriminator is
+        # distinct from the no-key ``generated_by: "template"``
+        # path above so observability can tell "key not configured"
+        # apart from "key configured but call failed".
+        #
+        # We log the underlying exception type at WARNING level
+        # without leaking the API key or upstream stack — admin
+        # logs catch the failure class (anthropic.RateLimitError,
+        # anthropic.APITimeoutError, etc.) so they can tune limits
+        # or retry timing without exposing infra detail to the
+        # client.
+        import logging
+        logging.getLogger(__name__).warning(
+            "draft_contact_email AI call failed (%s); falling back "
+            "to template",
+            exc.__class__.__name__,
+        )
+        return {
+            "subject": template_subject,
+            "body": template_body,
+            "generated_by": "template_fallback",
+            "error": True,
+            "error_message": (
+                "AI personalisation is temporarily unavailable. The "
+                "fallback template below is generic — edit before "
+                "sending."
+            ),
+        }
 
 
 @router.post("/dedup-contacts")
