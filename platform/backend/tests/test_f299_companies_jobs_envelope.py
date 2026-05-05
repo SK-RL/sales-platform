@@ -74,8 +74,16 @@ def test_query_param_per_page_unchanged_for_back_compat():
     handler = src[handler_start:handler_end]
     sig_end = src.find("):\n", handler_start)
     sig = src[handler_start:sig_end]
-    assert "per_page: int = Query(" in sig, (
+    # F299 + F319 — back-compat means EITHER form is acceptable
+    # (the F319 dual-param shape ``per_page: int | None = Query(
+    # default=None, deprecated=True)`` still accepts ``?per_page=``
+    # from existing clients):
+    assert (
+        "per_page: int = Query(" in sig
+        or "per_page: int | None = Query(" in sig
+    ), (
         "F299 regression: ``per_page`` query param was renamed "
-        "or removed. Existing callers will get 422 on the missing "
-        "param."
+        "or removed entirely. Existing callers will get 422 on "
+        "the missing param. F319's dual-param shape is also "
+        "acceptable — back-compat is preserved either way."
     )

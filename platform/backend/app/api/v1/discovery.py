@@ -50,10 +50,16 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 @router.get("/runs")
 async def list_runs(
     page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
+    # F319 (closes F108 query-param drift): canonical ``page_size``
+    # alongside the legacy ``per_page``. Either one works; if both
+    # supplied, the legacy wins for back-compat.
+    per_page: int | None = Query(default=None, ge=1, le=100, deprecated=True),
+    page_size: int = Query(default=20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    per_page = per_page if per_page is not None else page_size
+
     query = select(DiscoveryRun)
 
     count_q = select(func.count()).select_from(query.subquery())
@@ -193,10 +199,14 @@ async def list_discovered_companies(
     status: str | None = None,
     run_id: UUID | None = None,
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
+    # F319 (closes F108): canonical ``page_size`` + legacy ``per_page``.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    per_page = per_page if per_page is not None else page_size
+
     query = select(DiscoveredCompany)
 
     if status:

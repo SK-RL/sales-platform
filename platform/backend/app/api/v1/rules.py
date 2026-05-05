@@ -38,10 +38,14 @@ async def list_rules(
     cluster: str | None = None,
     is_active: bool | None = None,
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
+    # F319 (closes F108): canonical ``page_size`` + legacy ``per_page``.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    per_page = per_page if per_page is not None else page_size
+
     query = select(RoleRule)
 
     if cluster:

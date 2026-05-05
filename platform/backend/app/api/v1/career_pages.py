@@ -115,10 +115,18 @@ async def list_career_pages(
     # discovery.py:49-55 per F108). A shared `<Pagination>`
     # component was rendering 0/0 on this list because it only
     # understood the canonical keys.
-    per_page: int = Query(50, ge=1, le=200),
+    # F319 (closes F108): legacy ``per_page`` query param stays
+    # alongside the canonical ``page_size``. Either one works;
+    # if both are supplied the legacy ``per_page`` wins for back-
+    # compat. New callers should send ``page_size`` so the param
+    # name matches what every other paginated endpoint uses.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    per_page = per_page if per_page is not None else page_size
+
     query = select(CareerPageWatch)
     if is_active is not None:
         query = query.where(CareerPageWatch.is_active == is_active)
