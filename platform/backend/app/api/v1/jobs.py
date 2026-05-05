@@ -220,14 +220,17 @@ async def list_jobs(
     sort_by: str = "first_seen_at",
     sort_dir: JobSortDir = "desc",
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
-    page_size: int | None = Query(None, ge=1, le=200),
+    # F319 (closes F108 query-param drift): canonical ``page_size``
+    # (matches every other paginated endpoint) + legacy ``per_page``
+    # marked deprecated. Either name works on the wire; if both
+    # supplied, the legacy ``per_page`` wins for back-compat.
+    per_page: int | None = Query(default=None, ge=1, le=200, deprecated=True),
+    page_size: int = Query(default=50, ge=1, le=200),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Accept page_size as alias for per_page (frontend sends page_size)
-    if page_size is not None:
-        per_page = page_size
+    # F319: legacy wins when explicitly supplied; otherwise use canonical.
+    per_page = per_page if per_page is not None else page_size
 
     # Regression finding 33: the response schema aliases `Job.platform` as
     # `source_platform` and field-level aliases for `search` (`q`) and
