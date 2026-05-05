@@ -353,6 +353,25 @@ async def create_answer(
         source="manual",
     )
     db.add(entry)
+
+    # F322 (race-safe): the lookup-then-INSERT above is TOCTOU-
+    # vulnerable to concurrent POSTs from the same user (two
+    # browser tabs, double-click, etc.) — both pass the dup
+    # check, both reach INSERT, the second hits
+    # ``uq_answer_user_resume_key`` and 500s. Wrap in SAVEPOINT
+    # and surface the constraint violation as the same 409 the
+    # handler-check returns.
+    from sqlalchemy.exc import IntegrityError
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="An entry with this question already exists",
+        )
+
     await db.commit()
     await db.refresh(entry)
 
