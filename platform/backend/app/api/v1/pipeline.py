@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -186,7 +187,47 @@ async def create_stage(
 
     stage = PipelineStage(key=body.key, label=body.label, color=body.color, sort_order=body.sort_order)
     db.add(stage)
-    await db.commit()
+    # F327 (race-safe): the lookup-then-insert above is TOCTOU-
+    # vulnerable. Two concurrent admin POSTs with the same stage
+    # ``key`` both pass the lookup, both INSERT, and the second
+    # blows up with an unhandled IntegrityError on the
+    # ``pipeline_stages.key`` UNIQUE that escapes as a bare HTTP
+    # 500. PipelineStage.key is declared as ``mapped_column(
+    # String(50), unique=True, ...)`` — no explicit constraint
+    # name, so Postgres auto-generates ``pipeline_stages_key_key``
+    # per the ``<table>_<column>_key`` convention. We match on
+    # the substring ``pipeline_stages_key`` so a future migration
+    # that renames the constraint to ``uq_pipeline_stages_key`` or
+    # similar still triggers the translation. Other IntegrityErrors
+    # propagate as 500 so genuinely-different bugs aren't hidden.
+    #
+    # Same shape as F325 (profiles), F326 (auth register), F324
+    # (work-time pending), F323 (routine-targets), F322 (answer-
+    # book), F321 (applications), F320 (potential-clients), F316
+    # (jobs), F282 (contacts), F281 (reviews).
+    #
+    # Note: the existing-row reactivation path (lines above)
+    # does NOT need the same wrap because it's an UPDATE on a
+    # row already pinned by primary key; the only race window is
+    # in the INSERT branch.
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        diag = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = (
+            getattr(diag, "constraint_name", "") if diag else ""
+        ) or ""
+        err_text = str(exc).lower()
+        if (
+            "pipeline_stages_key" in constraint_name
+            or "pipeline_stages_key" in err_text
+        ):
+            # Re-raise as the same 400 the lookup-check produces so
+            # the admin UI shows a single consistent error regardless
+            # of timing.
+            raise HTTPException(400, "Stage key already exists")
+        raise
     await db.refresh(stage)
 
     await log_action(
