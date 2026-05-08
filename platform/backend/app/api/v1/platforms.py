@@ -67,17 +67,72 @@ async def list_platforms(
     db: AsyncSession = Depends(get_db),
 ):
     """Get overview of all monitored platforms with stats."""
-    # Count boards per platform
+    # Count boards per platform.
+    #
+    # F330 (closes F116 observability half): the Finding-7
+    # auto-deactivation path on ``CompanyATSBoard`` already
+    # increments ``consecutive_zero_scans`` on each clean-empty
+    # scan and flips ``is_active=False`` after the threshold
+    # (``deactivated_reason`` records "auto: N consecutive zero-
+    # job scans on <platform>/<slug>"). Pre-F330 the /platforms
+    # response only surfaced ``total_boards`` and ``active_boards``
+    # — admins couldn't tell "wellfound: 0 active boards" apart
+    # from "wellfound has no boards configured" or from "wellfound
+    # had 5 boards, all auto-deactivated as silently dark." Now
+    # we also emit:
+    #
+    #   * ``auto_deactivated_boards`` — count of inactive rows
+    #     where ``deactivated_reason`` starts with ``auto:``
+    #     (manual admin pauses are excluded so this is a clean
+    #     fetcher-health signal, not an admin-action signal).
+    #   * ``silently_degrading_boards`` — count of STILL-ACTIVE
+    #     boards whose ``consecutive_zero_scans > 0``. These
+    #     haven't crossed the auto-deactivation threshold yet but
+    #     are returning empty results; surfacing them gives admins
+    #     a yellow-flag before the deactivation event fires.
+    #
+    # Frontend uses these two counts for the per-platform card's
+    # health badge: green (0/0), yellow (any silently_degrading),
+    # red (any auto_deactivated). Same query, two extra COUNT
+    # aggregations — no schema migration, no extra round-trip.
     boards_q = (
         select(
             CompanyATSBoard.platform,
             func.count(CompanyATSBoard.id).label("total_boards"),
             func.sum(case((CompanyATSBoard.is_active == True, 1), else_=0)).label("active_boards"),
+            func.sum(
+                case(
+                    (
+                        (CompanyATSBoard.is_active == False)
+                        & (CompanyATSBoard.deactivated_reason.like("auto:%")),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("auto_deactivated_boards"),
+            func.sum(
+                case(
+                    (
+                        (CompanyATSBoard.is_active == True)
+                        & (CompanyATSBoard.consecutive_zero_scans > 0),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("silently_degrading_boards"),
         )
         .group_by(CompanyATSBoard.platform)
     )
     boards_result = await db.execute(boards_q)
-    boards_by_platform = {row.platform: {"total_boards": row.total_boards, "active_boards": int(row.active_boards or 0)} for row in boards_result}
+    boards_by_platform = {
+        row.platform: {
+            "total_boards": row.total_boards,
+            "active_boards": int(row.active_boards or 0),
+            "auto_deactivated_boards": int(row.auto_deactivated_boards or 0),
+            "silently_degrading_boards": int(row.silently_degrading_boards or 0),
+        }
+        for row in boards_result
+    }
 
     # Count jobs per platform
     jobs_q = (
@@ -172,7 +227,19 @@ async def list_platforms(
     all_platforms = set(boards_by_platform.keys()) | set(jobs_by_platform.keys())
     platforms = []
     for name in sorted(all_platforms):
-        boards = boards_by_platform.get(name, {"total_boards": 0, "active_boards": 0})
+        # F330: include the new health signals in the default-zero
+        # case so the response shape is identical regardless of
+        # whether a platform has any boards rows yet (newly seeded
+        # / fully purged platforms vs. live ones).
+        boards = boards_by_platform.get(
+            name,
+            {
+                "total_boards": 0,
+                "active_boards": 0,
+                "auto_deactivated_boards": 0,
+                "silently_degrading_boards": 0,
+            },
+        )
         jobs = jobs_by_platform.get(name, {"total_jobs": 0, "new_jobs": 0, "accepted_jobs": 0, "rejected_jobs": 0, "avg_score": 0})
         scans = scans_by_platform.get(name, {"last_scan": None, "total_errors": 0})
         last_run = last_run_by_platform.get(name)
