@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -20,6 +21,21 @@ from app.utils.ssrf import url_is_safe_for_egress
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+
+# F331 (closes F120): the documented set of webhook channels the
+# alert dispatcher knows how to format messages for. Pre-fix the
+# request schema accepted ``channel: str`` so a typo
+# (``slcak`` instead of ``slack``) silently persisted and the
+# dispatcher's ``if channel == "slack": ...`` cascade fell through
+# to the default branch — alert never fired, no error to the admin
+# at create time. Locking to a Literal 422s typos at parse time.
+# The ``"slack"`` and ``"discord"`` values are pre-allocated even
+# though only ``"google_chat"`` is currently implemented in the
+# dispatcher; that's the documented set the comment on the
+# AlertConfig model column declares (``# google_chat | slack |
+# email``) so future additions don't require a schema migration.
+AlertChannel = Literal["google_chat", "slack", "discord", "email"]
 
 
 # Regression finding 140 (CWE-918, severity:red): `webhook_url: str`
@@ -63,7 +79,10 @@ class AlertConfigCreate(BaseModel):
     # into the payload hoping a future endpoint revision picks it up.
     model_config = ConfigDict(extra="forbid")
 
-    channel: str = "google_chat"
+    # F331: was ``channel: str`` — a typo silently persisted and
+    # the dispatcher fell through to a default branch that never
+    # fired. Now Literal-validated so ``slcak`` 422s at parse time.
+    channel: AlertChannel = "google_chat"
     webhook_url: str
     min_relevance_score: int = 70
     role_clusters: list[str] | None = None
