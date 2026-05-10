@@ -731,6 +731,11 @@ def _scan_board(
         _AGGREGATOR_PLATFORMS = {
             "himalayas", "weworkremotely", "remoteok", "remotive",
             "hackernews", "yc_waas",
+            # F335 — Working Nomads RSS aggregator. Single board
+            # with slug='__all__'; per-item company resolution
+            # happens inside the fetcher (dc:creator first, then
+            # description-body regex, then "unknown").
+            "workingnomads",
         }
         is_aggregator = board.platform in _AGGREGATOR_PLATFORMS and board.slug == "__all__"
 

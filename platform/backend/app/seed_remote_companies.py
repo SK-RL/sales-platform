@@ -146,6 +146,14 @@ REMOTE_COMPANIES = [
     # (postings). Single synthetic board; per-job Company rows
     # created from `companySlug`.
     {"name": "YC Work at a Startup", "platform": "yc_waas", "slug": "__all__"},
+
+    # F335 — Working Nomads (workingnomads.com). Curated remote
+    # aggregator with strong infra/devops/SRE cohort. Public RSS
+    # feed at workingnomads.com/jobsrss; same single-synthetic-
+    # board pattern (slug='__all__') as WWR / RemoteOK / Remotive.
+    # Per-item company resolved by the fetcher (dc:creator → desc-
+    # body regex → "unknown" cascade).
+    {"name": "Working Nomads", "platform": "workingnomads", "slug": "__all__"},
 ]
 
 
