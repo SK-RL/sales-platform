@@ -44,6 +44,12 @@ _HTML_KEYS_BY_PLATFORM: dict[str, tuple[str, ...]] = {
     "himalayas": ("description",),
     "smartrecruiters": ("description",),  # fallback — real data lives in jobAd.sections
     "career_page": ("description", "description_html"),
+    # F332: WWR feeds RSS ``<description>`` content as HTML; the
+    # fetcher persists it under ``raw_json["description"]``.
+    # Listed explicitly so a future raw_json key rename in WWR
+    # doesn't silently fall through to the default fallback and
+    # quietly drop description coverage again.
+    "weworkremotely": ("description",),
 }
 
 # Keys that contain plain-text description. When present, we skip the HTML
