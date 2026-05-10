@@ -368,6 +368,18 @@ _SECURITY_NEGATIVE_TITLE_SIGNALS = frozenset([
     "partner development", "go-to-market", "go to market",
     "demand generation", "revenue operations",
     "pre-sales", "pre sales", "presales", "solutions consultant",
+    # F333 — same teaching / mentor / PM / frontend / risk-analyst
+    # additions as infra; security cluster has the same drift class
+    # ("Security Instructor", "Cybersecurity Mentor", "Security
+    # Project Manager", "Security Compliance Analyst — Frontend").
+    # Keep parity with _INFRA_NEGATIVE_TITLE_SIGNALS so future
+    # audits can diff the three lists.
+    "instructor", "mentor",
+    "curriculum developer", "training specialist",
+    "project manager", "program manager", "project engineer",
+    "frontend", "front-end", "front end developer",
+    "risk monitoring", "risk analyst", "risk operations",
+    "compliance analyst",
 ])
 
 # F269 — QA cluster previously had NO negative signal list (only
@@ -431,6 +443,42 @@ _INFRA_NEGATIVE_TITLE_SIGNALS = frozenset([
     # Design (F227) — "UX Designer - Infrastructure"
     "ux designer", "ui designer", "product designer",
     "visual designer", "graphic designer",
+    # F333 — Teaching / mentoring roles. The 2026-05-09 audit
+    # found Udacity "Cloud Technical Mentor — Independent
+    # Contractor" (score 80) and Correlation One "Lead Instructor:
+    # Data Center Technician" (score 73) sitting in the infra
+    # cluster. Their JDs are genuinely about Cloud / Data Center
+    # tech, but the actual day-to-day work is curriculum +
+    # mentorship — not the IC infra/DevOps work the relevance
+    # filter is supposed to surface.
+    "instructor", "mentor",
+    "curriculum developer", "training specialist",
+    # F333 — Project management. Audit hit two TensorWave roles:
+    # "Data Center Project Engineer" (score 71) and "Data Center
+    # Sr. Project Manager" (score 71). Both are construction /
+    # commissioning roles, not software infra. ``project manager``
+    # is broad enough to catch the variants ("Sr. Project Manager",
+    # "Technical Project Manager") and narrow enough that real
+    # engineering-management titles ("Engineering Manager,
+    # Infrastructure", "Director of Engineering") don't false-
+    # positive. Pairs with ``program manager`` for the same class
+    # of non-IC role.
+    "project manager", "program manager",
+    "project engineer",
+    # F333 — Frontend roles. Audit hit Marbis "Frontend DevOps
+    # Engineer" (score 70) and Dutchie "Staff Platform Engineer —
+    # Frontend" (score 57). The keyword scorer fired on
+    # ``platform engineer`` / ``devops`` but the actual scope is
+    # browser-side. Both forms (``frontend`` and ``front-end``)
+    # since job-board titles vary on the hyphen.
+    "frontend", "front-end", "front end developer",
+    # F333 — Risk / compliance analyst roles. Audit hit Bitfinex
+    # "Junior Risk Monitoring Analyst" (score 57) sitting in the
+    # infra cluster because the JD mentions "monitoring" and
+    # "remote". Genuine risk/compliance analyst work is finance
+    # / governance, not infra.
+    "risk monitoring", "risk analyst", "risk operations",
+    "compliance analyst",
 ])
 
 # Regression finding 227: short tokens that must match with word
