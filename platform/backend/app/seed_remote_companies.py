@@ -64,6 +64,40 @@ REMOTE_COMPANIES = [
     {"name": "Figma", "platform": "greenhouse", "slug": "figma"},
     {"name": "Notion", "platform": "greenhouse", "slug": "notion"},
 
+    # F338 — seed expansion (2026-05-09 audit). 16 high-volume
+    # cloud / infra / observability / security / AI-infra
+    # companies on Greenhouse — each verified live against
+    # ``boards-api.greenhouse.io/v1/boards/<slug>/jobs`` returning
+    # >0 active postings on probe day. Combined contribution
+    # ~5,000 new jobs into the relevance pool, heavily weighted
+    # toward the infra/devops/SRE/security cohort.
+    #
+    # If a slug ever drifts the F330 ``/platforms`` observability
+    # surface (auto_deactivated_boards / silently_degrading_boards
+    # counts) catches it within 5 scan cycles via the consecutive_
+    # zero_scans threshold.
+    # Note: Elastic / Grafana Labs / GitLab were already seeded
+    # earlier in this list before F338; not re-added here to keep
+    # the seed dedup-clean. They contribute the same job pool
+    # they were already contributing before this batch.
+    {"name": "Datadog", "platform": "greenhouse", "slug": "datadog"},
+    {"name": "Cloudflare", "platform": "greenhouse", "slug": "cloudflare"},
+    {"name": "New Relic", "platform": "greenhouse", "slug": "newrelic"},
+    {"name": "MongoDB", "platform": "greenhouse", "slug": "mongodb"},
+    {"name": "Cribl", "platform": "greenhouse", "slug": "cribl"},
+    {"name": "Honeycomb", "platform": "greenhouse", "slug": "honeycomb"},
+    {"name": "Okta", "platform": "greenhouse", "slug": "okta"},
+    {"name": "Tenable", "platform": "greenhouse", "slug": "tenableinc"},
+    {"name": "Orca Security", "platform": "greenhouse", "slug": "orcasecurity"},
+    {"name": "PagerDuty", "platform": "greenhouse", "slug": "pagerduty"},
+    {"name": "Postman", "platform": "greenhouse", "slug": "postman"},
+    {"name": "JFrog", "platform": "greenhouse", "slug": "jfrog"},
+    {"name": "Databricks", "platform": "greenhouse", "slug": "databricks"},
+    {"name": "Anthropic", "platform": "greenhouse", "slug": "anthropic"},
+    {"name": "Pure Storage", "platform": "greenhouse", "slug": "purestorage"},
+    {"name": "Rubrik", "platform": "greenhouse", "slug": "rubrik"},
+    {"name": "Stripe", "platform": "greenhouse", "slug": "stripe"},
+
     # Lever boards
     {"name": "Zapier", "platform": "lever", "slug": "zapier"},
     {"name": "DigitalOcean", "platform": "lever", "slug": "digitalocean"},
@@ -89,6 +123,19 @@ REMOTE_COMPANIES = [
     {"name": "Tinybird", "platform": "ashby", "slug": "tinybird"},
     {"name": "Axiom", "platform": "ashby", "slug": "axiom"},
     {"name": "Stainless", "platform": "ashby", "slug": "stainlessapi"},
+
+    # F338 — seed expansion (2026-05-09 audit). 6 high-value
+    # cloud / data / AI-infra companies on Ashby; each verified
+    # live against ``api.ashbyhq.com/posting-api/job-board/<slug>``
+    # returning >0 active postings on probe day. Combined
+    # contribution ~1,300 new jobs (Snowflake + OpenAI alone =
+    # ~1,000), heavily weighted toward platform/infra roles.
+    {"name": "OpenAI", "platform": "ashby", "slug": "openai"},
+    {"name": "Snowflake", "platform": "ashby", "slug": "snowflake"},
+    {"name": "Confluent", "platform": "ashby", "slug": "confluent"},
+    {"name": "Sentry", "platform": "ashby", "slug": "sentry"},
+    {"name": "Plaid", "platform": "ashby", "slug": "plaid"},
+    {"name": "Clerk", "platform": "ashby", "slug": "clerk"},
 
     # SmartRecruiters boards (slug = company identifier)
     {"name": "Visa", "platform": "smartrecruiters", "slug": "Visa"},
