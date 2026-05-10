@@ -1,13 +1,15 @@
-"""F335 — new Working Nomads RSS aggregator fetcher.
+"""F335 — new Working Nomads JSON aggregator fetcher.
 
 Working Nomads (https://www.workingnomads.com/) is a curated
 remote-jobs aggregator. The 2026-05-09 audit recommended adding
-it as the cheapest tier-1 win because:
+it as the cheapest tier-1 win for the global_remote pool.
 
-  * Public RSS at https://www.workingnomads.com/jobsrss (no auth)
-  * Strong infra / devops / SRE cohort
-  * Same shape as the WWR fetcher we just hardened in F332,
-    so the cost is mostly templating
+Endpoint: https://www.workingnomads.com/api/exposed_jobs/ —
+public JSON array (~30-50 active jobs), no auth, no pagination.
+Each row carries ``title``, ``company_name``, ``category_name``,
+``location``, ``tags``, ``description`` (HTML), ``url``,
+``pub_date`` (ISO-8601 with timezone, no RFC-822 parsing
+needed).
 
 Wire-up:
   1. New fetcher class at app/fetchers/workingnomads.py
@@ -19,17 +21,14 @@ Wire-up:
 
 Tests cover:
   * Fetcher class is importable + has the expected PLATFORM tag
-  * RSS-item normalisation: end-to-end with a synthetic <item>
-  * Company-name extraction cascade (dc:creator first, then
-    description-body regex, then 'unknown' fallback)
-  * pubDate normalisation reuses the shared
-    app.utils.rss.normalize_rss_pubdate (no per-fetcher RFC-822
-    parsing)
-  * Skip-empty: missing title or link → empty dict (skip), not
-    a half-formed row that breaks the upsert path
+  * Fetcher subclasses BaseFetcher (registry visibility)
   * Wire-up: PlatformFilter Literal, _AGGREGATOR_PLATFORMS,
     _HTML_KEYS_BY_PLATFORM, seed list all updated together
-    (atomic addition)
+  * JSON-row normalisation: end-to-end with a synthetic dict
+  * URL → external_id derivation: extracts the numeric id from
+    /job/go/<id>/ paths so re-scans are idempotent
+  * Skip-empty: missing title or url → empty dict (skip), not
+    a half-formed row that breaks the upsert path
   * extract_description round-trip: synthesised raw_json shape
     actually produces a non-empty (html, text) tuple
 """
@@ -37,7 +36,6 @@ from __future__ import annotations
 
 import os
 import pathlib
-from xml.etree import ElementTree as ET
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -68,27 +66,22 @@ def test_fetcher_module_exists_and_class_importable():
 
 def test_fetcher_subclasses_basefetcher():
     """Required for the registry / scan_task to discover and
-    instantiate this fetcher correctly. Pre-F335 only fetchers
-    extending BaseFetcher were picked up by the scanner.
-    """
+    instantiate this fetcher correctly."""
     from app.fetchers.base import BaseFetcher
     from app.fetchers.workingnomads import WorkingNomadsFetcher
     assert issubclass(WorkingNomadsFetcher, BaseFetcher)
 
 
-# ────────────────── pubDate normalisation reuse ──────────────────
-
-
-def test_fetcher_uses_shared_pubdate_helper():
-    """F335 introduced ``app/utils/rss.py``; the WN fetcher must
-    import from it instead of re-implementing parsedate_to_datetime
-    locally (so a fix-once-everywhere change is possible).
+def test_fetcher_uses_documented_endpoint():
+    """The endpoint URL should be the documented JSON one
+    (``/api/exposed_jobs/``), not the legacy RSS form which now
+    redirects to the SPA.
     """
     src = _read("app/fetchers/workingnomads.py")
-    assert "from app.utils.rss import normalize_rss_pubdate" in src, (
-        "F335 regression: WN fetcher no longer uses the shared "
-        "RSS pubDate helper. Risk of per-fetcher drift on the same "
-        "RFC-822 quirk WWR tripped over."
+    assert "/api/exposed_jobs/" in src, (
+        "F335 regression: WN fetcher endpoint reverted to a "
+        "form that no longer returns JSON. The /jobsrss path "
+        "now redirects to the HTML SPA — verified 2026-05-09."
     )
 
 
@@ -107,9 +100,6 @@ def test_workingnomads_in_platform_filter_literal():
 
 def test_workingnomads_in_aggregator_platforms_set():
     src = _read("app/workers/tasks/scan_task.py")
-    # The set is defined as a constant in the scanner. Source-
-    # level grep is enough — the runtime build of the set is
-    # straight-line code.
     assert '"workingnomads"' in src, (
         "F335 regression: ``workingnomads`` removed from "
         "_AGGREGATOR_PLATFORMS. The scanner won't apply per-job "
@@ -136,115 +126,106 @@ def test_workingnomads_seed_entry_present():
         "seed_remote_companies.py — fresh deploys get a "
         "registered fetcher with no board to scan."
     )
-    # And confirm slug='__all__' (aggregator pattern, not a per-
-    # company slug).
     assert '"slug": "__all__"' in src
 
 
 # ────────────────── normalisation behaviour ──────────────────
 
 
-_SAMPLE_RSS_ITEM = """
-<item xmlns:dc="http://purl.org/dc/elements/1.1/">
-  <title>Senior DevOps Engineer (Kubernetes)</title>
-  <link>https://www.workingnomads.com/jobs/senior-devops-engineer-acme-corp</link>
-  <guid>https://www.workingnomads.com/jobs/senior-devops-engineer-acme-corp</guid>
-  <description><![CDATA[<p><strong>ACME Corp</strong> is hiring a Senior DevOps Engineer.</p><ul><li>Terraform</li><li>AWS / GCP</li><li>Kubernetes at scale</li></ul>]]></description>
-  <category>Worldwide</category>
-  <category>DevOps</category>
-  <category>Full-Time</category>
-  <pubDate>Fri, 09 May 2026 18:30:00 +0000</pubDate>
-  <dc:creator>ACME Corp</dc:creator>
-</item>
-"""
+_SAMPLE_ROW = {
+    "title": "Senior DevOps Engineer (Kubernetes)",
+    "company_name": "ACME Corp",
+    "category_name": "DevOps",
+    "location": "Worldwide",
+    "tags": "kubernetes,terraform,aws,gcp",
+    "description": (
+        "<p><strong>ACME Corp</strong> is hiring a Senior DevOps "
+        "Engineer.</p><ul><li>Terraform</li><li>Kubernetes at scale</li></ul>"
+    ),
+    "url": "https://www.workingnomads.com/job/go/1588652/",
+    "pub_date": "2026-05-08T15:54:48-04:00",
+}
 
 
-def test_normalize_rss_full_round_trip_uses_dc_creator():
-    """Happy path: ``<dc:creator>`` present → company_name is
-    populated, posted_at is ISO-8601, raw_json carries the
-    description and the category list.
+def test_normalize_full_round_trip():
+    """Happy path: dict in, canonical fetcher output dict out.
+    pub_date passes through unchanged (already ISO-8601),
+    description ends up under raw_json so extract_description
+    finds it.
     """
     from app.fetchers.workingnomads import WorkingNomadsFetcher
-    item = ET.fromstring(_SAMPLE_RSS_ITEM)
-    out = WorkingNomadsFetcher()._normalize_rss(item)
+    out = WorkingNomadsFetcher()._normalize(dict(_SAMPLE_ROW))
 
-    assert out, "WN fetcher rejected a well-formed RSS item"
+    assert out, "WN fetcher rejected a well-formed row"
     assert out["platform"] == "workingnomads"
     assert out["title"] == "Senior DevOps Engineer (Kubernetes)"
     assert out["company_name"] == "ACME Corp"
     assert out["company_slug"] == "acme-corp"
     assert out["url"].startswith("https://www.workingnomads.com/")
 
-    # ISO-8601 with timezone offset.
-    assert "T" in out["posted_at"]
-    assert out["posted_at"].endswith("+00:00") or "+" in out["posted_at"][10:]
+    # pub_date passes through unchanged.
+    assert out["posted_at"] == "2026-05-08T15:54:48-04:00"
 
-    # JD body persisted under raw_json["description"] for the
-    # extract_description pipeline.
+    # JD body persisted under raw_json["description"].
     desc = out["raw_json"]["description"]
     assert "ACME Corp" in desc
     assert "Kubernetes" in desc
 
-    # Category list preserved (department picks the first; full
-    # list available for downstream).
-    assert out["raw_json"]["categories"] == ["Worldwide", "DevOps", "Full-Time"]
-    assert out["department"] == "Worldwide"
-    # Worldwide signal upgrades remote_scope to "worldwide".
+    # Tag list normalised (split on commas, stripped).
+    assert out["raw_json"]["tag_list"] == [
+        "kubernetes", "terraform", "aws", "gcp"
+    ]
+
+    # Worldwide signal upgrades remote_scope.
     assert out["remote_scope"] == "worldwide"
 
+    # Department comes from category_name.
+    assert out["department"] == "DevOps"
 
-def test_normalize_rss_company_extraction_falls_back_to_description():
-    """When ``<dc:creator>`` is missing, the fetcher should pull
-    the company from the description-body opener
-    ("X is hiring..." / "X is looking for...").
+
+def test_normalize_external_id_extracted_from_url():
+    """The numeric id at the end of /job/go/<id>/ becomes the
+    external_id suffix so re-scans are idempotent.
     """
     from app.fetchers.workingnomads import WorkingNomadsFetcher
-    no_creator_xml = """
-    <item>
-      <title>Senior DevOps Engineer</title>
-      <link>https://www.workingnomads.com/jobs/x</link>
-      <guid>https://www.workingnomads.com/jobs/x</guid>
-      <description><![CDATA[<strong>BetaCloud</strong> is hiring a Senior DevOps Engineer.]]></description>
-      <pubDate>Fri, 09 May 2026 18:30:00 +0000</pubDate>
-    </item>
-    """
-    item = ET.fromstring(no_creator_xml)
-    out = WorkingNomadsFetcher()._normalize_rss(item)
-    assert out["company_name"] == "BetaCloud"
+    out = WorkingNomadsFetcher()._normalize(dict(_SAMPLE_ROW))
+    assert out["external_id"] == "workingnomads-1588652"
 
 
-def test_normalize_rss_company_falls_back_to_unknown():
-    """Defense-in-depth: if neither ``<dc:creator>`` nor a
-    description-body match fires, ``company_slug`` still gets a
-    usable string (``"unknown"``) so the upsert path doesn't
-    crash on an empty company key.
+def test_normalize_external_id_falls_back_to_url_hash():
+    """If the URL shape ever changes (no trailing numeric id),
+    we hash the URL so the row still gets a deterministic id.
     """
     from app.fetchers.workingnomads import WorkingNomadsFetcher
-    nothing_xml = """
-    <item>
-      <title>Some role</title>
-      <link>https://www.workingnomads.com/jobs/y</link>
-      <guid>https://www.workingnomads.com/jobs/y</guid>
-      <description><![CDATA[An anonymous job description with nothing useful.]]></description>
-      <pubDate>Fri, 09 May 2026 18:30:00 +0000</pubDate>
-    </item>
+    row = dict(_SAMPLE_ROW)
+    row["url"] = "https://workingnomads.com/some-other-shape"
+    out = WorkingNomadsFetcher()._normalize(row)
+    # Must still produce a stable, prefixed external_id.
+    assert out["external_id"].startswith("workingnomads-")
+    # And it shouldn't be the empty fallback.
+    assert len(out["external_id"]) > len("workingnomads-")
+
+
+def test_normalize_company_falls_back_to_unknown():
+    """Defense-in-depth: if ``company_name`` is missing,
+    ``company_slug`` still gets a usable string (``"unknown"``)
+    so the upsert path doesn't crash on an empty company key.
     """
-    item = ET.fromstring(nothing_xml)
-    out = WorkingNomadsFetcher()._normalize_rss(item)
+    from app.fetchers.workingnomads import WorkingNomadsFetcher
+    row = dict(_SAMPLE_ROW)
+    row["company_name"] = ""
+    out = WorkingNomadsFetcher()._normalize(row)
     assert out["company_slug"] == "unknown"
-    # company_name is the empty string in this case — that's the
-    # signal the upsert path uses to NOT bind to a real Company
-    # row.
     assert out["company_name"] == ""
 
 
-def test_normalize_rss_skips_items_missing_title_or_link():
+def test_normalize_skips_rows_missing_title_or_url():
     from app.fetchers.workingnomads import WorkingNomadsFetcher
-    no_title = ET.fromstring("<item><link>https://x</link></item>")
-    no_link = ET.fromstring("<item><title>X</title></item>")
     f = WorkingNomadsFetcher()
-    assert f._normalize_rss(no_title) == {}
-    assert f._normalize_rss(no_link) == {}
+    no_title = dict(_SAMPLE_ROW); no_title["title"] = ""
+    no_url = dict(_SAMPLE_ROW); no_url["url"] = ""
+    assert f._normalize(no_title) == {}
+    assert f._normalize(no_url) == {}
 
 
 def test_extract_description_picks_up_workingnomads_key():
@@ -253,10 +234,10 @@ def test_extract_description_picks_up_workingnomads_key():
     """
     from app.utils.job_description import extract_description
     raw_json = {
-        "guid": "https://www.workingnomads.com/jobs/x",
+        "url": "https://www.workingnomads.com/job/go/1588652/",
         "description": "<p>Scale our Kubernetes platform.</p>",
-        "categories": ["Worldwide", "DevOps"],
-        "pubDate": "2026-05-09T18:30:00+00:00",
+        "tags": "kubernetes,terraform",
+        "pub_date": "2026-05-08T15:54:48-04:00",
     }
     html, text = extract_description("workingnomads", raw_json)
     assert html, "F335 regression: WN description not picked up"
