@@ -47,6 +47,22 @@ REMOTE_COMPANIES = [
     {"name": "SentinelOne", "platform": "greenhouse", "slug": "sentinelone"},
     {"name": "1Password", "platform": "greenhouse", "slug": "1password"},
     {"name": "Bitwarden", "platform": "greenhouse", "slug": "bitwarden"},
+    # F336 — Figma + Notion are seeded on Wellfound elsewhere in
+    # this file but Wellfound's GraphQL endpoint is Cloudflare /
+    # DataDome blocked from datacenter IPs (see
+    # app/fetchers/wellfound.py docstring), so those rows produce
+    # zero jobs. Both companies actually post to Greenhouse — adding
+    # the working ATS slugs here so the boards start producing
+    # immediately. The dead Wellfound rows will auto-deactivate
+    # after 5 consecutive zero scans (Finding 7 + F330 surface).
+    #
+    # Slugs verified via the public Greenhouse pattern
+    # ``boards.greenhouse.io/<slug>``. If a slug ever drifts
+    # (Notion has migrated ATS at least once), the F330 dark-
+    # platform observability surface will catch it within a couple
+    # of scan cycles.
+    {"name": "Figma", "platform": "greenhouse", "slug": "figma"},
+    {"name": "Notion", "platform": "greenhouse", "slug": "notion"},
 
     # Lever boards
     {"name": "Zapier", "platform": "lever", "slug": "zapier"},
