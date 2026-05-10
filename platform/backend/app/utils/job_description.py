@@ -50,6 +50,10 @@ _HTML_KEYS_BY_PLATFORM: dict[str, tuple[str, ...]] = {
     # doesn't silently fall through to the default fallback and
     # quietly drop description coverage again.
     "weworkremotely": ("description",),
+    # F335 — Working Nomads. Same RSS shape as WWR; description
+    # body persisted under ``raw_json["description"]``. Listed
+    # explicitly for the same defense-in-depth reason as WWR.
+    "workingnomads": ("description",),
 }
 
 # Keys that contain plain-text description. When present, we skip the HTML

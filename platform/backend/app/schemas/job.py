@@ -82,6 +82,11 @@ PlatformFilter = Literal[
     # aggregator joining yc-oss batch dumps with WaaS job search.
     # See app/fetchers/yc_waas.py.
     "yc_waas",
+    # F335 — Working Nomads (workingnomads.com) RSS aggregator.
+    # Curated remote-jobs feed with strong infra/devops/SRE
+    # cohort. Same shape as WWR/RemoteOK: single board with
+    # slug='__all__'. See app/fetchers/workingnomads.py.
+    "workingnomads",
 ]
 
 
