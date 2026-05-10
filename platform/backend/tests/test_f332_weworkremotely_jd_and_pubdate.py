@@ -68,10 +68,24 @@ def _read_jd_helper() -> str:
 
 
 def test_fetcher_imports_parsedate_to_datetime():
+    """The pubDate normaliser must be importable in the fetcher.
+
+    F335 moved the implementation into ``app/utils/rss.py`` and
+    re-exported it as ``_normalize_pubdate`` for the test surface
+    here. Either form (inline import of ``parsedate_to_datetime``
+    OR the shared-util re-export) is acceptable as long as the
+    helper still fires.
+    """
     src = _read_fetcher()
-    assert "from email.utils import parsedate_to_datetime" in src, (
-        "F332 regression: parsedate_to_datetime import removed — "
-        "RSS pubDate normalisation can no longer fire."
+    inline = "from email.utils import parsedate_to_datetime" in src
+    shared = (
+        "from app.utils.rss import normalize_rss_pubdate" in src
+        and "_normalize_pubdate" in src
+    )
+    assert inline or shared, (
+        "F332 regression: pubDate normalisation no longer wired up "
+        "(neither the inline parsedate_to_datetime import nor the "
+        "shared rss.normalize_rss_pubdate re-export found)."
     )
 
 

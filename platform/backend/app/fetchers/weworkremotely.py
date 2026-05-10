@@ -7,47 +7,23 @@ Returns XML RSS with job items. Title format: "Company: Job Title".
 
 import logging
 import hashlib
-from email.utils import parsedate_to_datetime
 from typing import Any
 from xml.etree import ElementTree as ET
 
 import httpx
 
 from app.fetchers.base import BaseFetcher
+# F335: pubDate normaliser was inlined in F332; centralised so
+# new RSS-based fetchers (Working Nomads, planned Remote.co etc.)
+# don't re-implement and re-bug it. Re-exported under the original
+# name so the test surface in test_f332_weworkremotely_jd_and_pubdate.py
+# (``from app.fetchers.weworkremotely import _normalize_pubdate``)
+# keeps working without churn.
+from app.utils.rss import normalize_rss_pubdate as _normalize_pubdate
 
 logger = logging.getLogger(__name__)
 
 RSS_URL = "https://weworkremotely.com/remote-jobs.rss"
-
-
-def _normalize_pubdate(raw: str) -> str:
-    """Convert RSS RFC-822 pubDate to ISO-8601.
-
-    F332 regression fix: ``pubDate`` comes through as
-    ``"Fri, 09 May 2026 18:30:00 +0000"`` (RFC 822 / 2822). The DB
-    column is ``DateTime(timezone=True)`` and the upsert path
-    expects ISO-8601 — pre-fix, the raw RFC-822 string was passed
-    straight through and silently dropped at the SQLAlchemy
-    coercion boundary, so every WWR row ended up with
-    ``posted_at IS NULL``. Audit on prod showed 0/50 sampled WWR
-    jobs had ``posted_at`` populated even though every RSS item
-    carries a pubDate. Returns ``""`` on parse failure (matching
-    the other fetchers' "give up rather than guess" pattern).
-    """
-    s = (raw or "").strip()
-    if not s:
-        return ""
-    try:
-        dt = parsedate_to_datetime(s)
-        # parsedate_to_datetime can return a naive datetime if the
-        # input lacks a timezone — that's untestable for "is this
-        # really UTC?", so we drop these rather than fabricate a
-        # zone. All real WWR pubDates carry +0000.
-        if dt is None or dt.tzinfo is None:
-            return ""
-        return dt.isoformat()
-    except (TypeError, ValueError):
-        return ""
 
 
 class WeWorkRemotelyFetcher(BaseFetcher):
