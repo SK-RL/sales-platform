@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Filter, CheckSquare, X, Send, ArrowUp, ArrowDown, ArrowUpDown, Link as LinkIcon, Star, ChevronDown, ChevronUp } from "lucide-react";
 import { Card } from "@/components/Card";
@@ -84,7 +84,15 @@ function serializeSorts(sorts: SortKey[] | undefined): string {
 // the stickiness ask), then to defaults. URL params win because
 // shareable links and Sidebar deep-links should override stickiness;
 // stickiness is a "no-explicit-state" convenience.
-function buildInitialFilters(searchParams: URLSearchParams): JobFilters {
+// F339: ``mergeStored`` controls whether un-set URL keys fall back
+// to localStorage values. ONLY enable on INITIAL MOUNT (and on
+// sidebar-driven full re-mounts). For subsequent URL changes
+// triggered by the user clearing a filter via the UI, pass
+// ``mergeStored=false`` so the cleared key stays cleared.
+function buildInitialFilters(
+  searchParams: URLSearchParams,
+  mergeStored: boolean = true
+): JobFilters {
   const parseIsClassified = (raw: string | null): boolean | undefined => {
     if (raw === "true") return true;
     if (raw === "false") return false;
@@ -105,10 +113,42 @@ function buildInitialFilters(searchParams: URLSearchParams): JobFilters {
     searchParams.has("sorts") ||
     searchParams.has("sort_dir");
 
+  // F339 regression fix (filter stickiness):
+  //
+  // Pre-fix this branch RESET every filter axis the URL didn't
+  // explicitly carry. That meant the Sidebar's hardcoded
+  // ``/jobs?role_cluster=relevant`` link silently dropped a user's
+  // saved geography / platform / search / sorts on click — they had
+  // to re-apply them every time they bounced through the sidebar.
+  // User report 2026-05-09: "issue of stickiness of filter in the
+  // relevant jobs".
+  //
+  // The fix: URL keys still WIN where present (so a shareable link
+  // ``/jobs?geography=usa_only`` overrides any saved geography),
+  // but un-set URL keys fall through to localStorage so the user's
+  // other filters survive the round-trip. The
+  // ``urlHasFilters=true`` branch is the right home for this merge
+  // — it's the path that fires on sidebar-link clicks.
+  //
+  // Page is NOT pulled from localStorage (matches the existing
+  // no-URL-filters branch policy: landing on page 7 a day later
+  // would surprise the user).
+  let storedFilters: Partial<JobFilters> = {};
+  if (mergeStored) {
+    try {
+      const raw = window.localStorage.getItem(FILTERS_STORAGE_KEY);
+      if (raw) {
+        storedFilters = JSON.parse(raw) as Partial<JobFilters>;
+      }
+    } catch {
+      // Corrupt entry — proceed with empty stored.
+    }
+  }
+
   if (urlHasFilters) {
     // Multi-sort URL key takes precedence; fall back to legacy
     // sort_by + sort_dir for shareable links generated before
-    // multi-sort shipped.
+    // multi-sort shipped; final fallback is localStorage sorts.
     const sortsParam = searchParams.get("sorts");
     const legacySortBy = searchParams.get("sort_by");
     const legacySortDir = searchParams.get("sort_dir");
@@ -118,55 +158,81 @@ function buildInitialFilters(searchParams: URLSearchParams): JobFilters {
     } else if (legacySortBy) {
       const dir = (legacySortDir === "asc" ? "asc" : "desc") as "asc" | "desc";
       sorts = [{ key: legacySortBy, dir }];
+    } else if (
+      storedFilters.sorts &&
+      Array.isArray(storedFilters.sorts) &&
+      storedFilters.sorts.length > 0
+    ) {
+      sorts = storedFilters.sorts;
     } else {
       sorts = [{ key: "relevance_score", dir: "desc" }];
     }
+    // For each filter axis: URL value wins when present, otherwise
+    // fall back to the stored value. ``searchParams.get(...)`` returns
+    // ``null`` for absent keys (which we treat as "fall through to
+    // stored"), and empty string for explicitly-cleared params (which
+    // we also treat as "fall through to stored" — the user clearing
+    // a single param shouldn't force the others to defaults).
+    const urlOrStored = (key: keyof JobFilters, fallback: string = ""): string => {
+      const urlValue = searchParams.get(key as string);
+      if (urlValue !== null && urlValue !== "") return urlValue;
+      const stored = (storedFilters as any)[key];
+      return typeof stored === "string" && stored ? stored : fallback;
+    };
+
+    // ``is_classified`` is tri-state (true | false | undefined) so it
+    // needs its own URL-vs-stored merge.
+    const urlClassified = parseIsClassified(searchParams.get("is_classified"));
+    const isClassified =
+      urlClassified !== undefined
+        ? urlClassified
+        : storedFilters.is_classified;
+
     return {
-      search: searchParams.get("search") || "",
-      status: (searchParams.get("status") || "") as JobFilters["status"],
-      platform: searchParams.get("platform") || "",
-      geography: searchParams.get("geography") || "",
+      search: urlOrStored("search"),
+      status: urlOrStored("status") as JobFilters["status"],
+      platform: urlOrStored("platform"),
+      geography: urlOrStored("geography"),
       // F260: ``role_cluster=any`` is the explicit "All Jobs" sentinel
       // from the Sidebar. We keep it on the filter object so the page
       // header and active-link checks can distinguish "user navigated
       // to All Jobs" from "user landed on /jobs with localStorage
       // restored." Backend treats ``any`` as no-filter (jobs.py).
-      role_cluster: searchParams.get("role_cluster") || "",
-      is_classified: parseIsClassified(searchParams.get("is_classified")),
+      role_cluster: urlOrStored("role_cluster"),
+      is_classified: isClassified,
       sorts,
       page: Number(searchParams.get("page")) || 1,
       page_size: 25,
     };
   }
 
-  // No URL filters → try localStorage. We deliberately don't restore
-  // `page` from localStorage — restoring filters AND landing on page
-  // 7 would surprise a user who came back the next day expecting to
-  // see the top of the list. Page is always 1 on fresh visits.
-  try {
-    const raw = window.localStorage.getItem(FILTERS_STORAGE_KEY);
-    if (raw) {
-      const stored = JSON.parse(raw) as Partial<JobFilters>;
-      const sorts = stored.sorts && Array.isArray(stored.sorts) && stored.sorts.length > 0
-        ? stored.sorts
-        : [{ key: "relevance_score", dir: "desc" as const }];
-      return {
-        search: stored.search || "",
-        status: (stored.status || "") as JobFilters["status"],
-        platform: stored.platform || "",
-        geography: stored.geography || "",
-        role_cluster: stored.role_cluster || "",
-        is_classified: stored.is_classified,
-        sorts,
-        page: 1,
-        page_size: 25,
-      };
-    }
-  } catch {
-    // Corrupt localStorage entry — fall through to defaults. Don't
-    // bubble the parse error; this is a soft-restore that should
-    // never block the page from rendering.
+  // No URL filters → restore from localStorage (when allowed).
+  // We deliberately don't restore `page` from localStorage —
+  // landing on page 7 a day later would surprise the user.
+  if (mergeStored && storedFilters && Object.keys(storedFilters).length > 0) {
+    const sorts = storedFilters.sorts &&
+      Array.isArray(storedFilters.sorts) &&
+      storedFilters.sorts.length > 0
+      ? storedFilters.sorts
+      : [{ key: "relevance_score", dir: "desc" as const }];
+    return {
+      search: storedFilters.search || "",
+      status: (storedFilters.status || "") as JobFilters["status"],
+      platform: storedFilters.platform || "",
+      geography: storedFilters.geography || "",
+      role_cluster: storedFilters.role_cluster || "",
+      is_classified: storedFilters.is_classified,
+      sorts,
+      page: 1,
+      page_size: 25,
+    };
   }
+  // mergeStored=false and no URL filters, OR no stored entry
+  // present → fall through to defaults below. The
+  // ``mergeStored=false`` path fires when the URL→state effect
+  // re-runs after the user explicitly cleared the last filter via
+  // the UI — we DON'T want to silently re-apply the value they
+  // just cleared.
 
   return {
     search: "",
@@ -253,8 +319,21 @@ const GEOGRAPHY_OPTIONS = [
 
 export function JobsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // F339: helper that navigates to a job detail and remembers the
+  // current /jobs URL (with all filters) under ``location.state.from``.
+  // ``JobDetailPage.handleBackToJobs`` consumes this so the back
+  // button restores the exact filter set the user was looking at,
+  // even after a refresh of the detail page (browser history alone
+  // would lose that state).
+  const goToJob = (jobId: string) => {
+    navigate(`/jobs/${jobId}`, {
+      state: { from: location.pathname + location.search },
+    });
+  };
   // Regression finding 34: ref guards against infinite URL ↔ state loops
   const syncingFromUrl = useRef(false);
 
@@ -285,7 +364,13 @@ export function JobsPage() {
       searchParams.has("page");
     if (!urlHasFilters) return;
     syncingFromUrl.current = true;
-    setFilters(buildInitialFilters(searchParams));
+    // F339: after the initial mount we treat the URL as the source
+    // of truth. ``mergeStored=false`` so when the user clears a
+    // filter via the UI (which triggers a state→URL write, which
+    // re-fires this URL→state effect), the cleared value stays
+    // cleared instead of being silently re-applied from
+    // localStorage.
+    setFilters(buildInitialFilters(searchParams, false));
   }, [searchParams]);
 
   // State → URL: write filter changes back to the URL so the result
@@ -438,13 +523,13 @@ export function JobsPage() {
       queryClient.invalidateQueries({ queryKey: ["applications"] });
       queryClient.invalidateQueries({ queryKey: ["application-stats"] });
       // Navigate to job detail page where the full apply panel lives
-      navigate(`/jobs/${jobId}`);
+      goToJob(jobId);
     },
     onError: (error: any, jobId) => {
       setApplyingJobId(null);
       if (error?.status === 409 || error?.message?.includes("already")) {
         // Already applied — go to the job detail to see the existing application
-        navigate(`/jobs/${jobId}`);
+        goToJob(jobId);
       } else {
         const msg = error?.message || "Failed to prepare";
         setApplyFeedback({ jobId, msg, ok: false });
@@ -739,7 +824,7 @@ export function JobsPage() {
       <SubmitLinkModal
         open={submitLinkOpen}
         onClose={() => setSubmitLinkOpen(false)}
-        onOpenJob={(jobId) => navigate(`/jobs/${jobId}`)}
+        onOpenJob={(jobId) => goToJob(jobId)}
       />
 
       {/* F222: surfaces /jobs failures with a Retry button. */}
@@ -1115,7 +1200,7 @@ export function JobsPage() {
                   <TableRow
                     key={job.id}
                     clickable
-                    onClick={() => navigate(`/jobs/${job.id}`)}
+                    onClick={() => goToJob(job.id)}
                   >
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       {/* F71: per-row `aria-label` gives AT users the

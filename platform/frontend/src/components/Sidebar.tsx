@@ -177,6 +177,37 @@ export function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () =>
             isActive = location.pathname === item.to;
           }
 
+          // F339 regression fix (filter stickiness):
+          //
+          // The two ``/jobs?role_cluster=...`` sidebar links were
+          // hardcoded to a static URL with ONLY the role_cluster
+          // axis. When a user was on
+          // ``/jobs?role_cluster=relevant&geography=usa_only&platform=
+          // greenhouse`` and clicked "All Jobs" (or even re-clicked
+          // "Relevant Jobs"), the navigation replaced the URL with
+          // the static target, silently dropping geography and
+          // platform. User report 2026-05-09: "issue of stickiness
+          // of filter in the relevant jobs".
+          //
+          // Fix: dynamically construct the target by copying every
+          // existing query param EXCEPT ``role_cluster`` and
+          // ``page`` (the latter is intentionally reset so the user
+          // doesn't land on page 7 of a different cluster), then
+          // overriding ``role_cluster`` to the link's target value.
+          // The static ``item.to`` continues to be the source of
+          // truth for the link's INTENT (which cluster it points at);
+          // the dynamic href is the actual click target.
+          let dynamicTo: string = item.to;
+          if (itemPath === "/jobs" && item.to.includes("role_cluster=")) {
+            const targetParams = new URLSearchParams(item.to.split("?")[1] || "");
+            const targetCluster = targetParams.get("role_cluster") || "";
+            const currentParams = new URLSearchParams(location.search);
+            currentParams.delete("page");
+            currentParams.set("role_cluster", targetCluster);
+            const qs = currentParams.toString();
+            dynamicTo = qs ? `/jobs?${qs}` : "/jobs";
+          }
+
           // F264 — Relevant Jobs link gets a tooltip listing the
           // currently-configured relevant clusters. ``All Jobs`` and
           // the rest stay tooltip-less to avoid noise.
@@ -186,7 +217,7 @@ export function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () =>
           return (
             <NavLink
               key={item.name}
-              to={item.to}
+              to={dynamicTo}
               title={tooltip}
               className={clsx(
                 "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",

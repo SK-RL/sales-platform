@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -58,7 +58,38 @@ import type { ReviewPayload, PreparedAnswer, CoverLetterResult, InterviewPrepRes
 export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
+
+  // F339 regression fix (back-button preserves source filters):
+  //
+  // Pre-fix every "Back to Jobs" button hardcoded
+  // ``navigate("/jobs")``. A user coming from
+  // ``/jobs?role_cluster=relevant&geography=global_remote`` and
+  // clicking Back landed on bare ``/jobs`` — which (post-F260)
+  // resolves to "All Jobs" via localStorage. User report
+  // 2026-05-09: "when we open the job from relevant job and
+  // click on back button we landed on all jobs".
+  //
+  // Fix: prefer the explicit ``location.state.from`` if the
+  // caller passed it (cleanest, survives a refresh on the detail
+  // page); else use ``navigate(-1)`` which walks browser history
+  // back to the exact URL the user came from; final fallback to
+  // ``/jobs`` if there's no history (direct bookmark / first
+  // page load).
+  const handleBackToJobs = () => {
+    const stateFrom =
+      (location.state as { from?: string } | null)?.from || "";
+    if (stateFrom && stateFrom.startsWith("/jobs")) {
+      navigate(stateFrom);
+      return;
+    }
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/jobs");
+  };
 
   const [comment, setComment] = useState("");
   const [tagInput, setTagInput] = useState("");
@@ -304,7 +335,7 @@ export function JobDetailPage() {
           <p className="mt-1 text-sm text-gray-500">
             This listing may have been removed by the source or deleted by an admin.
           </p>
-          <Button variant="secondary" className="mt-4" onClick={() => navigate("/jobs")}>
+          <Button variant="secondary" className="mt-4" onClick={handleBackToJobs}>
             Back to Jobs
           </Button>
         </div>
@@ -342,7 +373,7 @@ export function JobDetailPage() {
           <Button variant="primary" onClick={() => queryClient.invalidateQueries({ queryKey: ["job", id] })}>
             Retry
           </Button>
-          <Button variant="secondary" onClick={() => navigate("/jobs")}>
+          <Button variant="secondary" onClick={handleBackToJobs}>
             Back to Jobs
           </Button>
         </div>
@@ -359,7 +390,7 @@ export function JobDetailPage() {
     return (
       <div className="py-20 text-center">
         <p className="text-gray-500">No job selected</p>
-        <Button variant="secondary" className="mt-4" onClick={() => navigate("/jobs")}>
+        <Button variant="secondary" className="mt-4" onClick={handleBackToJobs}>
           Back to Jobs
         </Button>
       </div>
@@ -370,7 +401,7 @@ export function JobDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <button
-          onClick={() => navigate("/jobs")}
+          onClick={handleBackToJobs}
           className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
         >
           <ArrowLeft className="h-5 w-5" />
