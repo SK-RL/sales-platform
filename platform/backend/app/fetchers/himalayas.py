@@ -152,6 +152,21 @@ class HimalayasFetcher(BaseFetcher):
         return {
             "external_id": f"himalayas-{ext_id}",
             "company_slug": company_slug,
+            # F340 regression fix: pre-fix the Himalayas fetcher
+            # omitted ``company_name`` from its return dict. The
+            # downstream aggregator-resolution path in
+            # ``scan_task.py`` had to fall back to
+            # ``raw_json.companyName``, which sometimes carries a
+            # stale / wrong value while ``companySlug`` (used by
+            # the public URL) is correct. The scanner then derived
+            # the lookup slug from the wrong name and bound the job
+            # to a different Company row (user feedback 2026-04-29:
+            # "showing about 'Senior Cloud Engineer' job at 'Ähdus
+            # Technology' but it is showing the job details of a
+            # different company"). Surfacing ``company_name``
+            # explicitly here lets the scanner ALSO use it for
+            # display while preferring ``companySlug`` for binding.
+            "company_name": company_name,
             "title": title,
             "url": job_url,
             "platform": self.PLATFORM,
