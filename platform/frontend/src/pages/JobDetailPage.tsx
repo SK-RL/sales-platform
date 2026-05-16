@@ -488,16 +488,97 @@ export function JobDetailPage() {
               ))}
             </div>
 
+            {/*
+              F341 regression fix (user feedback 2026-05-01 + 2026-04-29):
+              "Whenever I open any job listing (scraped from
+              Himalayas portal) and click on the 'View Original
+              Listing' option, it does not redirect me to the
+              original job posting. Instead, it shows an error."
+
+              Root cause: Himalayas's public API stopped including
+              the original employer's URL — ``applicationLink`` and
+              ``guid`` now both point to himalayas.app itself (where
+              Cloudflare bot-protection often blocks visitors). So
+              the "View Original Listing" CTA was misleading: it
+              wasn't "original" at all.
+
+              Two-part fix:
+                (a) Relabel for aggregator-sourced jobs so the link
+                    text matches reality. Himalayas-sourced jobs
+                    say "View on Himalayas" / RemoteOK says "View
+                    on RemoteOK" / etc. — the user knows they're
+                    being sent to the aggregator, not the employer.
+                (b) Add a "Search Google" fallback link for the
+                    same aggregator-sourced jobs that constructs a
+                    Google search URL from
+                    ``"<title>" "<company>" remote`` — gives the
+                    user a one-click path to find the original
+                    employer's posting when the aggregator link
+                    is broken / behind Cloudflare.
+
+              Non-aggregator jobs (Greenhouse / Lever / Ashby / etc.)
+              still say "View Original Listing" because their URLs
+              go directly to the employer's ATS — the original-URL
+              promise still holds.
+            */}
             <div className="mt-4 flex items-center gap-3 border-t border-gray-100 pt-4">
-              <a
-                href={job.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:text-primary-700"
-              >
-                View Original Listing
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
+              {(() => {
+                const aggregatorPlatforms = new Set([
+                  "himalayas", "weworkremotely", "remoteok",
+                  "remotive", "hackernews", "yc_waas",
+                  "workingnomads", "linkedin",
+                ]);
+                const platformLabels: Record<string, string> = {
+                  himalayas: "Himalayas",
+                  weworkremotely: "We Work Remotely",
+                  remoteok: "RemoteOK",
+                  remotive: "Remotive",
+                  hackernews: "HN Who's Hiring",
+                  yc_waas: "Work at a Startup",
+                  workingnomads: "Working Nomads",
+                  linkedin: "LinkedIn",
+                };
+                const platform = job.source_platform || "";
+                const isAggregator = aggregatorPlatforms.has(platform);
+                const aggLabel = platformLabels[platform] || platform;
+                const primaryLabel = isAggregator
+                  ? `View on ${aggLabel}`
+                  : "View Original Listing";
+                // Google search query: "<title>" "<company>" remote
+                // — quoting the title + company stays exact-phrase
+                // while ``remote`` widens the result pool. Aggregator
+                // listings often re-post the same role across many
+                // boards; the user can pick the cleanest one.
+                const searchQuery = encodeURIComponent(
+                  `"${job.title}" "${job.company_name || ""}" remote`
+                );
+                const googleUrl = `https://www.google.com/search?q=${searchQuery}`;
+                return (
+                  <>
+                    <a
+                      href={job.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:text-primary-700"
+                    >
+                      {primaryLabel}
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                    {isAggregator && (
+                      <a
+                        href={googleUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-700"
+                        title="Search Google for the employer's original posting"
+                      >
+                        Search Google
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </>
+                );
+              })()}
               <span className="text-xs text-gray-400">
                 Scraped{" "}
                 {new Date(job.scraped_at).toLocaleDateString("en-US", {
@@ -897,6 +978,16 @@ export function JobDetailPage() {
                 )}
 
                 {/* Action buttons */}
+                {/*
+                  F341 (apply-panel companion): the "Open ATS" link
+                  here implies the user is about to land in the
+                  employer's application form. For aggregator-
+                  sourced jobs (Himalayas / WWR / RemoteOK / etc.)
+                  the URL goes to the aggregator's LISTING page —
+                  the user has to click through again to reach the
+                  actual ATS. Relabel to "Open Posting" for
+                  aggregators so the expectation matches reality.
+                */}
                 <div className="flex gap-2">
                   <a
                     href={job.url}
@@ -905,7 +996,13 @@ export function JobDetailPage() {
                     className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
                     <ExternalLink className="h-4 w-4" />
-                    Open ATS
+                    {new Set([
+                      "himalayas", "weworkremotely", "remoteok",
+                      "remotive", "hackernews", "yc_waas",
+                      "workingnomads", "linkedin",
+                    ]).has(job.source_platform || "")
+                      ? "Open Posting"
+                      : "Open ATS"}
                   </a>
                   {applyData.status === "prepared" && (
                     <button
