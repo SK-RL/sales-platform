@@ -835,11 +835,80 @@ async def get_resume_scores(
         .where(ResumeScore.resume_id == resume.id)
     )).scalar() or 0
 
-    # Top missing keywords (from all scores)
-    all_missing_result = await db.execute(
-        select(ResumeScore.missing_keywords)
-        .where(ResumeScore.resume_id == resume.id)
+    # Top missing keywords.
+    #
+    # F342 regression fix (user feedback 2026-05-06, status=open):
+    #
+    #   "In resume score section, while matching the ATS score it
+    #   is not giving missing keywords suggestion from the uploaded
+    #   resume. I uploaded resume for QA but it is giving non
+    #   relevant suggestions. It should give the suggestions as
+    #   per the QA roles not for devops or SRE."
+    #
+    # Pre-fix, the aggregation walked EVERY ResumeScore row for
+    # the resume regardless of the matched job's role cluster.
+    # Since the DB is dominated by infra jobs (67k Himalayas +
+    # large infra-leaning ATS pool), a QA resume's scores were
+    # dominated by infra-cluster jobs with low scores; the top
+    # "missing keywords" became kubernetes/terraform/aws — the
+    # exact opposite of what a QA candidate needs to see.
+    #
+    # Fix: detect the resume's DOMINANT cluster (the cluster where
+    # the resume scores highest on average) and aggregate missing
+    # keywords ONLY from that cluster's jobs. Falls back to the
+    # full-DB aggregation when there's no clear winner (e.g. brand-
+    # new resume scored against an unclassified pool), so brand-
+    # new behaviour is the legacy behaviour — the fix only kicks
+    # in when we can confidently identify the resume's cluster.
+    #
+    # "Confident" = a cluster has at least 10 scored matches AND
+    # its mean score beats every other cluster by at least 5
+    # points. Both thresholds picked from the existing scoring
+    # constants (relevance ≥ 70 is "high quality"; 5-point gap
+    # is the discrimination buffer the role-matcher already uses).
+    cluster_stats_result = await db.execute(
+        select(
+            Job.role_cluster,
+            func.count(ResumeScore.id).label("n"),
+            func.avg(ResumeScore.overall_score).label("avg_score"),
+        )
+        .join(Job, ResumeScore.job_id == Job.id)
+        .where(
+            ResumeScore.resume_id == resume.id,
+            Job.role_cluster.isnot(None),
+            Job.role_cluster != "",
+        )
+        .group_by(Job.role_cluster)
     )
+    cluster_stats = [(row[0], row[1] or 0, float(row[2] or 0)) for row in cluster_stats_result]
+    # Sort by mean score desc.
+    cluster_stats.sort(key=lambda r: -r[2])
+    dominant_cluster: str | None = None
+    if len(cluster_stats) >= 1 and cluster_stats[0][1] >= 10:
+        if len(cluster_stats) == 1:
+            dominant_cluster = cluster_stats[0][0]
+        elif cluster_stats[0][2] - cluster_stats[1][2] >= 5.0:
+            dominant_cluster = cluster_stats[0][0]
+
+    if dominant_cluster:
+        # Cluster-filtered aggregation. Join ResumeScore to Job and
+        # filter by role_cluster so the missing-keyword list comes
+        # from the same cohort the resume actually matches well.
+        all_missing_result = await db.execute(
+            select(ResumeScore.missing_keywords)
+            .join(Job, ResumeScore.job_id == Job.id)
+            .where(
+                ResumeScore.resume_id == resume.id,
+                Job.role_cluster == dominant_cluster,
+            )
+        )
+    else:
+        # Legacy aggregation across all clusters — only fires when
+        # we can't identify the resume's dominant cluster.
+        all_missing_result = await db.execute(
+            select(ResumeScore.missing_keywords)
+            .where(ResumeScore.resume_id == resume.id)
+        )
     all_missing: dict[str, int] = {}
     for (mkw,) in all_missing_result:
         if mkw:
@@ -870,6 +939,11 @@ async def get_resume_scores(
         "best_score": round(best_score, 1),
         "above_70": above_70,
         "top_missing_keywords": top_missing,
+        # F342: surface the cluster the missing-keywords list was
+        # filtered to so the FE can render an explanation ("showing
+        # keywords for QA jobs based on your resume"). Null when the
+        # legacy all-clusters aggregation fired.
+        "missing_keywords_cluster": dominant_cluster,
         "jobs_scored": total_all,
         "total_filtered": total_filtered,  # deprecated alias for `total`
         "page": page,
