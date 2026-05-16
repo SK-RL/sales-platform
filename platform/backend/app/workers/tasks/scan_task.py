@@ -767,7 +767,52 @@ def _scan_board(
                             stats["skipped_jobs"] += 1
                             continue
                         import re
-                        agg_slug = re.sub(r"[^a-z0-9-]", "", agg_company_name.lower().replace(" ", "-"))[:100]
+                        # F340 regression fix: prefer the authoritative
+                        # company slug from the upstream raw payload
+                        # (``companySlug`` on Himalayas, also surfaces
+                        # under ``company_slug`` from fetcher
+                        # normalisation). The public URL on the
+                        # aggregator is built from this slug, so it's
+                        # the source of truth for "which employer
+                        # actually owns this posting". Pre-fix we
+                        # derived the slug from ``agg_company_name``
+                        # via re.sub — but the name can be stale or
+                        # wrong on the upstream side (user feedback
+                        # 2026-04-29: "showing job at 'Ähdus
+                        # Technology' but URL says elevus"). Result:
+                        # the job got bound to the wrong Company row.
+                        #
+                        # Resolution order:
+                        #   1. raw_json.companySlug (Himalayas) /
+                        #      raw_json.company_slug (other agg's)
+                        #      / raw_job.company_slug (fetcher-set) —
+                        #      whichever first non-empty.
+                        #   2. Fallback: derive from agg_company_name.
+                        #
+                        # The DERIVED slug is the F340 last-resort
+                        # path so aggregators that don't surface a
+                        # ``companySlug`` field (legacy / future
+                        # additions) still work — they just lose the
+                        # name-mismatch protection.
+                        authoritative_slug = (
+                            raw_json.get("companySlug")
+                            or raw_json.get("company_slug")
+                            or raw_job.get("company_slug")
+                            or ""
+                        ).strip().lower()
+                        if authoritative_slug:
+                            # Same character-set rules as the derived
+                            # path (alphanumerics + hyphens) so the
+                            # slug column's existing constraints hold.
+                            agg_slug = re.sub(
+                                r"[^a-z0-9-]", "",
+                                authoritative_slug.replace(" ", "-")
+                            )[:100]
+                        else:
+                            agg_slug = re.sub(
+                                r"[^a-z0-9-]", "",
+                                agg_company_name.lower().replace(" ", "-")
+                            )[:100]
                         # Look up by slug first (unique), then by name
                         existing_co = session.execute(
                             select(Company).where(Company.slug == agg_slug)
