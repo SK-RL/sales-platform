@@ -238,9 +238,14 @@ export function DashboardPage() {
       <BackendErrorBanner queries={dashboardQueries} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* "Total Jobs" sits alongside lifetime cardinality tiles
+            (Companies, Pipeline Active) so it must render lifetime,
+            not F214's windowed flow metric. The lifetime field is
+            populated server-side; legacy `total_jobs` is the windowed
+            value reserved for a future "Last N days" switcher. */}
         <StatCard
           label="Total Jobs"
-          value={overview?.total_jobs ?? 0}
+          value={overview?.total_jobs_lifetime ?? 0}
           icon={Briefcase}
           color="bg-primary-600"
         />

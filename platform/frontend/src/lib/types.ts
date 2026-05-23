@@ -357,7 +357,14 @@ export interface PipelineResponse {
 }
 
 export interface AnalyticsOverview {
+  // Flow metric — jobs first_seen_at within the last `days` window
+  // (default 30, set on the backend by F214). Use this for "Last N
+  // days" displays.
   total_jobs: number;
+  // Cardinality metric — lifetime count of rows in the jobs table.
+  // Use this for tiles that read as "how many jobs exist", matching
+  // /monitoring's data_counts.jobs.
+  total_jobs_lifetime: number;
   total_companies: number;
   pipeline_active: number;
   reviewed_count: number;
