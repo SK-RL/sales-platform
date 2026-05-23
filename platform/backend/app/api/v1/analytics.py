@@ -123,6 +123,23 @@ async def overview(
     total_companies = (await db.execute(select(func.count(Company.id)))).scalar() or 0
     pipeline_count = (await db.execute(select(func.count(PotentialClient.id)))).scalar() or 0
 
+    # Lifetime job cardinality — un-windowed counterpart to `total_jobs`.
+    # F214 redefined `total_jobs` as a flow metric (jobs first_seen in
+    # the last `days` window) to support a future "Last 7/30/90 days"
+    # switcher. The Dashboard "Total Jobs" tile sits next to lifetime
+    # cardinality tiles (Companies, Pipeline Active) and users read it
+    # as "how many jobs exist in our system" — matching what
+    # /monitoring reports. Exposing the lifetime value as a separate
+    # field lets the tile render lifetime without rolling back F214's
+    # windowed flow semantics for callers that opt into them.
+    #
+    # Honors `role_cluster` (cardinality of jobs *in this cluster*) but
+    # NOT `days` — by definition lifetime ignores the window.
+    lifetime_q = select(func.count(Job.id))
+    if cluster_filter is not None:
+        lifetime_q = lifetime_q.where(Job.role_cluster.in_(cluster_filter))
+    total_jobs_lifetime = (await db.execute(lifetime_q)).scalar() or 0
+
     accepted_count = status_counts.get("accepted", 0)
     rejected_count = status_counts.get("rejected", 0)
     reviewed_count = accepted_count + rejected_count
@@ -149,6 +166,7 @@ async def overview(
         # they intended.
         "role_cluster": role_cluster,
         "total_jobs": total_jobs,
+        "total_jobs_lifetime": total_jobs_lifetime,
         "by_status": status_counts,
         "total_companies": total_companies,
         "pipeline_count": pipeline_count,
