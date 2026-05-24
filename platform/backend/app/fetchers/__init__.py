@@ -16,6 +16,7 @@ from app.fetchers.remotive import RemotiveFetcher
 from app.fetchers.linkedin import LinkedInFetcher
 from app.fetchers.hackernews import HackerNewsFetcher
 from app.fetchers.yc_waas import YCWaaSFetcher
+from app.fetchers.adzuna import AdzunaFetcher
 
 FETCHER_MAP = {
     "greenhouse": GreenhouseFetcher,
@@ -44,4 +45,9 @@ FETCHER_MAP = {
     # + workatastartup.com /jobs/search for postings. See
     # app/fetchers/yc_waas.py.
     "yc_waas": YCWaaSFetcher,
+    # Adzuna — country-scoped aggregator. Slug = ISO-3166 alpha-2
+    # country code (``ae`` for UAE, ``us``, ``gb``, ``in``, etc.).
+    # Requires ADZUNA_APP_ID + ADZUNA_APP_KEY env vars. See
+    # app/fetchers/adzuna.py for the rationale + per-board limits.
+    "adzuna": AdzunaFetcher,
 }
