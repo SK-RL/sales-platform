@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-06-24 · 5b3feb4 · sha-5b3feb4
+Merge fix/adzuna-migration-unblock-deploy: restore broken prod deploy pipeline
+
+
 ## 2026-04-29 · cc908b5 · sha-cc908b5
 Merge feat/f275-companies-name-trigram into main
 
