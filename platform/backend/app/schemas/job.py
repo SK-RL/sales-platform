@@ -87,6 +87,12 @@ PlatformFilter = Literal[
     # cohort. Same shape as WWR/RemoteOK: single board with
     # slug='__all__'. See app/fetchers/workingnomads.py.
     "workingnomads",
+    # Adzuna — country-scoped aggregator, slug = ISO-3166 alpha-2
+    # (``ae`` for UAE). Filterable so admins can segment Adzuna-
+    # sourced jobs. See app/fetchers/adzuna.py. (Bugfix: this was
+    # missing from the Literal in the original Adzuna commit, so
+    # ``?platform=adzuna`` 422'd even after the fetcher shipped.)
+    "adzuna",
 ]
 
 

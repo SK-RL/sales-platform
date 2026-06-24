@@ -59,6 +59,7 @@ ADZUNA_UAE_BOARD_ID = "00000000-aaaa-0000-0000-00000000ae01"
 
 def upgrade() -> None:
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
 
     # Company row — synthetic owner for the aggregator output.
     existing = bind.execute(
@@ -66,34 +67,55 @@ def upgrade() -> None:
         {"slug": "adzuna-uae"},
     ).scalar_one_or_none()
     if not existing:
-        # NOT NULL columns with Python-side defaults (created_at,
-        # updated_at, tags) need explicit values here — the model's
-        # ``default=lambda: ...`` only applies on ORM insert. Raw
-        # alembic SQL would fail with "violates not-null constraint"
-        # otherwise. ``now()`` and the empty array literal keep this
-        # transactional + idempotent.
+        # Build the INSERT dynamically from the columns that actually
+        # exist on the prod ``companies`` table. The original revision
+        # of this migration hard-coded a ``relevance_score`` column
+        # that doesn't exist on the table — Postgres rejected the
+        # whole INSERT (``column "relevance_score" of relation
+        # "companies" does not exist``), which failed the migration
+        # and auto-rolled-back the deploy. Introspecting makes the
+        # seed immune to schema drift in either direction: we only
+        # ever name columns the table has, and supply safe values for
+        # the ones that are NOT NULL without a usable server default.
+        existing_cols = {c["name"] for c in inspector.get_columns("companies")}
+
+        # Candidate (column, SQL-literal-or-bind) pairs. Only those
+        # whose column exists on the table are included. ``now()`` is
+        # a literal; everything else is a bound param or literal that
+        # satisfies the model's NOT NULL + default contract.
+        candidates: list[tuple[str, str]] = [
+            ("id", ":id"),
+            ("name", ":name"),
+            ("slug", ":slug"),
+            ("website", ":website"),
+            ("logo_url", "''"),
+            ("industry", "''"),
+            ("employee_count", "''"),
+            ("funding_stage", "''"),
+            ("headquarters", "''"),
+            ("description", "''"),
+            ("is_target", "false"),
+            ("tags", "'{}'::text[]"),
+            ("metadata_json", "'{}'::jsonb"),
+            ("domain", "''"),
+            ("total_funding", "''"),
+            ("linkedin_url", "''"),
+            ("twitter_url", "''"),
+            ("tech_stack", "'{}'::text[]"),
+            ("enrichment_status", "'pending'"),
+            ("enrichment_error", "''"),
+            ("funding_news_url", "''"),
+            ("created_at", "now()"),
+            ("updated_at", "now()"),
+        ]
+        cols = [c for c, _ in candidates if c in existing_cols]
+        vals = [v for c, v in candidates if c in existing_cols]
+        stmt = (
+            f"INSERT INTO companies ({', '.join(cols)}) "
+            f"VALUES ({', '.join(vals)})"
+        )
         bind.execute(
-            sa.text(
-                """
-                INSERT INTO companies (
-                    id, name, slug, website, logo_url, industry,
-                    employee_count, funding_stage, headquarters,
-                    description, is_target, tags, metadata_json,
-                    domain, total_funding, linkedin_url, twitter_url,
-                    tech_stack, enrichment_status, enrichment_error,
-                    funding_news_url, relevance_score,
-                    created_at, updated_at
-                ) VALUES (
-                    :id, :name, :slug, :website, '', '',
-                    '', '', '',
-                    '', false, '{}'::text[], '{}'::jsonb,
-                    '', '', '', '',
-                    '{}'::text[], 'pending', '',
-                    '', 0,
-                    now(), now()
-                )
-                """
-            ),
+            sa.text(stmt),
             {
                 "id": ADZUNA_UAE_COMPANY_ID,
                 "name": "Adzuna (UAE)",
@@ -111,18 +133,27 @@ def upgrade() -> None:
         {"platform": "adzuna", "slug": "ae"},
     ).scalar_one_or_none()
     if not existing_board:
+        # Same introspection guard as the company insert above — only
+        # name columns the board table actually has, so a schema drift
+        # on ``company_ats_boards`` can't fail the migration.
+        board_cols = {c["name"] for c in inspector.get_columns("company_ats_boards")}
+        board_candidates: list[tuple[str, str]] = [
+            ("id", ":id"),
+            ("company_id", ":company_id"),
+            ("platform", ":platform"),
+            ("slug", ":slug"),
+            ("is_active", "true"),
+            ("consecutive_zero_scans", "0"),
+            ("deactivated_reason", "''"),
+        ]
+        bcols = [c for c, _ in board_candidates if c in board_cols]
+        bvals = [v for c, v in board_candidates if c in board_cols]
+        bstmt = (
+            f"INSERT INTO company_ats_boards ({', '.join(bcols)}) "
+            f"VALUES ({', '.join(bvals)})"
+        )
         bind.execute(
-            sa.text(
-                """
-                INSERT INTO company_ats_boards (
-                    id, company_id, platform, slug, is_active,
-                    consecutive_zero_scans, deactivated_reason
-                ) VALUES (
-                    :id, :company_id, :platform, :slug, true,
-                    0, ''
-                )
-                """
-            ),
+            sa.text(bstmt),
             {
                 "id": ADZUNA_UAE_BOARD_ID,
                 "company_id": ADZUNA_UAE_COMPANY_ID,
