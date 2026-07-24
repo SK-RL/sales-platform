@@ -520,24 +520,54 @@ def discover_and_add_boards(self, source: str = "scheduled"):
             status="running",
         )
         session.add(run)
-        session.flush()
+        # F344: COMMIT the run row up front (was: flush + one big
+        # commit after the whole crawl). Monitoring reported
+        # discovery_freshness=stale with zero runs for 5 straight
+        # days — the nightly beat was firing, but a crash anywhere
+        # in the crawl rolled back the uncommitted run row, so
+        # every failed night left no trace at all. With the early
+        # commit, a crashed run survives as status="running" and
+        # the existing fix_stuck_discovery_runs sweeper (every 6h)
+        # flips it to failed — failures become visible in
+        # /monitoring instead of silent.
+        session.commit()
 
         total_new_discovered = 0
+        source_errors: list[str] = []
 
-        # Greenhouse sitemap
-        gh_new = _crawl_greenhouse_sitemap(session, run)
-        total_new_discovered += gh_new
+        # F344: isolate each discovery source — one failing source
+        # (e.g. the Greenhouse sitemap fetch getting blocked or
+        # OOMing on a huge response) must not kill the whole run.
+        # Partial discovery beats none; errors are accumulated and
+        # surfaced on the run row.
+        try:
+            gh_new = _crawl_greenhouse_sitemap(session, run)
+            total_new_discovered += gh_new
+        except Exception as e:
+            logger.exception("discovery source greenhouse-sitemap failed: %s", e)
+            session.rollback()
+            source_errors.append(f"greenhouse-sitemap: {e}")
 
         # Probe all platforms
         for platform, config in PLATFORM_PROBE_CONFIG.items():
-            platform_new = _probe_platform_slugs(
-                session, run, platform, config["slugs"], config["url"]
-            )
-            total_new_discovered += platform_new
+            try:
+                platform_new = _probe_platform_slugs(
+                    session, run, platform, config["slugs"], config["url"]
+                )
+                total_new_discovered += platform_new
+            except Exception as e:
+                logger.exception("discovery source %s failed: %s", platform, e)
+                session.rollback()
+                source_errors.append(f"{platform}: {e}")
 
         # LinkedIn (special handler)
-        li_new = _probe_linkedin_slugs(session, run)
-        total_new_discovered += li_new
+        try:
+            li_new = _probe_linkedin_slugs(session, run)
+            total_new_discovered += li_new
+        except Exception as e:
+            logger.exception("discovery source linkedin failed: %s", e)
+            session.rollback()
+            source_errors.append(f"linkedin: {e}")
 
         session.commit()
 
@@ -635,9 +665,17 @@ def discover_and_add_boards(self, source: str = "scheduled"):
         run.completed_at = datetime.now(timezone.utc)
         run.companies_found = len(new_discoveries)
         run.new_companies = boards_added
-        run.status = "completed"
+        # F344: distinguish clean completion from "finished, but one
+        # or more sources errored" so /monitoring history shows the
+        # degradation instead of a false-green "completed".
+        run.status = "completed_with_errors" if source_errors else "completed"
         session.commit()
 
+        if source_errors:
+            logger.warning(
+                "discover_and_add_boards finished with %d source errors: %s",
+                len(source_errors), "; ".join(source_errors)[:500],
+            )
         logger.info(
             "discover_and_add_boards complete: %d discovered, %d boards added",
             len(new_discoveries), boards_added,
@@ -646,11 +684,23 @@ def discover_and_add_boards(self, source: str = "scheduled"):
             "discovered": len(new_discoveries),
             "boards_added": boards_added,
             "total_new_discovered": total_new_discovered,
+            "source_errors": source_errors,
         }
 
     except Exception as e:
         logger.exception("discover_and_add_boards failed: %s", e)
         session.rollback()
+        # F344: persist the failure on the (already-committed) run row
+        # so the monitoring history shows WHEN and that it failed —
+        # pre-fix the rollback erased the row entirely and 5 nights of
+        # crashes were invisible. Best-effort: if even this write
+        # fails, fall through to the retry unchanged.
+        try:
+            run.status = "failed"
+            run.completed_at = datetime.now(timezone.utc)
+            session.commit()
+        except Exception:
+            session.rollback()
         raise self.retry(exc=e, countdown=300)
     finally:
         session.close()

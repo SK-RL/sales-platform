@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   Bot,
   Clock,
+  BookOpenCheck,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
@@ -60,6 +61,10 @@ const navigation = [
   // routine itself is a superset-feature on top.
   { name: "Apply Routine", to: "/routine", icon: Bot },
   { name: "Pipeline", to: "/pipeline", icon: GitBranch },
+  // Ticket 8ef0e9c2 — shared repository of real interview questions
+  // from past client rounds. Placed next to Pipeline since both track
+  // the candidate-side sales motion.
+  { name: "Interview Qs", to: "/interview-questions", icon: BookOpenCheck },
   { name: "Analytics", to: "/analytics", icon: BarChart3 },
   { name: "Intelligence", to: "/intelligence", icon: Brain },
   // F237: AI Intelligence — per-user weekly insights + admin product

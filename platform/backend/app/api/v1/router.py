@@ -7,6 +7,7 @@ from app.api.v1 import (
     resume, users, role_config, credentials, answer_book, applications, feedback,
     alerts, cover_letter, interview_prep, intelligence, audit, ai, insights,
     training_data, saved_filters, profiles, routine, work_window,
+    interview_questions,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -56,3 +57,7 @@ api_router.include_router(routine.router)
 # enforcement itself lives in ``api.deps.get_current_user`` — this
 # router is purely the control plane.
 api_router.include_router(work_window.router)
+# Interview question repository (ticket 8ef0e9c2) — shared debriefs
+# of client interview rounds so future candidates can prepare from
+# real data. All-users read/create; author-or-admin edit/delete.
+api_router.include_router(interview_questions.router)

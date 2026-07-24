@@ -577,22 +577,42 @@ def _upsert_job(
                 getattr(constraint, "constraint_name", "") if constraint else ""
             )
             raw_msg = str(exc).lower()
-            if (
+            is_title_dup = (
                 "uq_jobs_active_company_title" in (constraint_name or "")
                 or "uq_jobs_active_company_title" in raw_msg
-            ):
+            )
+            # F343: the same cross-worker race exists on the
+            # ``external_id`` UNIQUE (``jobs_external_id_key``).
+            # LinkedIn runs 41 board slugs and the same posting
+            # (same linkedin-<id> external_id) frequently appears on
+            # several of them — two concurrent board scans both miss
+            # the lookup and both insert, one loses. Pre-fix that
+            # loser re-raised and logged as a scan error (53/week,
+            # pure noise: the row exists and is fresh). Recover the
+            # same way as the title dup — re-fetch the survivor and
+            # take the update path.
+            is_external_id_dup = (
+                "jobs_external_id_key" in (constraint_name or "")
+                or "jobs_external_id_key" in raw_msg
+            )
+            if is_title_dup or is_external_id_dup:
                 # Re-find the active survivor that beat us to the
-                # insert and update IT instead. Same lookup shape
-                # the F88 fallback uses so we land on the canonical
-                # row.
+                # insert and update IT instead. Match on the same key
+                # the violated constraint enforces so we land on the
+                # canonical row.
                 session.expunge(job)
-                survivor = session.execute(
-                    select(Job).where(
-                        Job.company_id == company.id,
-                        func.lower(func.trim(Job.title)) == title.strip().lower(),
-                        Job.status.in_(("new", "under_review", "accepted")),
-                    ).limit(1)
-                ).scalar_one_or_none()
+                if is_external_id_dup:
+                    survivor = session.execute(
+                        select(Job).where(Job.external_id == external_id).limit(1)
+                    ).scalar_one_or_none()
+                else:
+                    survivor = session.execute(
+                        select(Job).where(
+                            Job.company_id == company.id,
+                            func.lower(func.trim(Job.title)) == title.strip().lower(),
+                            Job.status.in_(("new", "under_review", "accepted")),
+                        ).limit(1)
+                    ).scalar_one_or_none()
                 if survivor is None:
                     # Constraint fired but the row's gone — re-raise
                     # so the outer SAVEPOINT in ``scan_all_platforms``

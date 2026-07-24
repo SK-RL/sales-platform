@@ -30,9 +30,11 @@ import {
   // and let the admin reassign their funnel stage from the side panel.
   getClientApplications,
   updateApplicationStage,
+  // Ticket bac45b42 — manual pipeline card creation.
+  createManualPipelineCard,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import type { PipelineItem } from "@/lib/types";
+import type { ManualPipelineCardPayload, PipelineItem } from "@/lib/types";
 import { formatCount } from "@/lib/format";
 
 const STAGE_COLORS = [
@@ -359,8 +361,13 @@ function StageHeader({
 export function PipelinePage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  // Ticket bac45b42 — card creation is admin + reviewer (matches the
+  // backend require_role("admin", "reviewer") on POST /pipeline/manual).
+  const canCreateCard =
+    isAdmin || user?.role === "reviewer";
   const queryClient = useQueryClient();
   const [showAddStage, setShowAddStage] = useState(false);
+  const [showAddCard, setShowAddCard] = useState(false);
   // F261 — id of the pipeline client whose applications side-panel is
   // currently open. null = panel closed. Admin-only; the
   // ``onOpenApplications`` prop on PipelineCard is gated on isAdmin
@@ -457,15 +464,26 @@ export function PipelinePage() {
             {pipeline?.total ?? 0} companies in pipeline
           </p>
         </div>
-        {isAdmin && (
-          <button
-            onClick={() => setShowAddStage(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            Add Stage
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {canCreateCard && (
+            <button
+              onClick={() => setShowAddCard(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add Card
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setShowAddStage(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add Stage
+            </button>
+          )}
+        </div>
       </div>
 
       {/* F222: stages query is admin-only and non-critical (kanban still
@@ -556,6 +574,242 @@ export function PipelinePage() {
           onClose={() => setDrillClientId(null)}
         />
       )}
+
+      {/* Ticket bac45b42 — manual card creation modal. */}
+      {showAddCard && canCreateCard && (
+        <ManualCardModal
+          stagesConfig={stagesConfig}
+          onClose={() => setShowAddCard(false)}
+          onCreated={() => {
+            queryClient.invalidateQueries({ queryKey: ["pipeline"] });
+            setShowAddCard(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// Ticket bac45b42 — manual pipeline card creation. Four mandatory
+// fields up top (company name, website, JD link, applied identity);
+// everything else lives in a collapsible "More details" section so
+// the fast path stays fast.
+function ManualCardModal({
+  stagesConfig,
+  onClose,
+  onCreated,
+}: {
+  stagesConfig: { key: string; label: string; color: string }[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [companyName, setCompanyName] = useState("");
+  const [website, setWebsite] = useState("");
+  const [jdLink, setJdLink] = useState("");
+  const [appliedId, setAppliedId] = useState("");
+  const [stage, setStage] = useState(stagesConfig[0]?.key ?? "");
+  const [showMore, setShowMore] = useState(false);
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [fundingStatus, setFundingStatus] = useState("");
+  const [designation, setDesignation] = useState("");
+  const [salaryCurrent, setSalaryCurrent] = useState("");
+  const [salaryExpected, setSalaryExpected] = useState("");
+  const [interviewerName, setInterviewerName] = useState("");
+  const [interviewerEmail, setInterviewerEmail] = useState("");
+  const [intervieweeName, setIntervieweeName] = useState("");
+  const [intervieweeType, setIntervieweeType] = useState("");
+  const [jdDescription, setJdDescription] = useState("");
+  const [details, setDetails] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const opt = (v: string) => (v.trim() ? v.trim() : undefined);
+      const payload: ManualPipelineCardPayload = {
+        company_name: companyName.trim(),
+        company_website: website.trim(),
+        jd_link: jdLink.trim(),
+        applied_id: appliedId.trim(),
+        stage: stage || undefined,
+        linkedin_url: opt(linkedinUrl),
+        funding_status: opt(fundingStatus),
+        designation: opt(designation),
+        salary_current: opt(salaryCurrent),
+        salary_expected: opt(salaryExpected),
+        interviewer_name: opt(interviewerName),
+        interviewer_email: opt(interviewerEmail),
+        interviewee_name: opt(intervieweeName),
+        interviewee_type: opt(intervieweeType),
+        jd_description: opt(jdDescription),
+        details: opt(details),
+      };
+      return createManualPipelineCard(payload);
+    },
+    onSuccess: onCreated,
+    onError: (e: unknown) =>
+      setError(e instanceof Error ? e.message : "Failed to create card"),
+  });
+
+  const valid =
+    companyName.trim() && website.trim() && jdLink.trim() && appliedId.trim();
+
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    props: { placeholder?: string; required?: boolean; type?: string } = {},
+  ) => (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">
+        {label}{" "}
+        {props.required ? (
+          <span className="text-red-500">*</span>
+        ) : (
+          <span className="text-gray-400">(optional)</span>
+        )}
+      </label>
+      <input
+        type={props.type ?? "text"}
+        value={value}
+        onChange={(e) => set(e.target.value)}
+        placeholder={props.placeholder}
+        className="input w-full text-sm"
+        required={props.required}
+      />
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-2xl"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Add Pipeline Card</h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (valid && !mutation.isPending) mutation.mutate();
+          }}
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {field("Company Name", companyName, setCompanyName, { required: true })}
+            {field("Company Website", website, setWebsite, {
+              required: true, placeholder: "https://…", type: "url",
+            })}
+            {field("JD Link", jdLink, setJdLink, {
+              required: true, placeholder: "Link to the job description", type: "url",
+            })}
+            {field("Applied ID (Email/Name)", appliedId, setAppliedId, {
+              required: true, placeholder: "Identity used to apply",
+            })}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Stage</label>
+            <select
+              value={stage}
+              onChange={(e) => setStage(e.target.value)}
+              className="input w-full text-sm"
+            >
+              {stagesConfig.map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowMore(!showMore)}
+            className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700"
+          >
+            {showMore ? "Hide" : "Show"} more details
+            <ChevronRight className={`h-4 w-4 transition-transform ${showMore ? "rotate-90" : ""}`} />
+          </button>
+
+          {showMore && (
+            <div className="space-y-4 rounded-lg border border-gray-100 bg-gray-50 p-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {field("LinkedIn", linkedinUrl, setLinkedinUrl, { placeholder: "Company LinkedIn URL" })}
+                {field("Funding Status", fundingStatus, setFundingStatus, { placeholder: "e.g. Series B" })}
+                {field("Designation", designation, setDesignation, { placeholder: "Role being pursued" })}
+                {field("Salary — Current", salaryCurrent, setSalaryCurrent)}
+                {field("Salary — Expectation", salaryExpected, setSalaryExpected)}
+                {field("Interviewer / Contact Name", interviewerName, setInterviewerName)}
+                {field("Interviewer Email", interviewerEmail, setInterviewerEmail)}
+                {field("Interviewee Name", intervieweeName, setIntervieweeName)}
+                {field("Interviewee Type", intervieweeType, setIntervieweeType, {
+                  placeholder: "Description type",
+                })}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  JD Description <span className="text-gray-400">(optional)</span>
+                </label>
+                <textarea
+                  value={jdDescription}
+                  onChange={(e) => setJdDescription(e.target.value)}
+                  rows={3}
+                  className="input w-full text-sm"
+                  maxLength={8000}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Details <span className="text-gray-400">(optional)</span>
+                </label>
+                <textarea
+                  value={details}
+                  onChange={(e) => setDetails(e.target.value)}
+                  rows={3}
+                  placeholder="Anything else worth tracking on this card…"
+                  className="input w-full text-sm"
+                  maxLength={8000}
+                />
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!valid || mutation.isPending}
+              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+            >
+              {mutation.isPending && <span className="spinner h-4 w-4" />}
+              Create Card
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
