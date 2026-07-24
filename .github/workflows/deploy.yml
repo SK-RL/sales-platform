@@ -315,7 +315,7 @@ jobs:
           # over SSH instead of scp, since the forced-command authorized_keys
           # entry blocks scp's separate subsystem channel.
           ssh -i ~/.ssh/deploy_key \
-              -o BatchMode=yes \
+              -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
               ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
               "stage-infra" < /tmp/sales-platform-infra.tgz
 
@@ -344,7 +344,7 @@ jobs:
             # signal — see the contract comment above.
             printf '%s\n' "${ANTHROPIC_API_KEY:-}"
           } | ssh -i ~/.ssh/deploy_key \
-                  -o BatchMode=yes \
+                  -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
                   ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
                   "deploy ${{ needs.build.outputs.tag }} $GH_ACTOR"
 
@@ -352,7 +352,7 @@ jobs:
         if: always()
         run: |
           ssh -i ~/.ssh/deploy_key \
-              -o BatchMode=yes \
+              -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
               ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
               "status" || true
 
