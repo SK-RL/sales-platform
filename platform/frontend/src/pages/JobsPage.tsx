@@ -303,6 +303,8 @@ const PLATFORM_OPTIONS = [
   { value: "weworkremotely", label: "WeWorkRemotely" },
   { value: "remoteok", label: "RemoteOK" },
   { value: "remotive", label: "Remotive" },
+  // F351 — team-curated Google Sheets ingested as boards.
+  { value: "google_sheet", label: "Google Sheet" },
 ];
 
 // Legacy filter values still sent on the wire as ``?geography=`` so
