@@ -84,6 +84,9 @@ import type {
   WorkWindowState,
   WorkTimeExtensionRequest,
   WorkTimeExtensionRequestList,
+  ManualPipelineCardPayload,
+  InterviewQuestionSet,
+  InterviewQuestionSetPayload,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api/v1";
@@ -1559,4 +1562,59 @@ export async function adminDecideExtensionRequest(
     `/work-window/admin/extension-requests/${requestId}/decision`,
     { method: "POST", body: JSON.stringify({ decision, note }) },
   );
+}
+
+// ─── Manual pipeline card (ticket bac45b42) ───────────────────────
+
+export async function createManualPipelineCard(
+  payload: ManualPipelineCardPayload,
+): Promise<{ ok: boolean; id: string; company_name: string }> {
+  return request<{ ok: boolean; id: string; company_name: string }>(
+    "/pipeline/manual",
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+// ─── Interview question repository (ticket 8ef0e9c2) ──────────────
+
+export async function listInterviewQuestionSets(params: {
+  q?: string;
+  company?: string;
+  role?: string;
+  page?: number;
+  page_size?: number;
+} = {}): Promise<PaginatedResponse<InterviewQuestionSet>> {
+  const query = buildQuery({
+    q: params.q,
+    company: params.company,
+    role: params.role,
+    page: params.page,
+    page_size: params.page_size,
+  });
+  return request<PaginatedResponse<InterviewQuestionSet>>(
+    `/interview-questions${query}`,
+  );
+}
+
+export async function createInterviewQuestionSet(
+  payload: InterviewQuestionSetPayload,
+): Promise<InterviewQuestionSet> {
+  return request<InterviewQuestionSet>("/interview-questions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateInterviewQuestionSet(
+  id: string,
+  payload: Partial<InterviewQuestionSetPayload>,
+): Promise<InterviewQuestionSet> {
+  return request<InterviewQuestionSet>(`/interview-questions/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteInterviewQuestionSet(id: string): Promise<void> {
+  return request<void>(`/interview-questions/${id}`, { method: "DELETE" });
 }

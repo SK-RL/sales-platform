@@ -17,6 +17,7 @@ from app.fetchers.linkedin import LinkedInFetcher
 from app.fetchers.hackernews import HackerNewsFetcher
 from app.fetchers.yc_waas import YCWaaSFetcher
 from app.fetchers.adzuna import AdzunaFetcher
+from app.fetchers.workingnomads import WorkingNomadsFetcher
 
 FETCHER_MAP = {
     "greenhouse": GreenhouseFetcher,
@@ -50,4 +51,10 @@ FETCHER_MAP = {
     # Requires ADZUNA_APP_ID + ADZUNA_APP_KEY env vars. See
     # app/fetchers/adzuna.py for the rationale + per-board limits.
     "adzuna": AdzunaFetcher,
+    # F335 — Working Nomads RSS aggregator, slug `__all__`. Bugfix:
+    # the fetcher + PlatformFilter entry + seeded board all shipped,
+    # but this map registration was missed — every scan tick errored
+    # "No fetcher for platform: workingnomads" (21 errors/week, zero
+    # jobs sourced) until it was added here.
+    "workingnomads": WorkingNomadsFetcher,
 }

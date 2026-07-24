@@ -21,6 +21,7 @@ from app.api.deps import get_current_user, require_role
 from app.schemas.pipeline import (
     PipelineItemOut,
     PipelineUpdate,
+    ManualPipelineCardRequest,
     PIPELINE_MAX_PRIORITY,
     PIPELINE_MAX_NOTES_LENGTH,
 )
@@ -505,6 +506,127 @@ async def create_pipeline_entry(
         resource="pipeline",
         request=request,
         metadata={"client_id": str(client.id), "company_id": str(body.company_id), "stage": body.stage},
+    )
+
+    return {"ok": True, "id": str(client.id), "company_name": company.name}
+
+
+def _slugify_company(name: str) -> str:
+    """Conservative slugifier for manual-card company creation.
+
+    Same shape as ``AdzunaFetcher._slugify`` — lowercase, punctuation
+    to dashes, bounded — so the same employer entered manually and
+    later discovered by a scan lands on ONE Company row instead of
+    a near-duplicate pair.
+    """
+    import re
+
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return s[:200] or "manual-company"
+
+
+@router.post("/manual", status_code=201)
+async def create_manual_pipeline_card(
+    body: ManualPipelineCardRequest,
+    request: Request,
+    user: User = Depends(require_role("admin", "reviewer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ticket bac45b42 — create a pipeline card from free-form fields.
+
+    Unlike ``POST /pipeline`` (which requires an existing
+    ``company_id``), this endpoint find-or-creates the Company from
+    the typed name + website, so sales can card up a prospect that
+    the scraper has never seen. The four mandatory fields (company
+    name, website, JD link, applied identity) are enforced by the
+    request schema; everything else lands in the ``manual_card``
+    JSONB on the PotentialClient row.
+    """
+    slug = _slugify_company(body.company_name)
+    company = (await db.execute(
+        select(Company).where(Company.slug == slug)
+    )).scalar_one_or_none()
+    if not company:
+        company = Company(
+            name=body.company_name.strip(),
+            slug=slug,
+            website=body.company_website.strip(),
+            linkedin_url=(body.linkedin_url or "").strip(),
+            funding_stage=(body.funding_status or "").strip(),
+            is_target=False,
+        )
+        db.add(company)
+        await db.flush()
+    else:
+        # Company already known — backfill website/linkedin if the
+        # scraped record lacks them. Presence wins: never overwrite
+        # non-empty scraped data with hand-typed values.
+        if not company.website and body.company_website:
+            company.website = body.company_website.strip()
+        if not company.linkedin_url and body.linkedin_url:
+            company.linkedin_url = body.linkedin_url.strip()
+
+    existing = (await db.execute(
+        select(PotentialClient).where(PotentialClient.company_id == company.id)
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{company.name}' is already in the pipeline",
+        )
+
+    stage_keys = await _get_stage_keys(db)
+    stage = body.stage or (stage_keys[0] if stage_keys else "new_lead")
+    if stage not in stage_keys:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stage. Must be one of: {', '.join(stage_keys)}",
+        )
+
+    # Everything card-specific goes into the JSONB — drop Nones so
+    # the stored dict only carries what the user actually filled in.
+    card_fields = {
+        k: v.strip()
+        for k, v in {
+            "jd_link": body.jd_link,
+            "applied_id": body.applied_id,
+            "linkedin_url": body.linkedin_url,
+            "funding_status": body.funding_status,
+            "designation": body.designation,
+            "salary_current": body.salary_current,
+            "salary_expected": body.salary_expected,
+            "interviewer_name": body.interviewer_name,
+            "interviewer_email": body.interviewer_email,
+            "interviewee_name": body.interviewee_name,
+            "interviewee_type": body.interviewee_type,
+            "jd_description": body.jd_description,
+            "details": body.details,
+        }.items()
+        if v is not None and v.strip()
+    }
+
+    client = PotentialClient(
+        company_id=company.id,
+        stage=stage,
+        priority=body.priority,
+        notes=body.notes,
+        manual_card=card_fields,
+    )
+    db.add(client)
+    await db.commit()
+    await db.refresh(client)
+
+    await log_action(
+        db, user,
+        action="pipeline.create_manual",
+        resource="pipeline",
+        request=request,
+        metadata={
+            "client_id": str(client.id),
+            "company_id": str(company.id),
+            "company_name": company.name,
+            "stage": stage,
+        },
     )
 
     return {"ok": True, "id": str(client.id), "company_name": company.name}

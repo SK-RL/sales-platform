@@ -342,6 +342,68 @@ export interface PipelineItem {
   // backends omit the field.
   applications_count?: number;
   last_job_at: string | null;
+  // Ticket bac45b42 — free-form fields present only on manually-
+  // created cards. Empty object for scan-sourced cards. Optional so
+  // older API responses don't break the page.
+  manual_card?: ManualCardFields;
+}
+
+// Ticket bac45b42 — manual pipeline card fields (mirrors the backend
+// ManualCardFields schema; all optional, stored in JSONB).
+export interface ManualCardFields {
+  jd_link?: string;
+  applied_id?: string;
+  linkedin_url?: string;
+  funding_status?: string;
+  designation?: string;
+  salary_current?: string;
+  salary_expected?: string;
+  interviewer_name?: string;
+  interviewer_email?: string;
+  interviewee_name?: string;
+  interviewee_type?: string;
+  jd_description?: string;
+  details?: string;
+}
+
+// Create payload for POST /pipeline/manual — 4 mandatory fields per
+// the ticket, everything else optional.
+export interface ManualPipelineCardPayload extends ManualCardFields {
+  company_name: string;
+  company_website: string;
+  jd_link: string;
+  applied_id: string;
+  stage?: string;
+  priority?: number;
+  notes?: string;
+}
+
+// ─── Interview question repository (ticket 8ef0e9c2) ──────────────
+export interface InterviewQuestionSet {
+  id: string;
+  user_id: string | null;
+  author_name: string | null;
+  company_name: string;
+  job_role: string;
+  interview_round: string;
+  interview_date: string | null; // ISO date
+  candidate_name: string;
+  interviewer: string;
+  questions: string; // one per line
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InterviewQuestionSetPayload {
+  company_name: string;
+  job_role: string;
+  interview_round: string;
+  interview_date?: string | null;
+  candidate_name?: string;
+  interviewer?: string;
+  questions: string;
+  notes?: string;
 }
 
 // F215: backend `/pipeline` now returns canonical `items: PipelineItem[]`

@@ -31,6 +31,7 @@ import { RoutinePage } from "./pages/RoutinePage";
 import { RoutineRunDetailPage } from "./pages/RoutineRunDetailPage";
 import { RequiredSetupPage } from "./pages/RequiredSetupPage";
 import { WorkWindowsPage } from "./pages/WorkWindowsPage";
+import { InterviewQuestionsPage } from "./pages/InterviewQuestionsPage";
 
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -286,6 +287,16 @@ export default function App() {
         element={
           <ProtectedLayout>
             <WorkWindowsPage />
+          </ProtectedLayout>
+        }
+      />
+      {/* Ticket 8ef0e9c2 — shared interview-question repository. All
+          authenticated users can read + contribute. */}
+      <Route
+        path="/interview-questions"
+        element={
+          <ProtectedLayout>
+            <InterviewQuestionsPage />
           </ProtectedLayout>
         }
       />

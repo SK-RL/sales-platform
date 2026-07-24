@@ -38,6 +38,10 @@ class PipelineItemOut(BaseModel):
     # aggregated query.
     applications_count: int = 0
     notes: str
+    # Ticket bac45b42 — free-form fields for manually-created cards.
+    # Empty dict for scan-sourced cards; see ManualCardFields for the
+    # documented shape.
+    manual_card: dict = {}
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -54,3 +58,73 @@ class PipelineUpdate(BaseModel):
     resume_id: UUID | None = None
     applied_by: UUID | None = None
     notes: str | None = Field(default=None, max_length=PIPELINE_MAX_NOTES_LENGTH)
+
+
+class ManualCardFields(BaseModel):
+    """Documented shape of ``PotentialClient.manual_card`` (JSONB).
+
+    Ticket bac45b42. Mandatory-vs-optional is enforced on
+    :class:`ManualPipelineCardRequest` (the create payload) — this
+    model is the storage contract: everything optional, unknown keys
+    forbidden so typos in future writers 422 instead of silently
+    persisting.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    jd_link: str | None = Field(default=None, max_length=1000)
+    applied_id: str | None = Field(
+        default=None, max_length=300,
+        description="Email or name of the identity used to apply.",
+    )
+    linkedin_url: str | None = Field(default=None, max_length=500)
+    funding_status: str | None = Field(default=None, max_length=200)
+    designation: str | None = Field(default=None, max_length=200)
+    salary_current: str | None = Field(default=None, max_length=100)
+    salary_expected: str | None = Field(default=None, max_length=100)
+    interviewer_name: str | None = Field(default=None, max_length=200)
+    interviewer_email: str | None = Field(default=None, max_length=300)
+    interviewee_name: str | None = Field(default=None, max_length=200)
+    interviewee_type: str | None = Field(
+        default=None, max_length=100,
+        description="Description type of the interviewee (per ticket).",
+    )
+    jd_description: str | None = Field(default=None, max_length=8000)
+    details: str | None = Field(default=None, max_length=8000)
+
+
+class ManualPipelineCardRequest(BaseModel):
+    """Create-payload for ``POST /pipeline/manual`` (ticket bac45b42).
+
+    The four mandatory ("restricted") fields per the ticket:
+    company name, company website, JD link, applied identity. The
+    company is found-or-created by slugified name — manual cards must
+    not be blocked on the company already existing in the scraped
+    corpus.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_name: str = Field(min_length=1, max_length=300)
+    company_website: str = Field(min_length=4, max_length=500)
+    jd_link: str = Field(min_length=4, max_length=1000)
+    applied_id: str = Field(min_length=1, max_length=300)
+
+    stage: str | None = Field(
+        default=None,
+        description="Pipeline stage key; defaults to the first active stage.",
+    )
+    priority: int = Field(default=0, ge=0, le=PIPELINE_MAX_PRIORITY)
+    notes: str = Field(default="", max_length=PIPELINE_MAX_NOTES_LENGTH)
+
+    linkedin_url: str | None = Field(default=None, max_length=500)
+    funding_status: str | None = Field(default=None, max_length=200)
+    designation: str | None = Field(default=None, max_length=200)
+    salary_current: str | None = Field(default=None, max_length=100)
+    salary_expected: str | None = Field(default=None, max_length=100)
+    interviewer_name: str | None = Field(default=None, max_length=200)
+    interviewer_email: str | None = Field(default=None, max_length=300)
+    interviewee_name: str | None = Field(default=None, max_length=200)
+    interviewee_type: str | None = Field(default=None, max_length=100)
+    jd_description: str | None = Field(default=None, max_length=8000)
+    details: str | None = Field(default=None, max_length=8000)
