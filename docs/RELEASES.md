@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-24 · a1447b0 · sha-a1447b0
+Merge feat/google-sheet-ingestion: F351 — team Google Sheets as scan source
+
+
 ## 2026-07-24 · c31e60f · sha-c31e60f
 fix(ci): SSH keepalives on deploy/rollback — backup outlives idle timeout
 
