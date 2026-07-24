@@ -227,11 +227,29 @@ USA_SIGNALS = [
 ]
 
 # UAE-specific signals
+#
+# F350 (UAE sourcing push): expanded beyond the original
+# dubai/abu-dhabi/uae set. Matched against location_raw +
+# remote_scope only (never the description body), so short tokens
+# like "gcc" can't collide with e.g. the GNU compiler in a JD.
 UAE_SIGNALS = [
     "uae only", "uae-based", "emirates", "dubai", "abu dhabi",
     "remote - uae", "remote (uae)",
     "united arab emirates", "uae remote", "remote uae",
     "middle east", "gcc",
+    # F350 — remaining emirates + major cities. "ras al khaimah"
+    # also appears as the RAK initialism in listings; "rak " with a
+    # trailing space would be too fragile, so only the full name.
+    "sharjah", "ajman", "ras al khaimah", "fujairah",
+    "umm al quwain", "al ain",
+    # F350 — free zones / business districts that listings use as
+    # the location string instead of a city.
+    "difc", "adgm", "jafza", "dubai internet city", "dubai media city",
+    "masdar city", "dubai silicon oasis",
+    # F350 — phrasing variants the original list missed.
+    "based in uae", "based in dubai", "based in abu dhabi",
+    "dubai-based", "abu dhabi-based",
+    "uae residents", "uae national", "emirati",
 ]
 
 # Country-specific signals that are NOT global (region-locked remote)
