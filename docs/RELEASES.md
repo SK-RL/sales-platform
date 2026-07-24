@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-24 · c31e60f · sha-c31e60f
+fix(ci): SSH keepalives on deploy/rollback — backup outlives idle timeout
+
+
 ## 2026-06-24 · 5b3feb4 · sha-5b3feb4
 Merge fix/adzuna-migration-unblock-deploy: restore broken prod deploy pipeline
 
