@@ -296,3 +296,55 @@ def test_frontend_pieces_exist():
     assert "/interview-questions" in sidebar
     pipeline_page = (front / "pages" / "PipelinePage.tsx").read_text()
     assert "createManualPipelineCard" in pipeline_page
+
+
+# ═══ F350 — UAE sourcing push ════════════════════════════════════
+
+
+class TestUAESourcingPush:
+    """Expanded UAE signals + seeded UAE-hub employer boards."""
+
+    UAE_LOCATIONS = [
+        ("Sharjah, UAE", "remote"),
+        ("Remote - Ras Al Khaimah", "remote"),
+        ("DIFC, Dubai", ""),
+        ("Dubai Internet City", ""),
+        ("Based in UAE (remote)", "remote"),
+        ("Abu Dhabi-based", ""),
+        ("Al Ain", ""),
+        ("Masdar City, Abu Dhabi", ""),
+    ]
+
+    def test_expanded_signals_classify_as_uae(self):
+        from app.workers.tasks._role_matching import (
+            classify_geography,
+            classify_remote_policy,
+        )
+
+        for loc, scope in self.UAE_LOCATIONS:
+            assert classify_geography(loc, scope) == "uae_only", loc
+            policy, countries = classify_remote_policy(loc, scope)
+            assert (policy, countries) == ("country_restricted", ["AE"]), loc
+
+    def test_no_false_positive_on_ai_engineer(self):
+        """'al ain' is a substring hazard — 'Principal AI Engineer'
+        must not classify as UAE."""
+        from app.workers.tasks._role_matching import classify_geography
+
+        assert classify_geography("Principal AI Engineer - Remote US", "remote") == "usa_only"
+        assert classify_geography("Berlin, Germany", "") == ""
+
+    def test_uae_board_seed_migration(self):
+        from pathlib import Path
+
+        versions = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+        target = next(versions.glob("*uae_employer_boards*.py"))
+        src = target.read_text()
+        # The four probed-live boards, all on greenhouse.
+        for slug in ("careem", "okx", "bybit", "tamara"):
+            assert f'"{slug}"' in src, f"missing board seed: {slug}"
+        # Introspected column lists (post-relevance_score-incident
+        # defence) + per-board existence guard.
+        assert "inspector.get_columns" in src
+        assert "SELECT id FROM company_ats_boards" in src
+        assert 'down_revision = "p2q3r4s5t6u7"' in src
