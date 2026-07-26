@@ -219,3 +219,59 @@ class TestTeamSheetHeaderShape:
         assert job["company_name"] == "Canonical"
         assert job["url"] == "https://canonical.com/careers/4468036"
         assert job["location_raw"] == "WFA"
+
+
+# ═══ F352 — sheet→board ATS-link promotion ═══════════════════════
+
+
+class TestPromoteSheetAtsLinks:
+    def test_extract_ats_ref_known_platforms(self):
+        from app.workers.tasks.discovery_task import _extract_ats_ref
+
+        cases = [
+            ("https://boards.greenhouse.io/canonical/jobs/4468036", ("greenhouse", "canonical")),
+            ("https://job-boards.greenhouse.io/calendly/jobs/123", ("greenhouse", "calendly")),
+            ("https://jobs.lever.co/coinmarketcap/abc-def", ("lever", "coinmarketcap")),
+            ("https://jobs.ashbyhq.com/DoubleZero/xyz", ("ashby", "DoubleZero")),
+            ("https://apply.workable.com/covergo/j/ABC/", ("workable", "covergo")),
+            ("https://vexxhost.bamboohr.com/careers/42", ("bamboohr", "vexxhost")),
+            ("https://bunq.recruitee.com/o/devops", ("recruitee", "bunq")),
+        ]
+        for url, expected in cases:
+            assert _extract_ats_ref(url) == expected, url
+
+    def test_extract_ats_ref_rejects_non_ats_and_junk(self):
+        from app.workers.tasks.discovery_task import _extract_ats_ref
+
+        for url in (
+            "",
+            "https://example.com/careers",
+            "https://wellfound.com/jobs/123",       # no fetcher that works
+            "https://docs.google.com/spreadsheets/d/x",
+            "https://boards.greenhouse.io/embed",   # denylisted segment
+        ):
+            assert _extract_ats_ref(url) is None, url
+
+    def test_ashby_slug_case_preserved(self):
+        """Ashby slugs are case-sensitive — lowercasing would 404 the
+        board on every scan until stale-cull removed it."""
+        from app.workers.tasks.discovery_task import _extract_ats_ref
+
+        assert _extract_ats_ref("https://jobs.ashbyhq.com/DoubleZero/x") == ("ashby", "DoubleZero")
+
+    def test_task_registered_and_scheduled(self):
+        import inspect as _inspect
+
+        from app.workers.celery_app import celery_app
+        from app.workers.tasks import discovery_task
+
+        assert callable(discovery_task.promote_sheet_ats_links)
+        # Beat entry exists and points at the right task name.
+        beat = celery_app.conf.beat_schedule
+        entry = beat.get("promote_sheet_ats_links")
+        assert entry is not None, "beat entry missing"
+        assert entry["task"].endswith("promote_sheet_ats_links")
+        # Guarded: per-run cap + board-existence check.
+        src = _inspect.getsource(discovery_task.promote_sheet_ats_links)
+        assert "limit" in src
+        assert "CompanyATSBoard.platform == platform" in src

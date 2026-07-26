@@ -903,3 +903,143 @@ def fingerprint_existing_companies(self, limit: int = 50, only_unfingerprinted: 
         raise self.retry(exc=e, countdown=300)
     finally:
         session.close()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# F352 — promote ATS links found in Google-Sheet rows into boards
+# ─────────────────────────────────────────────────────────────────────
+
+# ATS URL patterns → (platform, slug-extraction regex). Only platforms
+# with a registered fetcher; slugs keep their original case (Ashby
+# slugs are case-sensitive).
+import re as _re
+
+_SHEET_ATS_LINK_PATTERNS: list[tuple[str, "_re.Pattern[str]"]] = [
+    ("greenhouse", _re.compile(r"greenhouse\.io/(?:embed/job_board\?for=)?([a-z0-9_-]+)", _re.I)),
+    ("lever", _re.compile(r"jobs\.lever\.co/([a-zA-Z0-9_-]+)")),
+    ("ashby", _re.compile(r"jobs\.ashbyhq\.com/([a-zA-Z0-9._-]+)")),
+    ("workable", _re.compile(r"apply\.workable\.com/([a-z0-9_-]+)", _re.I)),
+    ("smartrecruiters", _re.compile(r"(?:jobs|careers)\.smartrecruiters\.com/([a-zA-Z0-9_-]+)")),
+    ("recruitee", _re.compile(r"([a-z0-9-]+)\.recruitee\.com", _re.I)),
+    ("bamboohr", _re.compile(r"([a-z0-9-]+)\.bamboohr\.com", _re.I)),
+]
+
+# Path segments that greet the slug position in non-board greenhouse
+# URLs — never valid board tokens.
+_SLUG_DENYLIST = {"embed", "boards", "jobs", "job", "careers", "www"}
+
+
+def _extract_ats_ref(url: str) -> tuple[str, str] | None:
+    """Return ``(platform, slug)`` when ``url`` points at a scrapeable
+    ATS board we recognise, else None."""
+    if not url:
+        return None
+    for platform, pattern in _SHEET_ATS_LINK_PATTERNS:
+        m = pattern.search(url)
+        if m:
+            slug = m.group(1)
+            if slug.lower() in _SLUG_DENYLIST or len(slug) < 2:
+                return None
+            return platform, slug
+    return None
+
+
+@celery_app.task(name="app.workers.tasks.discovery_task.promote_sheet_ats_links", bind=True, max_retries=1)
+def promote_sheet_ats_links(self, limit: int = 100):
+    """F352 — turn team-sheet job links into directly-scraped boards.
+
+    Gap analysis on the team's sheets (2026-07-24): 33% of sheet rows
+    (159 companies) linked to public boards on ATS platforms we
+    already scrape — Greenhouse/Ashby/Lever/Workable/BambooHR/
+    SmartRecruiters — but the boards were never registered, so the
+    platform only ever saw the single row the team hand-curated
+    instead of the employer's full live board.
+
+    Daily beat (01:00 UTC, after the 00:00 scan wave ingests fresh
+    sheet rows): walk ``jobs.platform='google_sheet'`` rows, extract
+    ATS references from their URLs, and register any board we don't
+    have yet. The next 08:00 scan wave then pulls each new board in
+    full. One sheet row from Canonical → Canonical's entire
+    Greenhouse board.
+
+    Safety:
+      * capped at ``limit`` new boards per run (spread large backlogs
+        across days, same rationale as discovery_promote_batch_size);
+      * existence-guarded per (platform, slug);
+      * dead/typo'd slugs cost a few empty scans and are then culled
+        by the stale-board auto-deactivator — the designed backstop
+        for unprobed promotions;
+      * companies are find-or-created by slug so a sheet company that
+        later appears via discovery lands on the same row.
+    """
+    from app.models.job import Job
+
+    session = SyncSession()
+    added = 0
+    seen: set[tuple[str, str]] = set()
+    try:
+        sheet_jobs = session.execute(
+            select(Job.url).where(Job.platform == "google_sheet")
+        ).scalars().all()
+
+        for url in sheet_jobs:
+            if added >= limit:
+                logger.info(
+                    "promote_sheet_ats_links: hit per-run cap (%d) — "
+                    "remainder promotes tomorrow", limit,
+                )
+                break
+            ref = _extract_ats_ref(url or "")
+            if not ref or ref in seen:
+                continue
+            seen.add(ref)
+            platform, slug = ref
+
+            exists = session.execute(
+                select(CompanyATSBoard.id).where(
+                    CompanyATSBoard.platform == platform,
+                    CompanyATSBoard.slug == slug,
+                )
+            ).scalar_one_or_none()
+            if exists:
+                continue
+
+            cslug = _re.sub(r"[^a-z0-9]+", "-", slug.lower()).strip("-")[:200]
+            company = session.execute(
+                select(Company).where(Company.slug == cslug)
+            ).scalar_one_or_none()
+            if not company:
+                company = Company(
+                    id=uuid.uuid4(),
+                    # Board slug as a provisional display name — the
+                    # enrichment pipeline improves it later.
+                    name=slug.replace("-", " ").title(),
+                    slug=cslug,
+                    is_target=False,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                session.add(company)
+                session.flush()
+
+            session.add(CompanyATSBoard(
+                id=uuid.uuid4(),
+                company_id=company.id,
+                platform=platform,
+                slug=slug,
+                is_active=True,
+            ))
+            added += 1
+
+        session.commit()
+        logger.info(
+            "promote_sheet_ats_links: %d new boards from %d sheet rows",
+            added, len(sheet_jobs),
+        )
+        return {"boards_added": added, "sheet_rows": len(sheet_jobs)}
+    except Exception as e:
+        logger.exception("promote_sheet_ats_links failed: %s", e)
+        session.rollback()
+        raise self.retry(exc=e, countdown=300)
+    finally:
+        session.close()
