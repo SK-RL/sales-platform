@@ -236,3 +236,223 @@ def deduplicate_contacts():
         raise
     finally:
         session.close()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# F354 — recruiter/HR contact harvesting (sheet columns + JD text)
+# ─────────────────────────────────────────────────────────────────────
+
+import re as _re
+import uuid as _uuid
+
+_EMAIL_RE = _re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+
+# Local-part tokens that mark a hiring/application mailbox. These are
+# accepted from ANY domain (an agency gmail published in a JD is still
+# an intentional application address).
+_HIRING_LOCAL_TOKENS = (
+    "career", "job", "talent", "recruit", "hr", "hiring",
+    "apply", "application", "people", "resume", "cv",
+)
+
+# Domains that appear inside JD boilerplate but are never a contact:
+# ATS infrastructure, trackers, social, image CDNs.
+_JUNK_EMAIL_DOMAINS = (
+    "greenhouse.io", "lever.co", "ashbyhq.com", "workable.com",
+    "bamboohr.com", "myworkdayjobs.com", "smartrecruiters.com",
+    "jobvite.com", "recruitee.com", "linkedin.com", "example.com",
+    "sentry.io", "wixpress.com", "2x.png", "email.com",
+)
+
+
+def _looks_like_hiring_mailbox(email: str) -> bool:
+    local = email.split("@", 1)[0].lower()
+    return any(tok in local for tok in _HIRING_LOCAL_TOKENS)
+
+
+def _company_domain(company: Company) -> str:
+    dom = (company.domain or "").strip().lower()
+    if dom:
+        return dom
+    website = (company.website or "").strip().lower()
+    m = _re.search(r"https?://(?:www\.)?([^/]+)", website)
+    return m.group(1) if m else ""
+
+
+def _upsert_contact(
+    session, company_id, *, email: str, first_name: str = "",
+    last_name: str = "", title: str = "", linkedin: str = "",
+    role_category: str = "talent", source: str = "",
+    confidence: float = 0.5,
+) -> bool:
+    """Insert a contact unless one with the same email already exists
+    for the company (matches the F282 partial-unique semantics:
+    case-insensitive, trimmed). Returns True when inserted."""
+    from app.models.company_contact import CompanyContact
+
+    email_norm = email.strip().lower()
+    if not email_norm:
+        return False
+    existing = session.execute(
+        select(CompanyContact.id).where(
+            CompanyContact.company_id == company_id,
+            func.lower(func.trim(CompanyContact.email)) == email_norm,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return False
+    session.add(CompanyContact(
+        id=_uuid.uuid4(),
+        company_id=company_id,
+        first_name=first_name[:200],
+        last_name=last_name[:200],
+        title=title[:300],
+        role_category=role_category,
+        email=email.strip()[:300],
+        linkedin_url=linkedin[:500],
+        source=source,
+        confidence_score=confidence,
+    ))
+    return True
+
+
+@celery_app.task(name="app.workers.tasks.enrichment_task.sync_sheet_contacts", bind=True, max_retries=1)
+def sync_sheet_contacts(self):
+    """F354a — promote recruiter POCs from team Google-Sheet rows into
+    CompanyContact.
+
+    The team's sheets carry hand-curated contact columns (Name /
+    Designation / Email id / LinkedIn / Company Email) that the
+    fetcher captures into ``raw_json.row``. Nightly, walk every
+    google_sheet job and upsert those contacts onto the job's
+    (already correctly-resolved, F353) company:
+
+      * ``contact_email`` → a named person, role_category="talent",
+        confidence 0.9 (team-curated beats every scraped source).
+      * ``company_email`` → the employer's hiring mailbox,
+        role_category="hiring", confidence 0.8.
+
+    Idempotent via the (company_id, lower(email)) existence check —
+    re-runs and unchanged sheet rows are no-ops.
+    """
+    from app.models.job import Job
+
+    session = SyncSession()
+    added = 0
+    try:
+        rows = session.execute(
+            select(Job.company_id, Job.raw_json).where(
+                Job.platform == "google_sheet"
+            )
+        ).all()
+        for company_id, raw_json in rows:
+            row = (raw_json or {}).get("row") or {}
+            contact_email = (row.get("contact_email") or "").strip()
+            company_email = (row.get("company_email") or "").strip()
+            name = (row.get("contact_name") or "").strip()
+            first, _, last = name.partition(" ")
+            if contact_email and _EMAIL_RE.fullmatch(contact_email):
+                if _upsert_contact(
+                    session, company_id,
+                    email=contact_email,
+                    first_name=first, last_name=last,
+                    title=(row.get("contact_title") or "").strip(),
+                    linkedin=(row.get("contact_linkedin") or "").strip(),
+                    role_category="talent",
+                    source="google_sheet",
+                    confidence=0.9,
+                ):
+                    added += 1
+            if company_email and _EMAIL_RE.fullmatch(company_email):
+                if _upsert_contact(
+                    session, company_id,
+                    email=company_email,
+                    role_category="hiring",
+                    source="google_sheet",
+                    confidence=0.8,
+                ):
+                    added += 1
+        session.commit()
+        logger.info("sync_sheet_contacts: %d contacts added from %d sheet rows", added, len(rows))
+        return {"contacts_added": added, "sheet_rows": len(rows)}
+    except Exception as e:
+        logger.exception("sync_sheet_contacts failed: %s", e)
+        session.rollback()
+        raise self.retry(exc=e, countdown=300)
+    finally:
+        session.close()
+
+
+@celery_app.task(name="app.workers.tasks.enrichment_task.mine_jd_contact_emails", bind=True, max_retries=1)
+def mine_jd_contact_emails(self, batch_size: int = 5000):
+    """F354b — mine employer-published emails out of stored JDs.
+
+    235k+ job descriptions sit in the DB; many contain application /
+    recruiter addresses the employer published precisely to be
+    contacted ("send your CV to talent@acme.com"). Nightly, scan a
+    batch (SQL-prefiltered to rows containing '@') and upsert:
+
+      * hiring-keyword local parts (careers@/talent@/recruit@/hr@/…)
+        → role_category="hiring", any domain except ATS/tracker junk,
+        confidence 0.7;
+      * other emails → accepted ONLY when the domain matches the
+        job's company domain (person address on the employer's own
+        domain) → role_category="talent", confidence 0.6. Everything
+        else is discarded — that rule is what keeps random JD noise
+        (partner logos, support addresses of tools) out.
+
+    Batch is ordered by newest-first so fresh postings are mined the
+    night they arrive; the idempotent upsert makes overlap across
+    nights free.
+    """
+    from app.models.job import Job, JobDescription
+
+    session = SyncSession()
+    added = scanned = 0
+    try:
+        rows = session.execute(
+            select(
+                JobDescription.text_content, Job.company_id, Job.id
+            )
+            .join(Job, Job.id == JobDescription.job_id)
+            .where(JobDescription.text_content.like("%@%"))
+            .order_by(JobDescription.fetched_at.desc())
+            .limit(batch_size)
+        ).all()
+
+        # Company-domain cache for the person-email rule.
+        domain_cache: dict = {}
+        for text, company_id, _job_id in rows:
+            scanned += 1
+            for email in set(_EMAIL_RE.findall(text or "")[:20]):
+                domain = email.split("@", 1)[1].lower()
+                if any(domain.endswith(j) for j in _JUNK_EMAIL_DOMAINS):
+                    continue
+                if _looks_like_hiring_mailbox(email):
+                    role, conf = "hiring", 0.7
+                else:
+                    if company_id not in domain_cache:
+                        comp = session.get(Company, company_id)
+                        domain_cache[company_id] = _company_domain(comp) if comp else ""
+                    cdom = domain_cache[company_id]
+                    if not cdom or not domain.endswith(cdom):
+                        continue
+                    role, conf = "talent", 0.6
+                if _upsert_contact(
+                    session, company_id,
+                    email=email, role_category=role,
+                    source="jd_text", confidence=conf,
+                ):
+                    added += 1
+        session.commit()
+        logger.info(
+            "mine_jd_contact_emails: %d contacts from %d descriptions",
+            added, scanned,
+        )
+        return {"contacts_added": added, "descriptions_scanned": scanned}
+    except Exception as e:
+        logger.exception("mine_jd_contact_emails failed: %s", e)
+        session.rollback()
+        raise self.retry(exc=e, countdown=300)
+    finally:
+        session.close()

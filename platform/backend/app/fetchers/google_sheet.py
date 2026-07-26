@@ -122,6 +122,15 @@ _HEADER_ALIASES: dict[str, tuple[str, ...]] = {
         "added", "added on", "posting date",
     ),
     "notes": ("notes", "note", "remarks", "comments", "detail", "details"),
+    # F354 — recruiter/HR contact columns the team curates in their
+    # sheets. Capture-only at the fetcher level (they ride along in
+    # raw_json.row); the nightly ``sync_sheet_contacts`` task promotes
+    # them into CompanyContact rows for the company section.
+    "contact_name": ("contact name", "poc", "point of contact", "recruiter name", "hr name", "name"),
+    "contact_email": ("email id", "email_id", "contact email", "recruiter email", "hr email", "poc email"),
+    "company_email": ("company email", "company_email", "careers email"),
+    "contact_linkedin": ("linkedin", "linkedin url", "contact linkedin"),
+    "contact_title": ("contact designation", "contact title", "poc designation"),
 }
 
 _SHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
@@ -235,6 +244,15 @@ class GoogleSheetFetcher(BaseFetcher):
                         break
                 if field in out:
                     break
+        # F354 fixup: the team sheets carry BOTH "Technology/
+        # Designation" (the job title) and a bare "Designation"
+        # column describing the CONTACT person. When title resolved
+        # to a different column, re-purpose the bare "designation"
+        # column as the contact's title.
+        if "contact_title" not in out and "designation" in cleaned:
+            didx = cleaned.index("designation")
+            if out.get("title") != didx:
+                out["contact_title"] = didx
         return out
 
     def _normalize_row(
