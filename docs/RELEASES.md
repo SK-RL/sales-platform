@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-26 · 16b9f63 · sha-16b9f63
+fix(ci): rebase-retry the release-log push — stop false deploy failures
+
+
 ## 2026-07-26 · 4a24988 · sha-4a24988
 Merge fix/sheet-company-attribution: F353
 
