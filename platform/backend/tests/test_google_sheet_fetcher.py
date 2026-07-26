@@ -180,3 +180,42 @@ def test_registered_in_fetcher_map_and_platform_filter():
     assert FETCHER_MAP.get("google_sheet") is GoogleSheetFetcher
     assert "google_sheet" in get_args(PlatformFilter)
     assert GoogleSheetFetcher.PLATFORM == "google_sheet"
+
+
+class TestTeamSheetHeaderShape:
+    """The team's real sheets (registered 2026-07-24) use this header
+    convention — lock the mapping so an alias refactor can't break
+    the live boards."""
+
+    TEAM_CSV = (
+        "Date,Name of Company,Company Website,Company Email,Name,"
+        "Designation,Email id,LinkedIn,Technology/Designation,"
+        "Job Post Link,Location,Salary Range,Name of Freelancer,"
+        "Apply Date,From Freelance/Company,Appiled From,"
+        "Applies Through Form,,Response by team\n"
+        "07/04/2026,Canonical,https://canonical.com/,,John Contact,"
+        "Hiring Manager,hm@x.com,li.com/x,Site Reliability Engineer,"
+        "https://canonical.com/careers/4468036,WFA,,,,,,,,\n"
+    )
+
+    def _fetch(self):
+        from app.fetchers.google_sheet import GoogleSheetFetcher
+
+        client = _client_with_csv(self.TEAM_CSV)
+        return GoogleSheetFetcher(client=client).fetch(SHEET_ID)
+
+    def test_title_comes_from_technology_designation_not_contact(self):
+        """'Designation' (col 6) is the CONTACT's title ('Hiring
+        Manager'); the job title lives in 'Technology/Designation'
+        (col 9). Alias-priority matching must pick the latter even
+        though the former appears in an earlier column."""
+        jobs = self._fetch()
+        assert len(jobs) == 1
+        assert jobs[0]["title"] == "Site Reliability Engineer"
+        assert jobs[0]["title"] != "Hiring Manager"
+
+    def test_company_and_url_aliases(self):
+        job = self._fetch()[0]
+        assert job["company_name"] == "Canonical"
+        assert job["url"] == "https://canonical.com/careers/4468036"
+        assert job["location_raw"] == "WFA"

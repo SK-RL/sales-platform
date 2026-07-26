@@ -69,18 +69,34 @@ EXPORT_URL = "https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=cs
 # can't flood the scan. Real curated lists are dozens-to-hundreds.
 _MAX_ROWS = 5000
 
-# Canonical field → accepted header spellings (lowercased, stripped).
+# Canonical field → accepted header spellings (lowercased, stripped),
+# in PRIORITY ORDER: ``_map_headers`` walks aliases first and columns
+# second, so an earlier alias beats a later one even when the later
+# one appears in an earlier column. That ordering matters for the
+# team's real sheets, where "Technology/Designation" (the job title)
+# coexists with a bare "Designation" column that describes the
+# *contact person* — naive column-order matching grabbed the wrong
+# one.
 _HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "title": (
-        "title", "job title", "job_title", "jobtitle", "role",
-        "position", "designation", "job role", "job",
+        "title", "job title", "job_title", "jobtitle",
+        # Team-sheet convention: the role column is headed
+        # "Technology/Designation" — must outrank bare "designation".
+        "technology/designation", "technology / designation",
+        "technology",
+        "role", "position", "job role", "job",
+        "designation",
     ),
     "company": (
         "company", "company name", "company_name", "companyname",
+        # Team-sheet convention.
+        "name of company", "company title",
         "client", "employer", "organisation", "organization", "org",
     ),
     "url": (
         "url", "link", "job link", "job_link", "job url", "job_url",
+        # Team-sheet convention.
+        "job post link", "job post url", "job posting link",
         "jd link", "jd_link", "jd", "apply link", "apply_link",
         "application link", "application_link", "jd url",
     ),
@@ -202,13 +218,22 @@ class GoogleSheetFetcher(BaseFetcher):
 
     @staticmethod
     def _map_headers(header_row: list[str]) -> dict[str, int]:
-        """Map canonical field names → column index, first match wins."""
+        """Map canonical field names → column index.
+
+        Aliases are walked in priority order, columns second — so
+        "Technology/Designation" (listed early in the title aliases)
+        beats a bare "Designation" column even when the latter sits
+        further left in the sheet. See the _HEADER_ALIASES comment.
+        """
         out: dict[str, int] = {}
         cleaned = [h.strip().lower() for h in header_row]
         for field, aliases in _HEADER_ALIASES.items():
-            for idx, header in enumerate(cleaned):
-                if header in aliases:
-                    out[field] = idx
+            for alias in aliases:
+                for idx, header in enumerate(cleaned):
+                    if header == alias:
+                        out[field] = idx
+                        break
+                if field in out:
                     break
         return out
 
