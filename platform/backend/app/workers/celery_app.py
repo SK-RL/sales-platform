@@ -110,6 +110,16 @@ if SCAN_MODE == "aggressive":
             "task": "app.workers.tasks.discovery_task.discover_and_add_boards",
             "schedule": crontab(minute=0, hour=0),  # Daily at midnight
         },
+        # F352 — promote ATS links found in team Google-Sheet rows into
+        # directly-scraped boards. Runs at 01:00 UTC, AFTER the 00:00
+        # scan wave has ingested fresh sheet rows; the 08:00 wave then
+        # pulls each newly-promoted board in full. Gap analysis
+        # 2026-07-24: 33% of sheet rows pointed at public boards on
+        # platforms we scrape but had never registered.
+        "promote_sheet_ats_links": {
+            "task": "app.workers.tasks.discovery_task.promote_sheet_ats_links",
+            "schedule": crontab(minute=0, hour=1),
+        },
         # Phase-A fallback groundwork: fingerprint company websites to
         # populate `Company.careers_url` for future ATS-lockdown fallback.
         # Runs at 00:30 UTC daily — 30 min after the ATS-side discovery
