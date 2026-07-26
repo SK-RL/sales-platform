@@ -120,6 +120,18 @@ if SCAN_MODE == "aggressive":
             "task": "app.workers.tasks.discovery_task.promote_sheet_ats_links",
             "schedule": crontab(minute=0, hour=1),
         },
+        # F354 — recruiter/HR contact harvesting. Sheet POC columns at
+        # 01:30 (after the promote pass), JD-text email mining at
+        # 02:30 (5k newest descriptions/night; idempotent upserts make
+        # the multi-night sweep of the 235k backlog free of dupes).
+        "sync_sheet_contacts": {
+            "task": "app.workers.tasks.enrichment_task.sync_sheet_contacts",
+            "schedule": crontab(minute=30, hour=1),
+        },
+        "mine_jd_contact_emails": {
+            "task": "app.workers.tasks.enrichment_task.mine_jd_contact_emails",
+            "schedule": crontab(minute=30, hour=2),
+        },
         # Phase-A fallback groundwork: fingerprint company websites to
         # populate `Company.careers_url` for future ATS-lockdown fallback.
         # Runs at 00:30 UTC daily — 30 min after the ATS-side discovery
