@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-26 · 4a24988 · sha-4a24988
+Merge fix/sheet-company-attribution: F353
+
+
 ## 2026-07-24 · a1447b0 · sha-a1447b0
 Merge feat/google-sheet-ingestion: F351 — team Google Sheets as scan source
 
