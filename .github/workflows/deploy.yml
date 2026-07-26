@@ -614,4 +614,18 @@ jobs:
           # [skip ci] prevents the Deploy workflow from re-triggering
           # on our own push — otherwise each deploy would loop once.
           git commit -m "docs(releases): append ${{ needs.build.outputs.tag }} [skip ci]"
+          # Race-hardening (2026-07-26): three consecutive deploys
+          # reported "failure" solely because main moved (another merge
+          # landed) between checkout and this push — a non-fast-forward
+          # reject on a DOCS commit made a fully-green deploy look
+          # broken, which is exactly how the May pipeline outage went
+          # unnoticed. Rebase-retry a few times; the release entry is
+          # content-independent of whatever else landed on main.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt) — rebasing on latest main"
+            git pull --rebase origin main
+          done
           git push origin HEAD:main
