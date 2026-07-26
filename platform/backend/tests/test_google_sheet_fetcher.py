@@ -275,3 +275,34 @@ class TestPromoteSheetAtsLinks:
         src = _inspect.getsource(discovery_task.promote_sheet_ats_links)
         assert "limit" in src
         assert "CompanyATSBoard.platform == platform" in src
+
+
+# ═══ F353 — per-row company resolution for sheet boards ══════════
+
+
+def test_google_sheet_is_aggregator_regardless_of_slug():
+    """Sheet boards use the sheet ID as slug (never "__all__"), so
+    the aggregator company-resolution needed its own condition arm.
+    Pre-fix, all sheet jobs were attributed to the board's synthetic
+    company instead of the per-row employers."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "app" / "workers" / "tasks" / "scan_task.py"
+    ).read_text()
+    assert 'or board.platform == "google_sheet"' in src
+
+
+def test_google_sheet_rehome_guarded_by_external_id():
+    """The self-heal must only re-home rows matched by their OWN
+    external_id — a title-match fallback row could belong to a
+    different employer and must not be stolen."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "app" / "workers" / "tasks" / "scan_task.py"
+    ).read_text()
+    assert "existing.external_id == external_id" in src
+    assert "existing.company_id = company.id" in src

@@ -434,6 +434,18 @@ def _upsert_job(
     now = datetime.now(timezone.utc)
 
     if existing:
+        # F353 self-heal: sheet rows ingested before google_sheet
+        # joined the aggregator set were attributed to the board's
+        # synthetic "Google Sheet — …" company. On re-scan, the same
+        # row (matched by ITS OWN external_id — never a title-match
+        # fallback, which could belong to a different employer) gets
+        # re-homed to the correctly-resolved per-row company.
+        if (
+            board.platform == "google_sheet"
+            and existing.external_id == external_id
+            and existing.company_id != company.id
+        ):
+            existing.company_id = company.id
         existing.title = title
         existing.title_normalized = title_normalized
         existing.url = raw_job.get("url", existing.url)
@@ -757,7 +769,15 @@ def _scan_board(
             # description-body regex, then "unknown").
             "workingnomads",
         }
-        is_aggregator = board.platform in _AGGREGATOR_PLATFORMS and board.slug == "__all__"
+        # F353: google_sheet boards are aggregators too — every row
+        # names its own employer — but their slug is the sheet ID
+        # (one board per sheet), never "__all__", so they need their
+        # own arm of this condition. Pre-fix, sheet jobs were all
+        # attributed to the board's synthetic "Google Sheet — …"
+        # company instead of the per-row companies.
+        is_aggregator = (
+            board.platform in _AGGREGATOR_PLATFORMS and board.slug == "__all__"
+        ) or board.platform == "google_sheet"
 
         for raw_job in raw_jobs:
             try:
