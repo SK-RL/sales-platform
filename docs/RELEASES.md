@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-31 · 2fa1bc9 · sha-2fa1bc9
+fix(celery): F356 — register beat tasks that were silently unregistered
+
+
 ## 2026-07-31 · 8bfc3e3 · sha-8bfc3e3
 fix(deploy): point GHCR pull at sk-rl after org rename
 
