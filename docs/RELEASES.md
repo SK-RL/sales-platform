@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-31 · 8bfc3e3 · sha-8bfc3e3
+fix(deploy): point GHCR pull at sk-rl after org rename
+
+
 ## 2026-07-26 · ccff960 · sha-ccff960
 Merge feat/contact-harvesting: F354 — recruiter email sources
 
