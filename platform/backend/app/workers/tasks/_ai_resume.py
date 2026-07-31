@@ -24,6 +24,7 @@ Hardening applied here:
      already defeats guessing.
 """
 
+from app.ai_models import CLAUDE_SONNET
 import json
 import logging
 import re
@@ -139,7 +140,7 @@ def customize_resume(
         )
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_SONNET,
             max_tokens=4000,
             system=system,
             messages=[{"role": "user", "content": user_content}],

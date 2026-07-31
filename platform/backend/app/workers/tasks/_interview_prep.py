@@ -1,5 +1,6 @@
 """AI-powered interview preparation using Claude API."""
 
+from app.ai_models import CLAUDE_SONNET
 import json
 import logging
 from app.config import get_settings
@@ -81,7 +82,7 @@ Generate exactly: 8 questions (mix of categories), 4 talking points, 3 company r
 Base all suggested answers on ACTUAL resume content — never fabricate experience."""
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_SONNET,
             max_tokens=3000,
             messages=[{"role": "user", "content": prompt}],
         )

@@ -1,5 +1,6 @@
 """Cover letter generation API."""
 
+from app.ai_models import CLAUDE_OPUS
 import asyncio
 from typing import Literal
 from uuid import UUID
@@ -139,7 +140,7 @@ async def generate(body: CoverLetterRequest, user: User = Depends(get_current_us
                 cover_letter_text=result.get("cover_letter", ""),
                 job_id=job.id,
                 tone=body.tone,
-                model_version="claude-sonnet-4-20250514",
+                model_version=CLAUDE_OPUS,
             )
         except Exception:
             pass

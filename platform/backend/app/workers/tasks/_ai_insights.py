@@ -55,7 +55,8 @@ logger = logging.getLogger(__name__)
 USER_INSIGHTS_PROMPT_VERSION = "user_insights.1.0"
 PRODUCT_INSIGHTS_PROMPT_VERSION = "product_insights.1.0"
 
-MODEL_VERSION = "claude-sonnet-4-20250514"
+from app.ai_models import CLAUDE_SONNET
+MODEL_VERSION = CLAUDE_SONNET
 
 # Conservative caps — insight generators don't need long output. 1500
 # tokens ≈ 5-7 well-formed insight items with body text. Budget per

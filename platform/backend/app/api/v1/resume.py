@@ -1,5 +1,6 @@
 """Resume upload, ATS scoring, and AI customization endpoints."""
 
+from app.ai_models import CLAUDE_SONNET
 import uuid
 from datetime import datetime, timezone
 from typing import Literal
@@ -1192,7 +1193,7 @@ async def customize_resume_for_job(
                 customized_text=ai_result.get("customized_text", ""),
                 target_score=target_score,
                 job_id=job.id,
-                model_version="claude-sonnet-4-20250514",
+                model_version=CLAUDE_SONNET,
             )
         except Exception:
             pass

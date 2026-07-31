@@ -32,7 +32,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 
 from app.workers.celery_app import celery_app
 from app.workers.tasks._db import SyncSession
@@ -213,7 +213,13 @@ def _collect_product_signals(session) -> dict:
             Company.name,
             Company.is_target,
             func.count(Job.id).label("total"),
-            func.sum(func.cast(Job.status == "accepted", func.Integer)).label("accepted"),
+            # F357: was ``func.sum(func.cast(Job.status == "accepted",
+            # func.Integer))`` — ``func.Integer`` is a bogus SQL
+            # function, not a type, so SQLAlchemy raised
+            # ``'Comparator' object has no attribute '_isnull'`` and
+            # the whole product-insights pass died every run. ``case``
+            # is the idiom used elsewhere (companies.py accept counts).
+            func.sum(case((Job.status == "accepted", 1), else_=0)).label("accepted"),
         )
         .join(Job, Job.company_id == Company.id)
         .where(Job.first_seen_at >= cutoff_7d)

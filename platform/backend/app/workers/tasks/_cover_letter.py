@@ -1,5 +1,6 @@
 """AI-powered cover letter generation using Claude API."""
 
+from app.ai_models import CLAUDE_OPUS
 import logging
 import re
 from app.config import get_settings
@@ -172,7 +173,7 @@ Return your response in this exact format:
         # they're called per-job too but at higher volume and their
         # outputs aren't shipped verbatim to a recruiter's inbox.
         message = client.messages.create(
-            model="claude-opus-4-7",
+            model=CLAUDE_OPUS,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )

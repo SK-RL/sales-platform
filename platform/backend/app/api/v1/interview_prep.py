@@ -1,5 +1,6 @@
 """Interview preparation AI API."""
 
+from app.ai_models import CLAUDE_SONNET
 import asyncio
 from uuid import UUID
 
@@ -129,7 +130,7 @@ async def generate(body: InterviewPrepRequest, user: User = Depends(get_current_
                     "red_flags": result.get("red_flags", []),
                 },
                 job_id=job.id,
-                model_version="claude-sonnet-4-20250514",
+                model_version=CLAUDE_SONNET,
             )
         except Exception:
             pass
