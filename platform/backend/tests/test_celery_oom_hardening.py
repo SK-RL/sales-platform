@@ -171,3 +171,63 @@ def test_chunk_size_is_reasonable():
         "the value F262 validated against the 86k-row prod dataset "
         "without OOMing the 2GB heavy worker."
     )
+
+
+# ═══ F355 — worker child recycling ═══════════════════════════════
+
+
+def test_worker_max_memory_per_child_set_and_safe_for_concurrency():
+    """The leaking default worker must recycle its child before the
+    cgroup OOM-kills it. The per-child threshold is sized for
+    concurrency=2 under the 2048 MiB container limit — a value near
+    the container limit would never fire (2 children can't both reach
+    it)."""
+    from app.workers.celery_app import celery_app
+
+    kib = celery_app.conf.worker_max_memory_per_child
+    assert kib, "worker_max_memory_per_child not set — leaking worker won't recycle"
+    mib = kib / 1024
+    # Must leave room for 2 concurrent children + parent under 2048 MiB.
+    # 2×mib + 130 parent < 2048  →  mib < 959.
+    assert mib < 959, (
+        f"per-child threshold {mib:.0f} MiB too high for concurrency=2 "
+        f"under the 2048 MiB limit — 2 children would OOM before recycle."
+    )
+    # And high enough that recycling isn't pathologically frequent.
+    assert mib > 400, f"per-child threshold {mib:.0f} MiB is wastefully low"
+
+
+def test_worker_max_tasks_per_child_backstop():
+    from app.workers.celery_app import celery_app
+
+    n = celery_app.conf.worker_max_tasks_per_child
+    assert n and 50 <= n <= 1000, (
+        "worker_max_tasks_per_child should be a modest backstop (50–1000)"
+    )
+
+
+def test_prod_worker_limit_covers_recycle_threshold():
+    """Guard the compose limit vs the recycle math so they can't drift
+    apart: 2 × per-child + parent must fit the container limit."""
+    import re
+    from pathlib import Path
+
+    from app.workers.celery_app import celery_app
+
+    compose = (
+        Path(__file__).resolve().parent.parent.parent / "docker-compose.prod.yml"
+    ).read_text()
+    # First `--queues=default` worker block's memory limit.
+    default_block = compose.split("--queues=default", 1)[1]
+    m = re.search(r"memory:\s*(\d+)M", default_block)
+    assert m, "couldn't find default worker memory limit"
+    limit_mib = int(m.group(1))
+
+    per_child_mib = celery_app.conf.worker_max_memory_per_child / 1024
+    # concurrency default is 2; parent ~130 MiB.
+    worst_case = 2 * per_child_mib + 130
+    assert worst_case < limit_mib, (
+        f"2 recycled children ({worst_case:.0f} MiB) exceed the "
+        f"{limit_mib} MiB container limit — raise the limit or lower "
+        f"the per-child threshold."
+    )

@@ -130,13 +130,16 @@ services:
           cpus: "1.0"
 
   # F262 — default-queue worker. Handles the high-frequency steady-
-  # state tasks (30-min scans, hourly career-page checks, enrichment,
-  # AI insights, backups). ``--queues=default`` so this worker ignores
-  # anything routed to ``heavy`` — those tasks belong to the dedicated
-  # ``celery-worker-heavy`` container below. Memory bumped from 1024M
-  # to 1536M to absorb baseline + in-flight scan workload with
-  # headroom (was tight at 1G; live-stats showed steady-state RSS at
-  # ~900MB / 1G = 90% before this fix).
+  # state tasks (8h scans, hourly career-page checks, enrichment +
+  # contact harvesting, AI insights, backups). ``--queues=default`` so
+  # this worker ignores anything routed to ``heavy``.
+  # Memory history: 1024M → 1536M → 2048M. F355 raised it to 2048M
+  # after the monitoring guardrail caught the child at 100% of 1536M
+  # ("OOM imminent"). The DURABLE fix in F355 is worker child
+  # recycling (worker_max_memory_per_child / _max_tasks_per_child in
+  # celery_app.py): CPython doesn't return freed arenas to the OS, so
+  # a 4-day-old worker child only ratchets up. The limit bump just
+  # gives that recycling headroom (host has ~9 GiB free).
   celery-worker:
     image: platform-backend:${RELEASE_TAG:-latest}
     restart: always
@@ -161,7 +164,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 2048M  # F355: was 1536M; host has ~9GiB free, gives worker-child recycling headroom
           cpus: "1.0"
 
   # F262 — heavy-queue worker. Dedicated container for the batch
