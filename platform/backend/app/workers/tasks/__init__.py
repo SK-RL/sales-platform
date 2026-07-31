@@ -11,6 +11,18 @@ from app.workers.tasks.enrichment_task import enrich_company, enrich_target_comp
 from app.workers.tasks.resume_score_task import score_resume_task
 from app.workers.tasks.feedback_task import process_review_feedback_task, decay_scoring_signals
 from app.workers.tasks.question_collection_task import collect_questions
+# F356 — these three were beat-scheduled in celery_app.py but never
+# imported here, so their @celery_app.task decorators never ran and
+# the worker rejected every firing with "Received unregistered task"
+# (KeyError). Silent for months: weekly AI insights produced nothing
+# (empty /insights), nightly backups didn't run, and funding-followup
+# probes never fired. autodiscover_tasks(["app.workers.tasks"]) looks
+# for a non-existent ``app.workers.tasks.tasks`` module, so
+# registration depends ENTIRELY on the explicit imports in this file —
+# a module absent here is a task that silently never runs.
+from app.workers.tasks.ai_insights_task import run_weekly_insights
+from app.workers.tasks.backup_task import run_backup
+from app.workers.tasks.funding_followup_task import auto_probe_recent_funding
 
 __all__ = [
     "scan_all_platforms",
@@ -29,4 +41,7 @@ __all__ = [
     "reclassify_and_rescore",
     "auto_target_companies",
     "fix_stuck_enrichments",
+    "run_weekly_insights",
+    "run_backup",
+    "auto_probe_recent_funding",
 ]
