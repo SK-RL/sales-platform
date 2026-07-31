@@ -36,6 +36,41 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # F355 — worker child recycling. The monitoring guardrail fired
+    # "celery-worker-1 at 100% of its 1.5 GiB limit, OOM imminent":
+    # the DEFAULT-queue worker (8h scans + hourly career-page checks +
+    # the nightly enrichment/contact fan-out) ran the same child
+    # process for 4 days. CPython's allocator rarely returns freed
+    # arenas to the OS, so the RSS of a long-lived worker only ratchets
+    # up — BeautifulSoup parse trees, per-scan job lists, ORM identity
+    # maps all leave high-water marks. The queue-split + chunked
+    # iteration (F262) bound any SINGLE task, but nothing recycled the
+    # child between tasks.
+    #
+    # Two knobs, belt-and-braces:
+    #   * worker_max_memory_per_child (KiB): after a task finishes, if
+    #     the child's resident memory exceeds this, Celery gracefully
+    #     replaces it (finishes in-flight task first — no lost work).
+    #   * worker_max_tasks_per_child: hard cap on tasks per child as a
+    #     backstop for slow leaks that never trip the memory threshold
+    #     between the big periodic tasks.
+    #
+    # Sizing — the threshold is PER CHILD and must account for
+    # concurrency: the default worker runs ``--concurrency=2`` (2
+    # child processes) under a container limit raised to 2048 MiB in
+    # this same change (docker-compose.prod.yml; the host has ~9 GiB
+    # free, so 1536→2048 is free insurance). Budget:
+    #     2048 MiB − ~130 MiB parent = ~1918 MiB for 2 children
+    #     → ~959 MiB each; recycle at 750 MiB leaves ~20% headroom.
+    #     worst case 2×750 + 130 = 1630 MiB, comfortably under 2048.
+    # A per-child value near the OLD 1.5 GiB limit would have been the
+    # classic mistake: with 2 children it can never be reached before
+    # the cgroup OOM-kills, so recycling would never fire.
+    # Child restart is cheap (fork of the prewarmed parent, ~100ms) and
+    # invisible to callers; acks_late means a task mid-recycle is
+    # redelivered, not dropped.
+    worker_max_memory_per_child=768_000,   # ~750 MiB
+    worker_max_tasks_per_child=200,
     result_expires=3600,
     # Regression finding 204: persist the task's positional args on the
     # result row so `AsyncResult(task_id).args` returns the original
