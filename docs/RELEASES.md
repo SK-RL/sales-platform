@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-07-31 · 94b40cc · sha-94b40cc
+fix(ai): F357 — retired model ID broke every AI feature; centralize + fix insights SQL
+
+
 ## 2026-07-31 · 2fa1bc9 · sha-2fa1bc9
 fix(celery): F356 — register beat tasks that were silently unregistered
 
