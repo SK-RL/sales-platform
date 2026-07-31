@@ -60,8 +60,13 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BACKEND: ghcr.io/${{ github.repository_owner }}/sales-platform/backend
-  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/sales-platform/frontend
+  # IMAGE_BACKEND / IMAGE_FRONTEND are NOT set here: GHCR requires the
+  # repository path to be all-lowercase, but ``github.repository_owner``
+  # can be mixed-case (the org was ``betaque-team``, now ``SK-RL``), and
+  # GitHub Actions expressions have no lowercase function. So each job
+  # that needs them computes lowercased names into $GITHUB_ENV via a
+  # "Normalize image names" step (tr '[:upper:]' '[:lower:]'). Setting a
+  # broken value here would just shadow the good per-job one.
   PROD_URL: https://salesplatform.reventlabs.com
 
 permissions:
@@ -189,6 +194,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Normalize image names (GHCR requires lowercase)
+        run: |
+          OWNER_LC="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_BACKEND=ghcr.io/${OWNER_LC}/sales-platform/backend" >> "$GITHUB_ENV"
+          echo "IMAGE_FRONTEND=ghcr.io/${OWNER_LC}/sales-platform/frontend" >> "$GITHUB_ENV"
+
       - name: Compute tag
         id: meta
         run: |
@@ -252,6 +263,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Normalize image names (GHCR requires lowercase)
+        run: |
+          OWNER_LC="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_BACKEND=ghcr.io/${OWNER_LC}/sales-platform/backend" >> "$GITHUB_ENV"
+          echo "IMAGE_FRONTEND=ghcr.io/${OWNER_LC}/sales-platform/frontend" >> "$GITHUB_ENV"
 
       - name: Set up SSH key
         env:
