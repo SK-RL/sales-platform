@@ -38,8 +38,16 @@ APP_DIR="/opt/sales-platform"
 COMPOSE="docker compose -f docker-compose.prod.yml"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/ci-deploy.log"
-GHCR_IMAGE_BACKEND="${GHCR_IMAGE_BACKEND:-ghcr.io/betaque-team/sales-platform/backend}"
-GHCR_IMAGE_FRONTEND="${GHCR_IMAGE_FRONTEND:-ghcr.io/betaque-team/sales-platform/frontend}"
+# GHCR image pull paths. Default owner tracks the GitHub org that owns
+# the packages — changed from ``betaque-team`` to ``sk-rl`` after the
+# 2026-07-31 org rename (GHCR does not redirect package paths on rename,
+# so the old path 404s and every deploy failed at the image pull).
+# Overridable via env for staging / future renames. NOTE: this script
+# is installed at /opt/sales-platform/scripts/ci-deploy.sh and is NOT
+# shipped by the stage-infra tarball — so a repo edit here only takes
+# effect after the VM copy is refreshed (see DEPLOY.md).
+GHCR_IMAGE_BACKEND="${GHCR_IMAGE_BACKEND:-ghcr.io/sk-rl/sales-platform/backend}"
+GHCR_IMAGE_FRONTEND="${GHCR_IMAGE_FRONTEND:-ghcr.io/sk-rl/sales-platform/frontend}"
 
 mkdir -p "$LOG_DIR"
 
