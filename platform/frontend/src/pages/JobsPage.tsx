@@ -53,6 +53,24 @@ const DEFAULT_SORT_DIR: Record<string, "asc" | "desc"> = {
   status: "asc",
 };
 
+// Feedback ticket 14d00e33 — "Add a column which shows that I have
+// already applied for this job." Each All-Jobs row carries the
+// current user's `application_status` (enriched by GET /jobs). We
+// surface it as a badge next to the title. `withdrawn` deliberately
+// has no entry — a withdrawn application shouldn't read as "applied,"
+// so those rows show no marker (same as never-applied).
+const APPLICATION_BADGE: Record<
+  string,
+  { label: string; variant: "success" | "warning" | "info" | "danger" }
+> = {
+  prepared: { label: "Preparing", variant: "warning" },
+  submitted: { label: "Submitted", variant: "info" },
+  applied: { label: "Applied", variant: "success" },
+  interview: { label: "Interview", variant: "success" },
+  offer: { label: "Offer", variant: "success" },
+  rejected: { label: "Applied · Rejected", variant: "danger" },
+};
+
 function defaultDirFor(column: string): "asc" | "desc" {
   return DEFAULT_SORT_DIR[column] ?? "desc";
 }
@@ -1281,6 +1299,23 @@ export function JobsPage() {
                               unclassified
                             </Badge>
                           )}
+                          {/* Ticket 14d00e33: "already applied" marker.
+                              Shown whenever the current user has a
+                              non-withdrawn application for this job. */}
+                          {job.application_status &&
+                            APPLICATION_BADGE[job.application_status] && (
+                              <Badge
+                                variant={
+                                  APPLICATION_BADGE[job.application_status]
+                                    .variant
+                                }
+                              >
+                                {
+                                  APPLICATION_BADGE[job.application_status]
+                                    .label
+                                }
+                              </Badge>
+                            )}
                         </div>
                       </div>
                     </TableCell>
