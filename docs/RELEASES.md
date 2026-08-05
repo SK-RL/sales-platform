@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · 391b582 · sha-391b582
+Merge: All-Jobs applied marker (14d00e33) + UAE hybrid capture & filter preset
+
+
 ## 2026-07-31 · 94b40cc · sha-94b40cc
 fix(ai): F357 — retired model ID broke every AI feature; centralize + fix insights SQL
 
