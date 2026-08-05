@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · f9d618c · sha-f9d618c
+Merge: detect bare 'UAE' location (more UAE jobs)
+
+
 ## 2026-08-05 · a9b27e1 · sha-a9b27e1
 Merge: in-app login notice banner (re-upload comms for 650514ad)
 
