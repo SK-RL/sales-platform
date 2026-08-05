@@ -423,10 +423,26 @@ def _upsert_job(
     # are written. ``classify_remote_policy`` is the source of truth;
     # the legacy bucket is derived from (policy, countries) so the
     # two columns can never disagree.
-    from app.workers.tasks._role_matching import classify_remote_policy
+    from app.workers.tasks._role_matching import (
+        classify_remote_policy,
+        refine_uae_hybrid,
+    )
     from app.utils.remote_policy import legacy_bucket_for, normalise_countries
+    # Extract the description up-front: the UAE hybrid signal lives in
+    # the body, not the location/scope fields, so refine_uae_hybrid
+    # needs it. Parsed once here and reused for the JobDescription
+    # upsert below (F97) so we don't run extract_description twice.
+    try:
+        desc_html, desc_text = extract_description(
+            board.platform, raw_job.get("raw_json") or {}
+        )
+    except Exception:
+        desc_html, desc_text = "", ""
     remote_policy, remote_policy_countries = classify_remote_policy(
         location_raw, remote_scope
+    )
+    remote_policy, remote_policy_countries = refine_uae_hybrid(
+        remote_policy, remote_policy_countries, desc_text
     )
     remote_policy_countries = normalise_countries(remote_policy_countries)
     geography_bucket = legacy_bucket_for(remote_policy, remote_policy_countries)
@@ -681,10 +697,8 @@ def _upsert_job(
     # each fetcher) so per-platform field knowledge lives in one place
     # (`app.utils.job_description`) and the scan logic stays generic.
     try:
-        html_content, text_content = extract_description(
-            board.platform, raw_job.get("raw_json") or {}
-        )
-        _upsert_job_description(session, job_id_for_desc, html_content, text_content)
+        # Reuse the description parsed up-front for classification.
+        _upsert_job_description(session, job_id_for_desc, desc_html, desc_text)
     except Exception as exc:
         # Description write failure must never abort a whole `_upsert_job`
         # — the relevance-scoring + role-classification work above is what
