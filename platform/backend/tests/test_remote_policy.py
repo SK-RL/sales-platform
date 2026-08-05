@@ -269,6 +269,58 @@ class TestClassifier:
             ["AE"],
         )
 
+    def test_bare_country_name_plus_remote_is_country_restricted(self):
+        """THE big classification gap: ~87k jobs arrived as
+        location="Canada"/"Germany"/"India" with remote_scope="remote"
+        and fell through every "remote - X" signal to policy=unknown,
+        hidden from every geography view. A bare country name + a remote
+        signal must resolve to country_restricted[iso]."""
+        from app.workers.tasks._role_matching import classify_remote_policy
+
+        assert classify_remote_policy("Canada", "remote") == (
+            "country_restricted",
+            ["CA"],
+        )
+        assert classify_remote_policy("Germany", "remote") == (
+            "country_restricted",
+            ["DE"],
+        )
+        assert classify_remote_policy("United Kingdom", "remote") == (
+            "country_restricted",
+            ["GB"],
+        )
+        # Multi-country remote → sorted multi-code list.
+        assert classify_remote_policy("Australia, Canada, France", "remote") == (
+            "country_restricted",
+            ["AU", "CA", "FR"],
+        )
+
+    def test_bare_country_name_guards(self):
+        """The country-name step must be EXACT-segment (never substring)
+        and gated on a remote signal — so "Australia" can't match the
+        "us" code, and an on-site country job stays unknown."""
+        from app.workers.tasks._role_matching import classify_remote_policy
+
+        # Exact-match guard: Australia → AU, never US (substring 'us').
+        assert classify_remote_policy("Australia", "remote") == (
+            "country_restricted",
+            ["AU"],
+        )
+        # No remote signal → on-site country stays unknown (we don't
+        # invent a remote policy for a plain city/country location).
+        assert classify_remote_policy("Berlin", "") == ("unknown", [])
+        assert classify_remote_policy("Germany", "") == ("unknown", [])
+
+    def test_multi_continent_is_worldwide(self):
+        """A location naming ≥3 continents ("Americas, Europe, Asia,
+        Africa, Oceania" — common on Remotive/Himalayas) is effectively
+        worldwide, not unknown."""
+        from app.workers.tasks._role_matching import classify_remote_policy
+
+        assert classify_remote_policy(
+            "Americas, Europe, Asia, Africa, Oceania", "remote"
+        ) == ("worldwide", [])
+
     def test_strong_remote_overrides_hybrid(self):
         """A listing that says "100% remote" but also "in office"
         somewhere shouldn't silently flip to hybrid. The strong
