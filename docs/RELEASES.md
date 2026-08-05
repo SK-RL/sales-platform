@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · a9b27e1 · sha-a9b27e1
+Merge: in-app login notice banner (re-upload comms for 650514ad)
+
+
 ## 2026-08-05 · 95b9082 · sha-95b9082
 Merge: stop CDN caching feedback attachments (security, auth bypass)
 
