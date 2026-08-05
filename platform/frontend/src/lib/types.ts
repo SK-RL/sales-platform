@@ -123,6 +123,11 @@ export interface Job {
   remote_policy_countries?: string[];
   tags: string[];
   resume_score?: number | null;
+  // Feedback ticket 14d00e33: THIS user's application status for the
+  // job, so All Jobs can show an "Applied" marker. `null`/absent when
+  // the user has no application row for the job. Enriched onto each
+  // row by GET /jobs the same way `resume_score` is.
+  application_status?: ApplicationStatus | null;
   // The CURRENT reviewer's active-resume fit — set by /jobs/review-queue
   // (per-user score after F248; pre-fix this was MAX across every team
   // resume which surfaced wrong-role jobs to the wrong reviewer). `null`

@@ -53,6 +53,24 @@ const DEFAULT_SORT_DIR: Record<string, "asc" | "desc"> = {
   status: "asc",
 };
 
+// Feedback ticket 14d00e33 — "Add a column which shows that I have
+// already applied for this job." Each All-Jobs row carries the
+// current user's `application_status` (enriched by GET /jobs). We
+// surface it as a badge next to the title. `withdrawn` deliberately
+// has no entry — a withdrawn application shouldn't read as "applied,"
+// so those rows show no marker (same as never-applied).
+const APPLICATION_BADGE: Record<
+  string,
+  { label: string; variant: "success" | "warning" | "info" | "danger" }
+> = {
+  prepared: { label: "Preparing", variant: "warning" },
+  submitted: { label: "Submitted", variant: "info" },
+  applied: { label: "Applied", variant: "success" },
+  interview: { label: "Interview", variant: "success" },
+  offer: { label: "Offer", variant: "success" },
+  rejected: { label: "Applied · Rejected", variant: "danger" },
+};
+
 function defaultDirFor(column: string): "asc" | "desc" {
   return DEFAULT_SORT_DIR[column] ?? "desc";
 }
@@ -107,6 +125,8 @@ function buildInitialFilters(
     searchParams.has("status") ||
     searchParams.has("platform") ||
     searchParams.has("geography") ||
+    searchParams.has("remote_policy") ||
+    searchParams.has("remote_country") ||
     searchParams.has("role_cluster") ||
     searchParams.has("is_classified") ||
     searchParams.has("sort_by") ||
@@ -193,6 +213,11 @@ function buildInitialFilters(
       status: urlOrStored("status") as JobFilters["status"],
       platform: urlOrStored("platform"),
       geography: urlOrStored("geography"),
+      // UAE-hybrid preset + any other remote_policy/country filter.
+      remote_policy:
+        (urlOrStored("remote_policy") as JobFilters["remote_policy"]) ||
+        undefined,
+      remote_country: urlOrStored("remote_country") || undefined,
       // F260: ``role_cluster=any`` is the explicit "All Jobs" sentinel
       // from the Sidebar. We keep it on the filter object so the page
       // header and active-link checks can distinguish "user navigated
@@ -220,6 +245,8 @@ function buildInitialFilters(
       status: (storedFilters.status || "") as JobFilters["status"],
       platform: storedFilters.platform || "",
       geography: storedFilters.geography || "",
+      remote_policy: storedFilters.remote_policy || undefined,
+      remote_country: storedFilters.remote_country || undefined,
       role_cluster: storedFilters.role_cluster || "",
       is_classified: storedFilters.is_classified,
       sorts,
@@ -358,6 +385,8 @@ export function JobsPage() {
       searchParams.has("status") ||
       searchParams.has("platform") ||
       searchParams.has("geography") ||
+      searchParams.has("remote_policy") ||
+      searchParams.has("remote_country") ||
       searchParams.has("role_cluster") ||
       searchParams.has("is_classified") ||
       searchParams.has("sort_by") ||
@@ -392,6 +421,8 @@ export function JobsPage() {
     if (filters.status) params.set("status", filters.status);
     if (filters.platform) params.set("platform", filters.platform);
     if (filters.geography) params.set("geography", filters.geography);
+    if (filters.remote_policy) params.set("remote_policy", filters.remote_policy);
+    if (filters.remote_country) params.set("remote_country", filters.remote_country);
     if (filters.role_cluster) params.set("role_cluster", filters.role_cluster);
     // F87: only serialise `is_classified` when the user has explicitly
     // narrowed to it — `undefined` = "both", which is the default and
@@ -425,6 +456,8 @@ export function JobsPage() {
         status: filters.status,
         platform: filters.platform,
         geography: filters.geography,
+        remote_policy: filters.remote_policy,
+        remote_country: filters.remote_country,
         role_cluster: filters.role_cluster,
         is_classified: filters.is_classified,
         sorts: filters.sorts,
@@ -887,6 +920,39 @@ export function JobsPage() {
               </option>
             ))}
           </select>
+          {/* UAE sourcing push — one-click preset for UAE hybrid roles.
+              Sets remote_policy=hybrid + remote_country=AE (the backend
+              now tags hybrid jobs with their country). Clears the legacy
+              geography bucket, which is mutually exclusive with a hybrid
+              policy. Toggling off restores the unfiltered scope. */}
+          {(() => {
+            const uaeHybridActive =
+              filters.remote_policy === "hybrid" &&
+              filters.remote_country === "AE";
+            return (
+              <button
+                type="button"
+                onClick={() =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    remote_policy: uaeHybridActive ? undefined : "hybrid",
+                    remote_country: uaeHybridActive ? undefined : "AE",
+                    geography: uaeHybridActive ? prev.geography : "",
+                    page: 1,
+                  }))
+                }
+                aria-pressed={uaeHybridActive}
+                title="Show only hybrid roles based in the UAE"
+                className={`inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  uaeHybridActive
+                    ? "border-primary-600 bg-primary-600 text-white"
+                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                🇦🇪 UAE Hybrid
+              </button>
+            );
+          })()}
           {/* F87: role-cluster dropdown is now driven by the admin
               config (`/role-clusters`) with the synthetic "Relevant"
               pseudo at the top and a new "Unclassified" option that
@@ -974,7 +1040,7 @@ export function JobsPage() {
             <option value="platform:asc">Platform A-Z</option>
             <option value="status:asc">Status A-Z</option>
           </select>
-          {(filters.search || filters.status || filters.platform || filters.geography || filters.role_cluster || filters.is_classified !== undefined || isMultiSort) && (
+          {(filters.search || filters.status || filters.platform || filters.geography || filters.role_cluster || filters.remote_policy || filters.remote_country || filters.is_classified !== undefined || isMultiSort) && (
             <Button
               variant="ghost"
               size="sm"
@@ -990,6 +1056,8 @@ export function JobsPage() {
                   platform: "",
                   geography: "",
                   role_cluster: "",
+                  remote_policy: undefined,
+                  remote_country: undefined,
                   is_classified: undefined,
                   sorts: [{ key: "relevance_score", dir: "desc" }],
                   page: 1,
@@ -1281,6 +1349,23 @@ export function JobsPage() {
                               unclassified
                             </Badge>
                           )}
+                          {/* Ticket 14d00e33: "already applied" marker.
+                              Shown whenever the current user has a
+                              non-withdrawn application for this job. */}
+                          {job.application_status &&
+                            APPLICATION_BADGE[job.application_status] && (
+                              <Badge
+                                variant={
+                                  APPLICATION_BADGE[job.application_status]
+                                    .variant
+                                }
+                              >
+                                {
+                                  APPLICATION_BADGE[job.application_status]
+                                    .label
+                                }
+                              </Badge>
+                            )}
                         </div>
                       </div>
                     </TableCell>

@@ -1024,6 +1024,35 @@ _COUNTRY_NAME_TO_ISO: dict[str, str] = {
 }
 
 
+def _detect_country_codes(combined: str) -> list[str]:
+    """Best-effort ISO alpha-2 country detection for a job's location.
+
+    Mirrors the country-restricted precedence used inside
+    ``classify_remote_policy`` (region-locked signals → USA → UAE) but
+    factored out so the **hybrid** branch can reuse it. A hybrid job
+    that also names a country ("Hybrid - Dubai", "Hybrid (UAE-based)")
+    should keep that country: without it the UAE hybrid roles a UAE
+    sourcing push depends on were classified as bare ``hybrid`` with
+    an empty country list and vanished from every UAE view
+    (``?remote_policy=hybrid&remote_country=AE`` returned nothing).
+
+    Returns a single-element list (first match wins, matching the
+    country_restricted convention) or ``[]`` when no country is named.
+    """
+    for signal in REGION_LOCKED_SIGNALS:
+        if signal in combined:
+            for country_name, iso in _COUNTRY_NAME_TO_ISO.items():
+                if country_name in signal:
+                    return [iso]
+    for signal in USA_SIGNALS:
+        if signal in combined:
+            return ["US"]
+    for signal in UAE_SIGNALS:
+        if signal in combined:
+            return ["AE"]
+    return []
+
+
 def classify_remote_policy(
     location_raw: str, remote_scope: str
 ) -> tuple[str, list[str]]:
@@ -1031,15 +1060,19 @@ def classify_remote_policy(
 
     Returns ``(policy, countries)`` where ``policy`` ∈
     ``{"worldwide","country_restricted","region_restricted","hybrid",
-    "onsite","unknown"}`` and ``countries`` is a sorted list of ISO
-    alpha-2 codes (only populated for ``country_restricted``).
+    "onsite","unknown"}`` and ``countries`` is a list of ISO alpha-2
+    codes. Populated for ``country_restricted`` and — since the UAE
+    sourcing push — for ``hybrid`` when the location names a country
+    ("Hybrid - Dubai" → ("hybrid", ["AE"])). Empty for worldwide /
+    region_restricted / onsite / unknown and for bare hybrid.
 
     Order of detection (first match wins):
 
       1. **On-site** — explicit "no remote" markers. Beats hybrid
          because "on-site only" sometimes co-occurs with "hybrid"
          in scraped descriptions.
-      2. **Hybrid** — explicit hybrid markers.
+      2. **Hybrid** — explicit hybrid markers. Keeps any country the
+         location names (so UAE hybrid roles stay filterable).
       3. **Region restricted** — region-named signals (EMEA, APAC,
          "Europe only", etc.). Stays as policy=region_restricted with
          empty countries list — we don't try to enumerate the region.
@@ -1066,13 +1099,17 @@ def classify_remote_policy(
 
     # 2. Hybrid — explicit "hybrid" wording. Skip when the strong
     # remote signals are present (rare but happens in noisy scrapes).
+    # Unlike the pre-F350-followup behaviour, a hybrid job keeps any
+    # country it names ("Hybrid - Dubai" → ("hybrid", ["AE"])) so UAE
+    # hybrid roles are findable via ?remote_policy=hybrid&
+    # remote_country=AE. Bare hybrid (no country) still returns [].
     has_strong_remote = any(
         sig in combined for sig in ("100% remote", "fully remote", "remote - anywhere")
     )
     if not has_strong_remote:
         for signal in HYBRID_SIGNALS:
             if signal in combined:
-                return "hybrid", []
+                return "hybrid", _detect_country_codes(combined)
 
     # 3. Region-restricted — region-named signals (EMEA / APAC / etc).
     for signal in REGION_RESTRICTED_SIGNALS:

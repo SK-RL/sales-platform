@@ -160,6 +160,45 @@ class TestClassifier:
         )
         assert classify_remote_policy("Bangalore (Hybrid)", "") == ("hybrid", [])
 
+    def test_hybrid_retains_uae_country(self):
+        """UAE sourcing push: a hybrid role that names a UAE location
+        must keep the ``AE`` country code so it's findable via
+        ``?remote_policy=hybrid&remote_country=AE``. Pre-fix these were
+        classified as bare ``("hybrid", [])`` and vanished from every
+        UAE view even though most UAE roles are hybrid, not remote."""
+        from app.workers.tasks._role_matching import classify_remote_policy
+
+        assert classify_remote_policy("Hybrid - Dubai", "hybrid") == (
+            "hybrid",
+            ["AE"],
+        )
+        assert classify_remote_policy("Dubai (Hybrid)", "") == ("hybrid", ["AE"])
+        assert classify_remote_policy("Hybrid - Abu Dhabi, UAE", "") == (
+            "hybrid",
+            ["AE"],
+        )
+        # A hybrid role naming another country keeps THAT country, and a
+        # bare hybrid with no country stays empty (unchanged behaviour).
+        assert classify_remote_policy("Hybrid - Remote UK", "") == (
+            "hybrid",
+            ["GB"],
+        )
+        assert classify_remote_policy("Hybrid - 3 days/week in NYC", "hybrid") == (
+            "hybrid",
+            [],
+        )
+
+    def test_onsite_uae_not_country_tagged(self):
+        """Scope guard: the UAE push targets hybrid + fully-remote only,
+        NOT on-site. On-site UAE roles stay ``("onsite", [])`` so they
+        don't leak into the UAE-hybrid preset."""
+        from app.workers.tasks._role_matching import classify_remote_policy
+
+        assert classify_remote_policy("On-site only - Dubai", "onsite") == (
+            "onsite",
+            [],
+        )
+
     def test_strong_remote_overrides_hybrid(self):
         """A listing that says "100% remote" but also "in office"
         somewhere shouldn't silently flip to hybrid. The strong

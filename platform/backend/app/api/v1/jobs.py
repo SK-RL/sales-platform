@@ -14,6 +14,7 @@ from app.models.company import Company, CompanyATSBoard
 from app.models.user import User
 from app.models.resume import ResumeScore
 from app.models.review import Review
+from app.models.application import Application
 from app.models.role_config import RoleClusterConfig
 from app.models.audit_log import AuditLog
 from app.api.deps import get_current_user, require_role
@@ -524,10 +525,11 @@ async def list_jobs(
     result = await db.execute(query)
     jobs = result.unique().scalars().all()
 
+    job_ids = [j.id for j in jobs]
+
     # Fetch resume scores for these jobs
     resume_scores_map: dict[str, float] = {}
     if user.active_resume_id and jobs:
-        job_ids = [j.id for j in jobs]
         score_result = await db.execute(
             select(ResumeScore.job_id, ResumeScore.overall_score)
             .where(
@@ -538,17 +540,36 @@ async def list_jobs(
         for job_id, score in score_result:
             resume_scores_map[str(job_id)] = round(score, 1)
 
+    # Feedback ticket 14d00e33 ("Add a column which shows that I have
+    # already applied for this job"): batch-fetch THIS user's
+    # application status per job so All Jobs can render an "Applied"
+    # marker. Application has UNIQUE(user_id, job_id) so there's at
+    # most one row per (user, job). Same enrichment shape as
+    # resume_score above — one extra indexed query per page, keyed by
+    # the already-materialised job_ids, not an N+1.
+    application_status_map: dict[str, str] = {}
+    if jobs:
+        app_result = await db.execute(
+            select(Application.job_id, Application.status).where(
+                Application.user_id == user.id,
+                Application.job_id.in_(job_ids),
+            )
+        )
+        for job_id, status in app_result:
+            application_status_map[str(job_id)] = status
+
     items = []
     for j in jobs:
         item = JobOut.model_validate(j)
         item.company_name = j.company.name if j.company else None
         items.append(item)
 
-    # Serialize with resume_score enrichment
+    # Serialize with resume_score + application_status enrichment
     items_data = []
     for item, j in zip(items, jobs):
         d = item.model_dump(mode="json")
         d["resume_score"] = resume_scores_map.get(str(j.id))
+        d["application_status"] = application_status_map.get(str(j.id))
         items_data.append(d)
 
     return {"items": items_data, "total": total, "page": page, "page_size": per_page, "total_pages": (total + per_page - 1) // per_page}
