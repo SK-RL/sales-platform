@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · aa3ae51 · sha-aa3ae51
+Merge: UAE hybrid detection from description body (UAE-only)
+
+
 ## 2026-08-05 · 391b582 · sha-391b582
 Merge: All-Jobs applied marker (14d00e33) + UAE hybrid capture & filter preset
 
