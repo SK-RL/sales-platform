@@ -1166,6 +1166,37 @@ def classify_remote_policy(
     if any(sig in loc_lower for sig in ("united states", "usa", "u.s.")):
         return "country_restricted", ["US"]
 
+    # 8. Multi-continent location = effectively worldwide, e.g.
+    # "Americas, Europe, Asia, Africa, Oceania" (common on Remotive /
+    # Himalayas). ≥3 named continents → worldwide.
+    if sum(1 for cont in ("america", "europe", "asia", "africa", "oceania")
+           if cont in loc_lower) >= 3:
+        return "worldwide", []
+
+    # 9. Bare country-name location(s) + a remote signal. THE big gap:
+    # ~87k jobs arrived as location="Canada"/"Germany"/"India" with
+    # remote_scope="remote" and fell through every specific "remote - X"
+    # signal above to policy=unknown — hiding them from every geography
+    # view. Split the location on delimiters and EXACT-match each
+    # segment against the country map (exact only, never substring, so
+    # "australia" can't match the "us" code). One country →
+    # country_restricted[iso]; several → country_restricted[all sorted]
+    # (multi-country remote, e.g. "Australia, Canada, France"). Gated on
+    # a remote signal so we never tag a genuinely on-site "Berlin" job.
+    if "remote" in combined and loc_lower:
+        segments = [
+            s.strip()
+            for s in re.split(r"[,/;|]|\band\b|&", loc_lower)
+            if s.strip()
+        ]
+        found: list[str] = []
+        for seg in segments:
+            iso = _COUNTRY_NAME_TO_ISO.get(seg)
+            if iso and iso not in found:
+                found.append(iso)
+        if found:
+            return "country_restricted", sorted(found)
+
     return "unknown", []
 
 
