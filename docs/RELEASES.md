@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · 95b9082 · sha-95b9082
+Merge: stop CDN caching feedback attachments (security, auth bypass)
+
+
 ## 2026-08-05 · aedfd1f · sha-aedfd1f
 Merge: persist uploaded files across deploys (critical fix, feedback 650514ad)
 
