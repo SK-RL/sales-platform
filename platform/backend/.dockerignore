@@ -19,3 +19,10 @@ tests/
 *.md
 .dockerignore
 Dockerfile
+# DB backups / dumps — never bake prod data into an image
+db-backups/
+*.dump
+*.dump.gz
+*.sql
+*.sql.gz
+*.pgdump

@@ -23,10 +23,17 @@ dist/
 *.tfplan
 terraform.tfvars
 
-# Backups & dumps
+# Backups & dumps — NEVER commit. A prod pg_dump holds the full jobplatform
+# DB: password hashes, encrypted platform credentials, KYC document metadata,
+# and all PII. Kept locally in db-backups/ for convenience, never pushed.
 backups/
+db-backups/
 *.sql
+*.sql.gz
 *.dump
+*.dump.gz
+*.pgdump
+*.pgdump.gz
 
 # Docker
 *.log

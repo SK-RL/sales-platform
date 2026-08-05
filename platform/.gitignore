@@ -11,8 +11,14 @@
 infra/cloudflare/creds/*.json
 infra/cloudflare/creds/*.pem
 
-# ── Backups (local) ──
+# ── Backups (local) — never commit prod dumps (full DB incl. PII) ──
 backups/
+db-backups/
+*.dump
+*.dump.gz
+*.sql
+*.sql.gz
+*.pgdump
 
 # ── Python ──
 __pycache__/
