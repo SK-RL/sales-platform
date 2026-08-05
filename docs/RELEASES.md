@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · 04f040e · sha-04f040e
+Merge: classify ~87k unknown remote jobs (bare country + remote)
+
+
 ## 2026-08-05 · e7273b4 · sha-e7273b4
 Merge: propagate Adzuna secrets to VM .env (activate UAE fetcher)
 
