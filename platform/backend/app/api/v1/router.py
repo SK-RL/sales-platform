@@ -7,7 +7,7 @@ from app.api.v1 import (
     resume, users, role_config, credentials, answer_book, applications, feedback,
     alerts, cover_letter, interview_prep, intelligence, audit, ai, insights,
     training_data, saved_filters, profiles, routine, work_window,
-    interview_questions,
+    interview_questions, notices,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -61,3 +61,6 @@ api_router.include_router(work_window.router)
 # of client interview rounds so future candidates can prepare from
 # real data. All-users read/create; author-or-admin edit/delete.
 api_router.include_router(interview_questions.router)
+# In-app login notices — per-user dismissible banners (admin->user
+# comms; first use: "re-upload your lost documents" after 650514ad).
+api_router.include_router(notices.router)

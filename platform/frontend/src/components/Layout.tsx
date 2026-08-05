@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { ResumeSwitcher } from "./ResumeSwitcher";
+import { NoticeBanner } from "./NoticeBanner";
 import { Menu } from "lucide-react";
 
 interface LayoutProps {
@@ -47,7 +48,10 @@ export function Layout({ children }: LayoutProps) {
           </div>
         </header>
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-7xl px-4 py-6 lg:px-6 lg:py-8">{children}</div>
+          <div className="mx-auto max-w-7xl px-4 py-6 lg:px-6 lg:py-8">
+            <NoticeBanner />
+            {children}
+          </div>
         </main>
       </div>
     </div>
