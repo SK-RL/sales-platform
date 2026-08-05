@@ -96,6 +96,19 @@ services:
       - HOST_METRICS_PATH=/host/metrics.json
     volumes:
       - backups:/app/backups
+      # CRITICAL — user-uploaded files MUST live on named volumes, not
+      # the container's writable layer. Without these mounts every deploy
+      # recreates the backend container from the GHCR image and silently
+      # DESTROYS every uploaded file, while the DB rows (postgres volume)
+      # survive and keep pointing at the now-missing bytes — so downloads
+      # 410. This was the root cause of the "Unable to Download Document"
+      # incident (feedback 650514ad): 27 KYC docs/resumes wiped, 0 files
+      # on disk. `profile-docs` backs PROFILE_DOC_ROOT
+      # (/var/lib/sales-platform/profile-docs); `uploads` backs the
+      # feedback-attachment dir (/app/uploads/feedback). Resumes are safe
+      # — they store bytes in Postgres, not on disk.
+      - profile-docs:/var/lib/sales-platform/profile-docs
+      - uploads:/app/uploads
       # Host-side metrics snapshot, read-only. We mount the *parent directory*
       # (not the json file directly) so the collector's atomic-replace
       # `mv tmp final` works without crossing filesystems and so docker
@@ -295,6 +308,10 @@ volumes:
   postgres-data:
   redis-data:
   backups:
+  # User-uploaded files — persist across container recreation (deploys).
+  # See the backend service `volumes:` block for the incident context.
+  profile-docs:
+  uploads:
   certbot-etc:
   certbot-var:
   nginx-html:
