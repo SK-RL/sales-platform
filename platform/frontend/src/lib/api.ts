@@ -1,4 +1,5 @@
 import type {
+  UserNotice,
   User,
   Job,
   JobDescription,
@@ -763,6 +764,15 @@ export async function backfillRoleClassify(maxJobs?: number): Promise<{
 // F241: saved filter presets CRUD.
 export async function listSavedFilters(): Promise<SavedFiltersResponse> {
   return request<SavedFiltersResponse>("/saved-filters");
+}
+
+// In-app login notices (dismissible banners).
+export async function getMyNotices(): Promise<UserNotice[]> {
+  return request<UserNotice[]>("/notices/me");
+}
+
+export async function dismissNotice(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/notices/${id}/dismiss`, { method: "POST" });
 }
 
 export async function createSavedFilter(

@@ -837,6 +837,19 @@ export interface SavedFiltersResponse {
   total: number;
 }
 
+// In-app login notice (admin->user banner). Shown at the top of the
+// app until the user dismisses it. First use: "re-upload your lost
+// documents" after the storage-loss incident (650514ad).
+export interface UserNotice {
+  id: string;
+  level: "info" | "warning" | "critical";
+  title: string;
+  body: string;
+  action_label?: string | null;
+  action_href?: string | null;
+  created_at: string;
+}
+
 export interface CompanyScore {
   company_id: string;
   company_name: string;
