@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-05 · aedfd1f · sha-aedfd1f
+Merge: persist uploaded files across deploys (critical fix, feedback 650514ad)
+
+
 ## 2026-08-05 · aa3ae51 · sha-aa3ae51
 Merge: UAE hybrid detection from description body (UAE-only)
 
