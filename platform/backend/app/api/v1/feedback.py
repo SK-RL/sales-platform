@@ -361,6 +361,20 @@ async def get_attachment(
         headers={
             "Content-Disposition": f'attachment; filename="{safe_name}"',
             "X-Content-Type-Options": "nosniff",
+            # SECURITY (auth-bypass-via-CDN-cache): this endpoint is
+            # per-user authorized, but its URL ends in the stored
+            # filename's extension (…/attachments/<uuid>.png). Cloudflare
+            # caches static extensions (.png/.jpg/.pdf/…) by default, so
+            # WITHOUT an explicit no-cache directive the first authorized
+            # fetch populated the edge cache and every subsequent
+            # *unauthenticated* request for that URL was served the file
+            # straight from Cloudflare — a full auth bypass on other
+            # users' uploaded attachments (verified live: unauth-first
+            # 401, then 200 after an authed fetch). ``private, no-store``
+            # tells Cloudflare never to cache it; matches the
+            # profile-document download handler (which was safe both
+            # because it sends no-store AND has no extension in its URL).
+            "Cache-Control": "private, no-store, max-age=0",
         },
     )
 
