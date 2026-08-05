@@ -344,6 +344,8 @@ jobs:
         #                                existing .env value alone (so an accidental
         #                                un-set of the GH Secret doesn't wipe a
         #                                manually-provisioned key).
+        #   Line 3: ADZUNA_APP_ID      — same contract; activates the UAE Adzuna
+        #   Line 4: ADZUNA_APP_KEY       fetcher (empty = leave .env value alone).
         #
         # All values are minted/scoped to this run (GH_TOKEN) or come from
         # Environment-scoped Secrets (ANTHROPIC_API_KEY, env: production).
@@ -353,13 +355,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
         run: |
           {
             printf '%s\n' "$GH_TOKEN"
             # `${VAR:-}` so an unset Secret expands to empty instead of
-            # failing `set -u`. Empty line 2 is the documented "no change"
-            # signal — see the contract comment above.
+            # failing `set -u`. Empty lines are the documented "no change"
+            # signal — see the contract comment above. ORDER MATTERS: it
+            # must match the read order in ci-deploy.sh's action_deploy.
             printf '%s\n' "${ANTHROPIC_API_KEY:-}"
+            printf '%s\n' "${ADZUNA_APP_ID:-}"
+            printf '%s\n' "${ADZUNA_APP_KEY:-}"
           } | ssh -i ~/.ssh/deploy_key \
                   -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
                   ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \

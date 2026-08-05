@@ -154,6 +154,40 @@ persist_anthropic_key_from_stdin() {
   fi
 }
 
+# Generic sibling of persist_anthropic_key_from_stdin for secrets piped
+# AFTER ANTHROPIC_API_KEY. deploy.yml's stdin contract for the `deploy`
+# verb is, in order:
+#   line 1 GHCR token · line 2 ANTHROPIC_API_KEY ·
+#   line 3 ADZUNA_APP_ID · line 4 ADZUNA_APP_KEY
+# Reads ONE line and upserts ``VAR=<value>`` into .env atomically (0600).
+# Empty value / 5 s timeout = "leave .env unchanged" (same contract as
+# the ANTHROPIC helper) so a manual run — or an older deploy.yml that
+# sends fewer lines — is safe and never wipes a provisioned value.
+persist_env_var_from_stdin() {
+  local var_name="$1"
+  local env_file="$APP_DIR/.env"
+  if [[ ! -f "$env_file" ]]; then
+    log "WARN: .env not found at $env_file — refusing to persist $var_name"
+    local _drain
+    IFS= read -rs -t 2 _drain 2>/dev/null || true
+    return 0
+  fi
+  local val=""
+  if IFS= read -rs -t 5 val 2>/dev/null && [[ -n "$val" ]]; then
+    local tmp
+    tmp="$(mktemp)"
+    chmod 600 "$tmp"
+    grep -v "^${var_name}=" "$env_file" > "$tmp" || true
+    printf '%s=%s\n' "$var_name" "$val" >> "$tmp"
+    chmod 600 "$tmp"
+    mv -f "$tmp" "$env_file"
+    log "$var_name persisted to .env (length=${#val})"
+    unset val
+  else
+    log "$var_name: empty or unset on stdin — leaving .env unchanged"
+  fi
+}
+
 # -----------------------------------------------------------------------------
 # Set RELEASE_TAG in .env (persisted for future compose commands) and export
 # -----------------------------------------------------------------------------
@@ -387,6 +421,10 @@ action_deploy() {
   # value when it comes back up. No-op if the line is empty (documented
   # "leave .env alone" contract from deploy.yml).
   persist_anthropic_key_from_stdin
+  # Adzuna UAE-jobs fetcher creds (stdin lines 3 + 4). Read in the exact
+  # order deploy.yml emits them. Same "empty = leave alone" contract.
+  persist_env_var_from_stdin ADZUNA_APP_ID
+  persist_env_var_from_stdin ADZUNA_APP_KEY
 
   # 2026-04-17 fix: sync infra files (compose YAML, helper scripts, nginx
   # config) from the tarball deploy.yml SCP'd to /tmp before invoking us.
