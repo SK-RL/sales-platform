@@ -328,6 +328,22 @@ def reclassify_and_rescore():
             chunk_no += 1
             chunk_reclassified = 0
             chunk_rescored = 0
+
+            # Descriptions for this chunk — refine_uae_hybrid reads the
+            # body to catch UAE hybrid roles whose location field only
+            # says "Dubai, UAE" (the hybrid signal never reaches the
+            # location/scope fields the base classifier sees). One
+            # batched query per chunk, keyed by the chunk's job ids.
+            from app.models.job import JobDescription
+            desc_map = {
+                jid: (txt or "")
+                for jid, txt in session.execute(
+                    select(
+                        JobDescription.job_id, JobDescription.text_content
+                    ).where(JobDescription.job_id.in_([j.id for j in batch]))
+                ).all()
+            }
+
             for job in batch:
                 # Re-run role matching
                 role_match = match_role_with_config(job.title, cluster_config)
@@ -340,11 +356,17 @@ def reclassify_and_rescore():
                 # ``geography_bucket`` is derived from the new
                 # ``(policy, countries)`` pair via ``legacy_bucket_for``
                 # so they can never diverge.
-                from app.workers.tasks._role_matching import classify_remote_policy
+                from app.workers.tasks._role_matching import (
+                    classify_remote_policy,
+                    refine_uae_hybrid,
+                )
                 from app.utils.remote_policy import legacy_bucket_for, normalise_countries
 
                 new_policy, new_policy_countries = classify_remote_policy(
                     job.location_raw or "", job.remote_scope or ""
+                )
+                new_policy, new_policy_countries = refine_uae_hybrid(
+                    new_policy, new_policy_countries, desc_map.get(job.id, "")
                 )
                 new_policy_countries = normalise_countries(new_policy_countries)
                 new_geo = legacy_bucket_for(new_policy, new_policy_countries)

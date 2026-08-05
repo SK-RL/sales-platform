@@ -199,6 +199,52 @@ class TestClassifier:
             [],
         )
 
+    def test_refine_uae_hybrid_from_description(self):
+        """UAE ATS listings put the hybrid signal in the DESCRIPTION,
+        not the location field ("Dubai, UAE" + scope "remote"). The
+        base classifier tags them country_restricted+['AE']; the UAE
+        refinement upgrades them to hybrid+['AE'] when the body carries
+        a strong hybrid phrase, so they surface in the UAE-hybrid
+        preset."""
+        from app.workers.tasks._role_matching import refine_uae_hybrid
+
+        # UAE country-restricted + strong body signal → hybrid.
+        assert refine_uae_hybrid(
+            "country_restricted", ["AE"],
+            "Great role in Dubai. This is a hybrid working model, "
+            "3 days a week in office.",
+        ) == ("hybrid", ["AE"])
+        assert refine_uae_hybrid(
+            "country_restricted", ["AE"], "Hybrid schedule, based in our DIFC office."
+        ) == ("hybrid", ["AE"])
+
+    def test_refine_uae_hybrid_is_tightly_scoped(self):
+        """The refinement must NOT fire outside its remit."""
+        from app.workers.tasks._role_matching import refine_uae_hybrid
+
+        # No hybrid phrase in the body → unchanged.
+        assert refine_uae_hybrid(
+            "country_restricted", ["AE"], "Fully remote role, work from anywhere in the UAE."
+        ) == ("country_restricted", ["AE"])
+        # Bare "hybrid" word alone is too weak → unchanged (avoids the
+        # "not a hybrid company" false positive).
+        assert refine_uae_hybrid(
+            "country_restricted", ["AE"], "We are not a hybrid company."
+        ) == ("country_restricted", ["AE"])
+        # Another country (US) → untouched, so US counts don't shift.
+        assert refine_uae_hybrid(
+            "country_restricted", ["US"], "Hybrid working, 2 days a week in office."
+        ) == ("country_restricted", ["US"])
+        # Worldwide-remote is never downgraded even with a body signal.
+        assert refine_uae_hybrid(
+            "worldwide", [], "Occasional hybrid working when you visit HQ."
+        ) == ("worldwide", [])
+        # Empty description → no-op.
+        assert refine_uae_hybrid("country_restricted", ["AE"], "") == (
+            "country_restricted",
+            ["AE"],
+        )
+
     def test_strong_remote_overrides_hybrid(self):
         """A listing that says "100% remote" but also "in office"
         somewhere shouldn't silently flip to hybrid. The strong

@@ -1158,3 +1158,62 @@ def classify_remote_policy(
         return "country_restricted", ["US"]
 
     return "unknown", []
+
+
+# Strong hybrid signals we trust from the job DESCRIPTION body. Kept
+# separate from — and stricter than — HYBRID_SIGNALS because prose is
+# far noisier than the short location/scope fields: we require
+# unambiguous multi-word phrases and deliberately DROP weak tokens like
+# a bare "hybrid" or "in office" that would false-match "...this is NOT
+# a hybrid role, we're fully remote..." in a paragraph. Used only by
+# refine_uae_hybrid (UAE-scoped), never by the base classifier.
+DESCRIPTION_HYBRID_SIGNALS = (
+    "hybrid working", "hybrid work model", "hybrid work arrangement",
+    "hybrid working model", "hybrid model", "hybrid role",
+    "hybrid position", "hybrid setup", "hybrid schedule",
+    "hybrid arrangement", "work model: hybrid", "working model: hybrid",
+    # "workplace"/"work environment"/"work culture" unambiguously refer
+    # to the work SETUP — safe to include. We still exclude bare
+    # "hybrid", which in UAE tech listings overwhelmingly means "hybrid
+    # cloud / multicloud / infrastructure" or a "#li-hybrid" LinkedIn
+    # tag, not a hybrid work arrangement (verified against prod bodies).
+    "hybrid workplace", "hybrid work environment", "hybrid work culture",
+    "days a week in office", "days a week in the office",
+    "days per week in office", "days per week in the office",
+    "days/week in office", "days in the office each week",
+)
+
+
+def refine_uae_hybrid(
+    policy: str, countries: list[str], description: str
+) -> tuple[str, list[str]]:
+    """UAE-only: upgrade a UAE country-restricted job to ``hybrid`` when
+    its DESCRIPTION carries a strong hybrid signal.
+
+    Why this exists: UAE ATS listings almost never put "hybrid" in the
+    ``location_raw`` / ``remote_scope`` fields the base classifier reads
+    — the location is just "Dubai, United Arab Emirates" — so a
+    genuinely-hybrid Dubai role is tagged ``country_restricted`` (UAE
+    remote). The hybrid signal lives in the body. This refinement reads
+    the description for those jobs and re-tags them ``hybrid`` while
+    keeping ``["AE"]`` so they're findable via
+    ``?remote_policy=hybrid&remote_country=AE``.
+
+    Scoped deliberately (product decision — UAE sourcing push):
+      * **AE only** — ``countries == ["AE"]`` — so US/UK/other
+        country counts are untouched.
+      * **country_restricted only** — never downgrades a truly
+        worldwide-remote or already-hybrid posting.
+
+    A no-op (returns the inputs unchanged) for every non-UAE job and
+    for UAE jobs whose body has no strong hybrid phrase.
+    """
+    if (
+        policy == "country_restricted"
+        and list(countries) == ["AE"]
+        and description
+    ):
+        body = _normalize(description)
+        if any(sig in body for sig in DESCRIPTION_HYBRID_SIGNALS):
+            return "hybrid", ["AE"]
+    return policy, list(countries)
