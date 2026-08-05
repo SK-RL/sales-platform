@@ -245,6 +245,30 @@ class TestClassifier:
             ["AE"],
         )
 
+    def test_bare_uae_location_is_detected(self):
+        """A location that reads exactly "UAE" (or "UAE, Remote") must
+        be tagged AE. Pre-fix ``UAE_SIGNALS`` had "uae only"/"uae
+        remote"/"united arab emirates" but not the bare token, so these
+        fell through to ``unknown`` and vanished from every UAE view
+        (16+ live greenhouse/lever/ashby jobs). Also feeds the hybrid
+        country-retention + refinement paths."""
+        from app.workers.tasks._role_matching import classify_remote_policy
+
+        assert classify_remote_policy("UAE", "") == ("country_restricted", ["AE"])
+        assert classify_remote_policy("UAE", "Remote") == (
+            "country_restricted",
+            ["AE"],
+        )
+        assert classify_remote_policy("UAE, Remote", "") == (
+            "country_restricted",
+            ["AE"],
+        )
+        # And a bare-UAE hybrid keeps its country now too.
+        assert classify_remote_policy("Hybrid - UAE", "hybrid") == (
+            "hybrid",
+            ["AE"],
+        )
+
     def test_strong_remote_overrides_hybrid(self):
         """A listing that says "100% remote" but also "in office"
         somewhere shouldn't silently flip to hybrid. The strong

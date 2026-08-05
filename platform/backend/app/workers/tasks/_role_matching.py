@@ -233,6 +233,15 @@ USA_SIGNALS = [
 # remote_scope only (never the description body), so short tokens
 # like "gcc" can't collide with e.g. the GNU compiler in a JD.
 UAE_SIGNALS = [
+    # Bare "uae" — ATS location fields very often read exactly "UAE" or
+    # "UAE, Remote" with no other qualifier. Without this token they
+    # matched NONE of the multi-word signals below and fell through to
+    # policy=unknown, vanishing from every UAE view (found 16+ live jobs
+    # on greenhouse/lever/ashby doing exactly this). Safe as a substring:
+    # "uae" doesn't occur inside other city/country names, and
+    # UAE_SIGNALS is matched only against location_raw + remote_scope,
+    # never the noisy description body.
+    "uae",
     "uae only", "uae-based", "emirates", "dubai", "abu dhabi",
     "remote - uae", "remote (uae)",
     "united arab emirates", "uae remote", "remote uae",
