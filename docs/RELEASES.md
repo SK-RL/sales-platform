@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-09 · a0e6cc2 · sha-a0e6cc2
+Merge: add Jobsora fetcher (UAE aggregator source)
+
+
 ## 2026-08-05 · 04f040e · sha-04f040e
 Merge: classify ~87k unknown remote jobs (bare country + remote)
 
