@@ -18,6 +18,7 @@ from app.fetchers.hackernews import HackerNewsFetcher
 from app.fetchers.yc_waas import YCWaaSFetcher
 from app.fetchers.adzuna import AdzunaFetcher
 from app.fetchers.workingnomads import WorkingNomadsFetcher
+from app.fetchers.jobsora import JobsoraFetcher
 from app.fetchers.google_sheet import GoogleSheetFetcher
 
 FETCHER_MAP = {
@@ -58,6 +59,11 @@ FETCHER_MAP = {
     # "No fetcher for platform: workingnomads" (21 errors/week, zero
     # jobs sourced) until it was added here.
     "workingnomads": WorkingNomadsFetcher,
+    # Jobsora — per-country HTML aggregator, slug ``{country}/{path}``
+    # (e.g. ``ae/jobs-remote``). Server-rendered listing pages, parsed
+    # within robots limits (path-based URLs only). Aggregated / redirect
+    # links — see app/fetchers/jobsora.py caveats.
+    "jobsora": JobsoraFetcher,
     # F351 — team-curated Google Sheets as a scan source. Slug = the
     # sheet URL or ID (link-shared as Anyone-with-link → Viewer; no
     # Google API key needed). Register sheets via the admin Platforms
