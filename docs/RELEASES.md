@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-09 · 15cf7b6 · sha-15cf7b6
+Merge: add missing platforms (incl. Jobsora) to Jobs Platform dropdown
+
+
 ## 2026-08-09 · a0e6cc2 · sha-a0e6cc2
 Merge: add Jobsora fetcher (UAE aggregator source)
 
