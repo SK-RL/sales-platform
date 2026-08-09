@@ -93,6 +93,10 @@ PlatformFilter = Literal[
     # missing from the Literal in the original Adzuna commit, so
     # ``?platform=adzuna`` 422'd even after the fetcher shipped.)
     "adzuna",
+    # Jobsora — per-country HTML aggregator (``ae.jobsora.com`` etc.),
+    # slug ``{country}/{path}``. Filterable so admins can segment
+    # Jobsora-sourced (aggregated) rows. See app/fetchers/jobsora.py.
+    "jobsora",
     # F351 — team-curated Google Sheets ingested as boards. Slug =
     # sheet URL/ID. See app/fetchers/google_sheet.py.
     "google_sheet",
