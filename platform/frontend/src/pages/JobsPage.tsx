@@ -330,6 +330,16 @@ const PLATFORM_OPTIONS = [
   { value: "weworkremotely", label: "WeWorkRemotely" },
   { value: "remoteok", label: "RemoteOK" },
   { value: "remotive", label: "Remotive" },
+  // These were registered as backend fetchers/PlatformFilter values
+  // but never added to this hardcoded dropdown, so ?platform=<x> worked
+  // on the wire yet users couldn't select them in the UI (e.g. Jobsora
+  // jobs were invisible under the Platform filter). Kept in sync with
+  // ``PlatformFilter`` in backend/app/schemas/job.py.
+  { value: "workingnomads", label: "Working Nomads" },
+  { value: "hackernews", label: "Hacker News (Who's Hiring)" },
+  { value: "yc_waas", label: "YC Work at a Startup" },
+  { value: "adzuna", label: "Adzuna" },
+  { value: "jobsora", label: "Jobsora" },
   // F351 — team-curated Google Sheets ingested as boards.
   { value: "google_sheet", label: "Google Sheet" },
 ];
