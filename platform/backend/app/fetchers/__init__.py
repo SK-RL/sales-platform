@@ -19,6 +19,7 @@ from app.fetchers.yc_waas import YCWaaSFetcher
 from app.fetchers.adzuna import AdzunaFetcher
 from app.fetchers.workingnomads import WorkingNomadsFetcher
 from app.fetchers.jobsora import JobsoraFetcher
+from app.fetchers.remotedxb import RemoteDXBFetcher
 from app.fetchers.google_sheet import GoogleSheetFetcher
 
 FETCHER_MAP = {
@@ -64,6 +65,11 @@ FETCHER_MAP = {
     # within robots limits (path-based URLs only). Aggregated / redirect
     # links — see app/fetchers/jobsora.py caveats.
     "jobsora": JobsoraFetcher,
+    # RemoteDXB — curated UAE remote/hybrid board with a clean JSON API
+    # (/api/v1/listings). Real employers + explicit hybrid labels; slug
+    # is ignored (single board, use '__all__'). See app/fetchers/
+    # remotedxb.py.
+    "remotedxb": RemoteDXBFetcher,
     # F351 — team-curated Google Sheets as a scan source. Slug = the
     # sheet URL or ID (link-shared as Anyone-with-link → Viewer; no
     # Google API key needed). Register sheets via the admin Platforms

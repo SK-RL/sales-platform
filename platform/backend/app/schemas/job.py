@@ -97,6 +97,9 @@ PlatformFilter = Literal[
     # slug ``{country}/{path}``. Filterable so admins can segment
     # Jobsora-sourced (aggregated) rows. See app/fetchers/jobsora.py.
     "jobsora",
+    # RemoteDXB — curated UAE remote/hybrid board (JSON API). Real
+    # employers + explicit hybrid labels. See app/fetchers/remotedxb.py.
+    "remotedxb",
     # F351 — team-curated Google Sheets ingested as boards. Slug =
     # sheet URL/ID. See app/fetchers/google_sheet.py.
     "google_sheet",

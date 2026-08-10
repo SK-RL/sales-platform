@@ -340,6 +340,7 @@ const PLATFORM_OPTIONS = [
   { value: "yc_waas", label: "YC Work at a Startup" },
   { value: "adzuna", label: "Adzuna" },
   { value: "jobsora", label: "Jobsora" },
+  { value: "remotedxb", label: "RemoteDXB" },
   // F351 — team-curated Google Sheets ingested as boards.
   { value: "google_sheet", label: "Google Sheet" },
 ];
