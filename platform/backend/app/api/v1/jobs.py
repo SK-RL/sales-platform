@@ -1309,6 +1309,44 @@ async def submit_job_link(
     returns ``is_new=false``.
     """
     from app.fetchers.url_parser import parse_job_url, UnsupportedJobUrlError
+    from urllib.parse import urlparse, parse_qs
+
+    # 0. DB-first resolution (feedback 821bb39d — "actual job link is
+    #    saying invalid"). The pasted URL often points at a job we've
+    #    ALREADY scanned but whose host the ATS parser doesn't
+    #    recognise: ~45% of Greenhouse job URLs are company-domain
+    #    embeds carrying ``?gh_jid=`` (wiz.io, databricks.com, samsara
+    #    …), and Workable rows are stored short-form
+    #    (``apply.workable.com/j/<id>``). Rejecting those as "not a
+    #    recognised ATS" was the #1 submit-link failure. If the job is
+    #    already on the platform, return it — the user's goal (have it
+    #    here) is already met. Matched by exact URL, then by gh_jid →
+    #    the Greenhouse external_id (stored as the bare gh_jid).
+    raw_url = (body.url or "").strip()
+    existing = None
+    if raw_url:
+        existing = (await db.execute(
+            select(Job).options(joinedload(Job.company)).where(Job.url == raw_url)
+        )).unique().scalars().first()
+        if existing is None:
+            gh_jid = (parse_qs(urlparse(raw_url).query).get("gh_jid") or [None])[0]
+            if gh_jid and gh_jid.isdigit():
+                existing = (await db.execute(
+                    select(Job).options(joinedload(Job.company)).where(
+                        Job.platform == "greenhouse",
+                        Job.external_id == gh_jid,
+                    )
+                )).unique().scalars().first()
+    if existing is not None:
+        return SubmitJobLinkResponse(
+            id=str(existing.id),
+            title=existing.title,
+            company_name=existing.company.name if existing.company else "",
+            platform=existing.platform,
+            status=existing.status,
+            url=existing.url,
+            is_new=False,
+        )
 
     # 1. Parse URL → (platform, slug, external_id). Any parse failure
     #    becomes a 400 with an actionable message, before DB work.
