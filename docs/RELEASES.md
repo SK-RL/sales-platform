@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-10 · f741598 · sha-f741598
+fix(jobs): resolve already-scanned jobs in submit-link (feedback 821bb39d)
+
+
 ## 2026-08-09 · 15cf7b6 · sha-15cf7b6
 Merge: add missing platforms (incl. Jobsora) to Jobs Platform dropdown
 
