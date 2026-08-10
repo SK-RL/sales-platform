@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-10 · fd1afe8 · sha-fd1afe8
+Merge: add RemoteDXB fetcher (UAE remote/hybrid, real employers)
+
+
 ## 2026-08-10 · f741598 · sha-f741598
 fix(jobs): resolve already-scanned jobs in submit-link (feedback 821bb39d)
 
