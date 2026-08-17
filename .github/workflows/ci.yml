@@ -136,5 +136,11 @@ jobs:
         run: npm install
       - name: Typecheck
         run: npx tsc --noEmit
+      - name: Unit tests
+        # Fast, pure unit tests (vitest, no browser/DB). Kept in CI
+        # unlike the local-only Playwright E2E because they're
+        # sub-second. Guards the Relevant-Jobs → All-Jobs sidebar
+        # regression (src/lib/jobsNav.test.ts).
+        run: npm test
       - name: Build
         run: npm run build
