@@ -32,6 +32,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { logout, getRoleClusters } from "@/lib/api";
+import { isRelevantJobsView } from "@/lib/jobsNav";
 
 const navigation = [
   { name: "Dashboard", to: "/", icon: LayoutDashboard },
@@ -172,7 +173,15 @@ export function Sidebar({ mobile, onClose }: { mobile?: boolean; onClose?: () =>
           let isActive: boolean;
           if (itemPath === "/jobs" && location.pathname === "/jobs") {
             const isRelevantLink = item.to.includes("role_cluster=relevant");
-            const onRelevantPage = location.search.includes("role_cluster=relevant");
+            // Relevant-view detection includes the concrete relevant
+            // clusters (infra/security/qa), not just the ``relevant``
+            // pseudo-value — so filtering Relevant Jobs down to a single
+            // role no longer flips the highlight to "All Jobs". See
+            // src/lib/jobsNav.ts for the full rationale + unit test.
+            const onRelevantPage = isRelevantJobsView(
+              location.search,
+              relevantClusterNames,
+            );
             isActive = isRelevantLink ? onRelevantPage : !onRelevantPage;
           } else if (item.to.includes("?")) {
             isActive = location.pathname + location.search === item.to;
