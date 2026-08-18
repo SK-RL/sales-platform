@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-08-18 · 9d3baba · sha-9d3baba
+Merge: scope vitest to src/ (unbreak CI unit-test step)
+
+
 ## 2026-08-10 · fd1afe8 · sha-fd1afe8
 Merge: add RemoteDXB fetcher (UAE remote/hybrid, real employers)
 
