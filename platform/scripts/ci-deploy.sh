@@ -212,6 +212,53 @@ current_tag() {
 # -----------------------------------------------------------------------------
 # Backup DB + app state before a deploy. Non-fatal if backup script missing.
 # -----------------------------------------------------------------------------
+# Retention for pre-deploy dumps. Each dump is a full gzip of the database
+# (~1.2GB and growing), and pre-fix NOTHING ever removed them: 144 dumps
+# dating back to April had accumulated to 52GB — over half the 97GB root
+# disk and the single largest consumer on the VM, dwarfing the 4.2GB
+# database they back up. At ~2-4 deploys/week the disk would have hit 100%
+# within a month, which takes Postgres (and every other service) down with
+# it.
+#
+# Retention is age-based (keep anything newer than N days) with a hard
+# floor on COUNT. The floor matters: age alone would wipe out every
+# restore point during any quiet stretch longer than the window — a week
+# without deploys and the next deploy would delete all history including
+# the dump it just took. Whichever rule keeps more files wins.
+#
+# NOTE: these dumps live on the SAME disk as the database, so they are
+# rollback points, not disaster recovery — losing the volume loses both.
+# An offsite copy is still needed; retention here only stops the bleed.
+BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+BACKUP_RETENTION_MIN="${BACKUP_RETENTION_MIN:-3}"
+
+prune_old_backups() {
+  local dir="$APP_DIR/backups"
+  [ -d "$dir" ] || return 0
+  local keep old removed=0
+
+  # Newest-first list of the N we always keep regardless of age (the
+  # floor). Glob matches only `pre-deploy-*.sql.gz`, so hand-made
+  # full-dump directories under backups/ are never touched. `set -o
+  # pipefail` makes an empty pipe fatal, so absorb with `|| true`.
+  # Filenames are sha-derived — no spaces to word-split on.
+  keep="$(ls -1t "$dir"/pre-deploy-*.sql.gz 2>/dev/null | head -n "$BACKUP_RETENTION_MIN" || true)"
+
+  # Candidates: older than the age window. Anything in `keep` is then
+  # excluded, so the floor always wins over the age rule.
+  old="$(find "$dir" -maxdepth 1 -name 'pre-deploy-*.sql.gz' -mtime "+$BACKUP_RETENTION_DAYS" 2>/dev/null || true)"
+  [ -n "$old" ] || { log "No pre-deploy backups older than ${BACKUP_RETENTION_DAYS}d to prune"; return 0; }
+
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # Skip if this file is one of the floor-protected newest dumps.
+    if printf '%s\n' "$keep" | grep -Fxq "$f"; then continue; fi
+    rm -f "$f" && removed=$((removed + 1)) || true
+  done <<< "$old"
+
+  log "Pruned $removed pre-deploy backup(s) older than ${BACKUP_RETENTION_DAYS}d (floor: newest $BACKUP_RETENTION_MIN always kept)"
+}
+
 pre_deploy_backup() {
   local label="$1"
   cd "$APP_DIR"
@@ -220,6 +267,9 @@ pre_deploy_backup() {
   log "Taking pre-deploy DB backup -> $out"
   if $COMPOSE exec -T postgres pg_dump -U postgres jobplatform 2>/dev/null | gzip > "$out"; then
     log "Backup OK ($(du -h "$out" | cut -f1))"
+    # Prune only AFTER a confirmed-good new dump, never before — a failed
+    # pg_dump must not leave us with fewer restore points than we started.
+    prune_old_backups
   else
     log "WARN: pg_dump failed; continuing anyway"
     rm -f "$out"
