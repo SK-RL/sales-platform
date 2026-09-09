@@ -41,7 +41,21 @@ def test_registered_routes_is_flat_and_non_empty():
     from tests._routes import registered_routes
 
     routes = registered_routes()
-    assert len(routes) > 100
+    assert len(routes) > 100, (
+        f"only {len(routes)} routes — on FastAPI >= 0.141 a lazy include "
+        "leaked through; the helper must read app.openapi()['paths']"
+    )
     # Every entry is a real (METHOD, path) pair — nothing lazy leaked through.
     assert all(isinstance(m, str) and p.startswith("/") for m, p in routes)
     assert ("GET", "/api/v1/jobs") in routes
+
+
+def test_helper_does_not_depend_on_app_routes():
+    """``app.routes`` is only the app's own 9 routes on FastAPI >= 0.141;
+    the helper must go through the fully-resolved OpenAPI schema."""
+    import inspect
+    from tests import _routes
+
+    src = inspect.getsource(_routes.registered_routes)
+    assert "openapi()" in src
+    assert "app.routes" not in src
