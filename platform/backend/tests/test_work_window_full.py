@@ -472,13 +472,9 @@ class TestRouteRegistration:
     )
 
     def test_every_route_present_with_correct_method(self):
-        from app.api.v1.router import api_router
+        from tests._routes import registered_routes
 
-        actual = {
-            (method, route.path)
-            for route in api_router.routes
-            for method in getattr(route, "methods", set()) or set()
-        }
+        actual = registered_routes()
         for method, path in self.EXPECTED_ROUTES:
             assert (method, path) in actual, (
                 f"Missing route: {method} {path}. Either it was "

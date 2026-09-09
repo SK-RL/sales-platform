@@ -162,9 +162,9 @@ def test_allowlist_prefixes_match_only_prefixes():
 
 def test_router_registered_in_v1_router():
     """Smoke: ``/work-window/me`` is reachable in the v1 router."""
-    from app.api.v1.router import api_router
+    from tests._routes import registered_paths
 
-    paths = {r.path for r in api_router.routes}
+    paths = registered_paths()
     assert "/api/v1/work-window/me" in paths
     assert "/api/v1/work-window/admin/users/{user_id}" in paths
     assert "/api/v1/work-window/admin/extension-requests" in paths

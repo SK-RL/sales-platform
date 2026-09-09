@@ -32,13 +32,9 @@ os.environ.setdefault("JWT_SECRET", "pytest-job-apply")
 
 
 def test_record_route_registered():
-    from app.api.v1.router import api_router
+    from tests._routes import registered_routes
 
-    paths = {
-        (m, r.path)
-        for r in api_router.routes
-        for m in (getattr(r, "methods", None) or set())
-    }
+    paths = registered_routes()
     assert ("POST", "/api/v1/applications/record") in paths
 
 
