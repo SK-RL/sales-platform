@@ -44,21 +44,28 @@ token is ever handled:
 
 ## Per job
 1. New tab → job `url`. Click "Apply" / "Apply for this job" to reach the form.
-2. Identify the ATS from the host (`ats-notes.md`). Greenhouse boards may
-   offer **Autofill from resume**: upload the resume first, let it prefill,
-   then re-`read_page` and check every prefilled field against
-   `profile.yaml`. The profile always wins; correct anything the parser
-   got wrong.
-3. `read_page filter:interactive`. Map each labeled control to a profile
+2. Identify the ATS from the host (`ats-notes.md`). On modern Greenhouse
+   (`job-boards.greenhouse.io`) the form is already inline — no Apply
+   click — and fields are keyed by `id`, not `name`. If the URL bounces to
+   the board root or `?error=true`, the posting is gone: skip, log
+   `posting_gone`. Where a board offers **Autofill from resume**, upload
+   the resume first, then re-`read_page` and check every prefilled field
+   against `profile.yaml` — the profile always wins.
+3. **Scan for an own-words / no-AI attestation before composing anything**
+   (`attestations.md`). If the form has one, this job is attestation-gated:
+   fill only factual fields, and every free-text box must be the user's own
+   words, dictated by them and entered verbatim — or skip the job. Never
+   affirm such an attestation on their behalf. Seen live on Canonical.
+4. `read_page filter:interactive`. Map each labeled control to a profile
    key. Fill with `form_input`. Selects: pick the option matching the
    profile; nearest truthful option if no exact match; ask if none.
-4. Free-text boxes (cover letter, why us, tell us about …): write per
+5. Free-text boxes (cover letter, why us, tell us about …): write per
    `voice.md`, grounded only in `profile.yaml`.
-5. Resume: `file_upload` on the file input with `resume.path` (skip if
+6. Resume: `file_upload` on the file input with `resume.path` (skip if
    autofill already attached it — verify the filename is shown).
-6. EEO / voluntary self-identification: per `defaults.eeo` ("decline"
+7. EEO / voluntary self-identification: per `defaults.eeo` ("decline"
    picks the decline option everywhere). Never guess demographics.
-7. Do not submit. Screenshot. Print the review block:
+8. Do not submit. Screenshot. Print the review block:
    company · title · url · each field as `label → value` (truncate long
    values) · full text of every free-text answer · anything left blank.
 
@@ -123,8 +130,14 @@ Fill all N first, one tab each. Then one review pass listing all. Submit
 the approved ones with a 20–40 s gap between clicks. Cap 10 per run.
 
 ## Hard stops
-- CAPTCHA / Turnstile / "verify you're human": stop, name the tab, let the
-  user solve it, continue on their word. Never attempt it.
+- Visible CAPTCHA / Turnstile / "verify you're human": stop, name the tab,
+  let the user solve it, continue on their word. Never attempt it.
+- **Invisible reCAPTCHA v3 is active on Greenhouse** — no challenge appears,
+  it scores the session, and a bad score can bin the application with no
+  error. So: type into fields rather than injecting values via JS, work at
+  human pace, and never try to influence or suppress the check.
+- An own-words / no-AI attestation on the form (see `attestations.md`):
+  no composed free text goes in that form, ever.
 - Login or account-creation wall: skip, log `account_required`, give the URL.
 - Fields asking for ID numbers, bank details, passwords: leave blank, flag.
 - Never invent experience, dates, employers, numbers, or degrees. If the
