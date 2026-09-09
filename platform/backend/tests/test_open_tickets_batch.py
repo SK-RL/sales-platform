@@ -134,13 +134,9 @@ class TestDiscoveryResilience:
 
 class TestManualPipelineCard:
     def test_route_registered(self):
-        from app.api.v1.router import api_router
+        from tests._routes import registered_routes
 
-        paths = {
-            (m, r.path)
-            for r in api_router.routes
-            for m in (getattr(r, "methods", None) or set())
-        }
+        paths = registered_routes()
         assert ("POST", "/api/v1/pipeline/manual") in paths
 
     def test_mandatory_fields_enforced(self):
@@ -219,13 +215,9 @@ class TestInterviewQuestions:
     )
 
     def test_routes_registered(self):
-        from app.api.v1.router import api_router
+        from tests._routes import registered_routes
 
-        actual = {
-            (m, r.path)
-            for r in api_router.routes
-            for m in (getattr(r, "methods", None) or set())
-        }
+        actual = registered_routes()
         for m, p in self.EXPECTED:
             assert (m, p) in actual, f"missing {m} {p}"
 

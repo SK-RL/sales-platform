@@ -321,17 +321,12 @@ def test_routine_router_registered_in_v1_router():
     """Smoke-test: the routine router must be included in the v1
     router aggregator, or none of the endpoints above are reachable
     at all."""
-    from app.api.v1.router import api_router
+    from tests._routes import registered_paths
 
-    # The aggregator api_router has its own ``/api/v1`` prefix, so
-    # included-router paths come out as ``/api/v1/routine/...``. We
-    # match on substring, not startswith, so the test doesn't break
-    # if the v1 prefix is ever bumped.
-    routine_paths = [
-        route.path
-        for route in api_router.routes
-        if "/routine" in route.path
-    ]
+    # Mounted-app paths carry the ``/api/v1`` prefix, so routine paths
+    # come out as ``/api/v1/routine/...``. We match on substring, not
+    # startswith, so the test doesn't break if the v1 prefix is bumped.
+    routine_paths = [p for p in registered_paths() if "/routine" in p]
     assert routine_paths, (
         "no /routine/... routes found on api_router — routine router "
         "is not registered"
