@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-09 · 59cd178 · sha-59cd178
+Merge: route enumeration via OpenAPI (FastAPI >=0.141 lazy includes)
+
+
 ## 2026-09-09 · aa98809 · sha-aa98809
 Merge: job-apply skill + POST /applications/record
 
