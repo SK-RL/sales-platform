@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-09 · aa98809 · sha-aa98809
+Merge: job-apply skill + POST /applications/record
+
+
 ## 2026-08-18 · 3bed209 · sha-3bed209
 Merge: full-component render test for Relevant→All Jobs highlight
 
