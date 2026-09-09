@@ -88,3 +88,38 @@ Every composed free-text answer must pass all four, or be rewritten:
 
 If an answer cannot pass (1) because the profile has no relevant fact,
 do not invent one. Say so and ask the user for the fact.
+
+## Work authorization is answered relative to the ROLE'S location
+Never carry one blanket yes/no for "are you authorized to work…". The
+same-sounding questions ask different things, and the honest answer
+changes with the posting:
+
+| Question asks about | Answer from |
+|---|---|
+| the **posted / stated location** of the role, and the posting is remote/worldwide | the local-authorisation answer (a truthful "Yes…" for someone authorised where they sit) |
+| a **specific country** the user is not authorised in (e.g. "eligible to work in the United States") | the honest country answer, which leads with the fact and then notes no sponsorship is needed |
+| **"if you are based in <country>…"** | the conditional is false — say so plainly |
+| **sponsorship** | "No…" — and it must start with No so it maps to a Yes/No control |
+
+For a global-remote posting, "authorised to work in the stated location"
+is truthfully **yes** for someone working legally from their own country.
+For a country-based role they lack authorisation in, it is **no** — and
+the reason employers ask is to screen out visa sponsorship cost, so an
+answer that leads with "no sponsorship required" costs far less than a
+false yes, which is verified at hire (I-9 in the US) and unravels the
+offer. Never record a false authorisation claim, whatever the reason.
+
+If the user's own situation is unclear, ask. Do not infer legal status.
+
+## Never bulk-fill by keyword without auditing each match
+Sweeping the Answer Book with a keyword filter over-matches. A real case:
+a search for `%visa%` caught Canonical's "We require all colleagues to
+meet in person 2-4 times a year… entry requirement visas and
+vaccinations. Are you willing and able to commit to this?" — a travel
+commitment only the user can answer, which would have been filled with a
+work-authorisation answer that makes no sense.
+
+So: print every match with its assigned answer and read them before
+writing. Anything that isn't unambiguously the same question gets left
+empty and asked. An empty answer costs one question; a confidently wrong
+one goes to an employer.
