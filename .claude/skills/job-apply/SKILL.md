@@ -1,6 +1,6 @@
 ---
 name: job-apply
-description: Fill and submit job applications from the sales platform's relevant global-remote jobs using the user's own Chrome, then record every filled answer against that job's Application in the platform so it can be recalled. Use when the user says "apply to this job", "/job-apply <url>", "apply to the next N", "fill this application", or "prepare applications". Greenhouse first. Fills from profile.yaml, drafts free text in the user's voice (voice.md), uploads the resume, and always stops for review before submit.
+description: Fill and submit job applications from the sales platform's relevant global-remote jobs using the user's own Chrome, then record every filled answer against that job's Application in the platform so it can be recalled. Use when the user says "apply to this job", "/job-apply <url>", "apply to the next N", "fill this application", or "prepare applications". Greenhouse first. Fills from profile.yaml, drafts free text in the user's voice (voice.md), uploads the resume, and always stops for review before submit. Refuses to compose text for employers that require the applicant's own words.
 ---
 
 # job-apply
@@ -43,7 +43,9 @@ token is ever handled:
 5. Take the first N remaining.
 
 ## Per job
-1. New tab → job `url`. Click "Apply" / "Apply for this job" to reach the form.
+1. New tab → job `url`. On legacy boards click "Apply" / "Apply for this
+   job" to reveal the form; on modern Greenhouse the form is already there
+   (see step 2).
 2. Identify the ATS from the host (`ats-notes.md`). On modern Greenhouse
    (`job-boards.greenhouse.io`) the form is already inline — no Apply
    click — and fields are keyed by `id`, not `name`. If the URL bounces to
