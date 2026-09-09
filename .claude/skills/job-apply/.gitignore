@@ -1,0 +1,3 @@
+# Personal data and per-user history never go in the repo.
+profile.yaml
+log/

@@ -108,6 +108,76 @@ class PrepareApplicationRequest(BaseModel):
     job_id: UUID
 
 
+class RecordApplicationRequest(BaseModel):
+    """Body for ``POST /applications/record``.
+
+    The browser-side apply lane (the ``job-apply`` Claude skill under
+    ``.claude/skills/``) fills the ATS form in the user's own Chrome and
+    needs to store what it typed against this job's Application so the
+    answers are recallable from the platform. ``/prepare`` can't serve
+    that lane: it demands a stored ``PlatformCredential`` for the ATS
+    (built for the old server-side login flow) and fetches the questions
+    itself rather than accepting what the operator actually entered.
+
+    Exactly one of ``job_id`` / ``job_url`` must be set — the skill has
+    the id when targets came from ``GET /jobs``, but only the URL when
+    the user pasted a posting. ``answers`` reuse ``ApplicationAnswer``
+    (``extra="allow"``) so the skill can send ``label`` / ``field_type``
+    and the handler fills the rest of the ``PreparedAnswer`` shape the
+    Job Detail page already renders. Same 200-item cap as
+    ``ApplicationUpdate``.
+    """
+    model_config = ConfigDict(extra="forbid")
+    job_id: UUID | None = None
+    job_url: str | None = Field(default=None, min_length=1, max_length=2000)
+    answers: list[ApplicationAnswer] = Field(default_factory=list, max_length=200)
+    notes: str = Field(default="", max_length=5000)
+    ats_platform: str | None = Field(default=None, max_length=50)
+
+
+_RECORD_FIELD_TYPES = {"text", "textarea", "select", "multi_select", "file", "boolean"}
+
+
+def _normalize_recorded_answers(answers: list[dict]) -> list[dict]:
+    """Coerce operator-supplied answers into the ``PreparedAnswer`` shape.
+
+    The frontend (``JobDetailPage`` → ``PreparedAnswer``) expects every
+    row to carry ``field_key / label / field_type / required / options /
+    description / answer / match_source / question_key / confidence``.
+    The skill only reliably knows the label it saw and the value it
+    typed, so everything else gets a sensible default: ``match_source=
+    "override"`` (the operator chose it, not the matcher) and
+    ``confidence="high"``. ``question_key`` falls back to the normalised
+    label so ``/sync-answers`` and ``/promote-answer`` can key on it.
+    Rows with neither a label nor a key are dropped rather than stored
+    as unrecallable blanks.
+    """
+    from app.services.question_service import _normalise_key
+
+    out: list[dict] = []
+    for raw in answers:
+        label = (raw.get("label") or raw.get("question") or "").strip()
+        qk = (raw.get("question_key") or "").strip() or _normalise_key(label)
+        if not qk:
+            continue
+        ftype = raw.get("field_type") or "text"
+        if ftype not in _RECORD_FIELD_TYPES:
+            ftype = "text"
+        out.append({
+            "field_key": (raw.get("field_key") or qk)[:255],
+            "label": label or qk,
+            "field_type": ftype,
+            "required": bool(raw.get("required", False)),
+            "options": raw.get("options") or [],
+            "description": raw.get("description") or "",
+            "answer": raw.get("answer") or "",
+            "match_source": "override",
+            "question_key": qk[:200],
+            "confidence": "high",
+        })
+    return out
+
+
 class SyncAnswerItem(BaseModel):
     """One ``{question_key, answer}`` row for ``/sync-answers``."""
 
@@ -458,6 +528,117 @@ async def prepare_application(
         "has_credentials": True,
         "prepared_answers": prepared_answers,
         "status": "prepared",
+    }
+
+
+@router.post("/record")
+async def record_application(
+    body: RecordApplicationRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create (or refresh) the Application for a browser-side apply.
+
+    Called by the ``job-apply`` skill right after it has filled the ATS
+    form and BEFORE the user approves the submit, so the exact answers
+    typed are on record even if the submit is later skipped. After a
+    confirmed submit the skill calls ``/{id}/confirm-submitted``, which
+    owns the ``applied`` transition and all its side effects — this
+    endpoint deliberately never sets a status past ``prepared``.
+
+    Upsert rules: no row → create. Existing row still ``prepared`` →
+    overwrite answers/notes (the skill re-fills after an edit). Existing
+    row in any later status → 409, so a re-run can't clobber the history
+    of something already submitted.
+
+    ``resume_id`` is NOT NULL on the model, so the user's active resume
+    is required — same rule ``/prepare`` applies, same error text.
+    """
+    if (body.job_id is None) == (body.job_url is None):
+        raise HTTPException(status_code=400, detail="Provide exactly one of job_id or job_url.")
+    if not user.active_resume_id:
+        raise HTTPException(status_code=400, detail="No active resume selected. Please switch to a resume first.")
+
+    if body.job_id is not None:
+        job = (await db.execute(select(Job).where(Job.id == body.job_id))).scalar_one_or_none()
+    else:
+        url = body.job_url.strip()
+        job = (await db.execute(
+            select(Job).where(Job.url == url).order_by(Job.first_seen_at.desc())
+        )).scalars().first()
+        if not job:
+            # Boards append tracking params (``?gh_src=``, ``?lever-source=``);
+            # match on the path when the exact URL misses.
+            base = url.split("?", 1)[0].rstrip("/")
+            job = (await db.execute(
+                select(Job).where(Job.url.like(escape_like(base) + "%")).order_by(Job.first_seen_at.desc())
+            )).scalars().first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found in the platform for the given id/url.")
+
+    answers = _normalize_recorded_answers([a.model_dump() for a in body.answers])
+    notes = body.notes
+    if body.ats_platform and body.ats_platform not in notes:
+        notes = f"[{body.ats_platform}] {notes}".strip()
+
+    existing = (await db.execute(
+        select(Application).where(Application.user_id == user.id, Application.job_id == job.id)
+    )).scalar_one_or_none()
+    created = False
+    if existing:
+        if existing.status != "prepared":
+            raise HTTPException(
+                status_code=409,
+                detail=f"This job already has a {existing.status!r} application; not overwriting its answers.",
+            )
+        existing.prepared_answers = answers
+        existing.notes = notes
+        existing.apply_method = "claude_routine"
+        existing.submission_source = "routine"
+        app = existing
+    else:
+        app = Application(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            job_id=job.id,
+            resume_id=user.active_resume_id,
+            company_id=job.company_id,
+            status="prepared",
+            apply_method="claude_routine",
+            submission_source="routine",
+            prepared_answers=answers,
+            notes=notes,
+        )
+        db.add(app)
+        created = True
+
+    await log_action(
+        db, user,
+        action="application.recorded",
+        resource="application",
+        metadata={
+            "application_id": str(app.id),
+            "job_id": str(job.id),
+            "answer_count": len(answers),
+            "created": created,
+        },
+    )
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two skill tabs racing on the same job — the unique (user, job)
+        # constraint wins; surface it as the same 409 the slow path gives.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Application already exists for this job.")
+
+    return {
+        "id": str(app.id),
+        "application_id": str(app.id),
+        "job_id": str(job.id),
+        "job_url": job.url,
+        "status": app.status,
+        "created": created,
+        "prepared_answers": app.prepared_answers,
     }
 
 
