@@ -1,58 +1,41 @@
-# job-apply profile — the ONLY source of personal data the skill may use.
-# Copy to profile.yaml and fill in. Every value must be true; the skill
-# never invents anything that isn't here. Leave a field empty rather than
-# guess — the skill will ask once and save your answer.
+# job-apply — LOCAL profile.
+#
+# Deliberately small. The platform's Answer Book is the source of truth
+# for question→answer (see answers.md); this file holds only what the
+# Answer Book cannot: a path on this machine, plus the identity fields
+# that appear on literally every form and are faster read locally than
+# fetched.
+#
+# Copy to profile.yaml (git-ignored) and fill. Never guess a value —
+# leave it blank and the skill will ask you once and save the answer to
+# the Answer Book.
 
 identity:
   first_name: "<First>"
   last_name: "<Last>"
-  preferred_name: ""          # optional, used only if the form asks
-  pronouns: ""                # optional
+  preferred_name: ""            # only if a form asks
 
 contact:
   email: "<you@domain.com>"
-  phone: "<+971 5x xxx xxxx>" # include country code
-  location:
-    city: "<Dubai>"
-    country: "<United Arab Emirates>"
-    timezone: "<Asia/Dubai>"
-  address: ""                 # street address, only if a form requires it
+  phone: "<+971 5x xxx xxxx>"   # include country code
+  city: "<Dubai>"
+  country: "<United Arab Emirates>"
 
 links:
-  linkedin: "<https://www.linkedin.com/in/...>"
+  linkedin: "<https://www.linkedin.com/in/...>"   # asked on 141 forms in our corpus
+  website: ""                                    # asked on 76 — portfolio, blog or GitHub
   github: ""
-  portfolio: ""
-  other: ""
 
-work_authorization:
-  # Answered exactly as written on forms — keep these factual.
-  authorized_countries: ["<United Arab Emirates>"]
-  needs_sponsorship: "<yes|no>"          # for the countries above
-  open_to_relocate: "<yes|no>"
-  remote_preference: "fully remote"      # what you'll say if asked
-  willing_to_travel: "<yes|no|occasionally>"
-
-compensation:
-  currency: "<USD>"
-  expected_annual: "<120000>"            # a number, no symbols
-  expected_range: "<110000-130000>"      # used when a range is asked
-  current_annual: ""                     # leave blank unless you want it shared
-
-availability:
-  notice_period: "<30 days>"
-  earliest_start: "<immediately|YYYY-MM-DD>"
-  employment_types: ["full-time"]        # full-time / contract / part-time
-
+# The only genuinely local thing: the file uploaded on every application.
 resume:
-  path: "</absolute/path/to/Resume.pdf>" # uploaded on every application
-  cover_letter_path: ""                  # optional; text is generated per job anyway
+  path: "</absolute/path/to/Resume.pdf>"
 
-# Facts the skill may draw on for free-text answers (cover letter,
-# "why us", "tell us about a project"). Be specific: names, numbers,
-# tools. This is what makes an answer sound like you and not a template.
+# Facts used to ground free-text answers. Be specific — names, numbers,
+# tools. Generic entries produce generic answers, which is exactly what
+# voice.md is trying to avoid. Anything here must be true.
 experience:
   current_title: "<Senior DevOps Engineer>"
-  current_company: "<Company>"
+  current_company: "<Company>"        # asked on 13 forms in our corpus
   years_total: "<8>"
   headline: "<one plain sentence about what you actually do>"
   core_stack: ["<AWS>", "<Kubernetes>", "<Terraform>", "<Python>"]
@@ -61,31 +44,16 @@ experience:
       what: "<what you did, one or two lines>"
       result: "<a number: cost, latency, uptime, headcount, time>"
       tools: ["<Terraform>", "<EKS>"]
-    - name: ""
-      what: ""
-      result: ""
-      tools: []
-  certifications: []
-  education:
-    degree: ""
-    institution: ""
-    year: ""
 
-# Default answers for the boilerplate every ATS asks.
+# Small conveniences that aren't worth a round trip.
 defaults:
-  how_did_you_hear: "Company careers page"
+  how_did_you_hear: "Company careers page"   # asked on 41 forms in our corpus
   worked_here_before: "no"
   referred_by: ""
-  eeo: "decline"        # decline | answer — "decline" selects "Decline to self-identify" everywhere
-  veteran_status: "decline"
-  disability_status: "decline"
-  gender: "decline"
-  ethnicity: "decline"
-  over_18: "yes"
-  consent_to_data_processing: "yes"
 
-# Answers the skill saved after asking you once. Key = normalized question.
-# Add your own here too.
-custom_answers:
-  # "why do you want to leave your current role": "..."
-  # "what is your biggest technical achievement": "..."
+# NOT here on purpose — these live in the Answer Book as the 16 locked
+# required entries, because the platform requires them to be provably
+# user-chosen: salary minima (global/USA/UAE/remote), notice period,
+# earliest start, work authorization, sponsorship, relocation, work
+# mode, current location, and the four EEO questions.
+# Fill them via the answer-book setup screen. See answers.md.
