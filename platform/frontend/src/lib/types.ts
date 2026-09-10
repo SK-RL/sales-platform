@@ -1652,6 +1652,13 @@ export interface RoutinePreferences {
   // regardless of cluster/geography/score. Capped at 200 entries
   // server-side.
   excluded_company_ids: string[];
+  // F360 — server-side auto-apply. These MUST be present on the type:
+  // putRoutinePreferences PUTs the whole object with replace semantics,
+  // so a field missing here is a field silently reset to its default on
+  // the next save from any other control.
+  auto_apply_enabled: boolean;
+  auto_apply_daily_cap: number;   // 0 = auto-apply does nothing
+  auto_apply_min_score: number;   // 0-100
 }
 
 export interface ExcludedCompany {

@@ -524,6 +524,79 @@ function PreferencesCard() {
         </button>
       </div>
       <div className="space-y-5 px-6 py-5">
+        {/* F360 — auto-apply. Deliberately first and deliberately blunt:
+            this is the only control on the page that sends applications
+            to employers with nobody watching. */}
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <label className="text-sm font-medium text-amber-900">
+                Apply automatically
+              </label>
+              <p className="text-xs text-amber-800">
+                Submits applications on your behalf without asking first.
+                Anything the gate won&apos;t answer — legal, EEO or salary
+                questions with no saved answer, or a form we can&apos;t read —
+                goes to the review queue instead.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={draft.auto_apply_enabled}
+              onChange={(e) =>
+                setDraft({ ...draft, auto_apply_enabled: e.target.checked })
+              }
+              className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+            />
+          </div>
+          {draft.auto_apply_enabled && (
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-medium text-amber-900">
+                  Max per day
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={draft.auto_apply_daily_cap}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      auto_apply_daily_cap: Math.max(0, Math.min(50, Number(e.target.value) || 0)),
+                    })
+                  }
+                  className="mt-1 w-full rounded-md border border-amber-300 px-2 py-1 text-sm"
+                />
+                <p className="mt-1 text-xs text-amber-700">
+                  0 means nothing is sent, even with the toggle on.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-amber-900">
+                  Minimum match score
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={draft.auto_apply_min_score}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      auto_apply_min_score: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    })
+                  }
+                  className="mt-1 w-full rounded-md border border-amber-300 px-2 py-1 text-sm"
+                />
+                <p className="mt-1 text-xs text-amber-700">
+                  Keep this above the score you&apos;d browse at.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Toggle: only_global_remote */}
         <div className="flex items-start justify-between gap-4">
           <div>
