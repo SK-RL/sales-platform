@@ -270,6 +270,29 @@ class TestVerifiedAgainstLiveGreenhouseDOM:
     def test_explicit_recaptcha_widget_is_a_wall(self):
         assert detect_human_wall('<div class="g-recaptcha"></div>') is not None
 
+    def test_hcaptcha_checkbox_widget_is_a_wall(self):
+        """F359 — verified on a live Lever apply page. The old marker was
+        the single filename "hcaptcha.com/1/api.js"; Lever loads
+        "js.hcaptcha.com/1/secure-api.js", so a form carrying a real
+        hCaptcha checkbox came back as NO wall. That's the dangerous
+        direction — we'd drive a form we cannot submit and look like
+        abuse to the ATS."""
+        live = (
+            '<script src="https://js.hcaptcha.com/1/secure-api.js?host=jobs.lever.co"></script>'
+            '<div id="h-captcha" class="h-captcha" data-sitekey="e33f87f8">'
+            '<iframe title="Widget containing checkbox for hCaptcha security challenge">'
+            "</iframe></div>"
+        )
+        assert detect_human_wall(live) is not None
+
+    def test_hcaptcha_script_alone_is_not_a_wall(self):
+        """Invisible/score-based hCaptcha needs no human, so the markers
+        target the widget rather than any script URL — the same
+        discrimination the reCAPTCHA markers make."""
+        assert detect_human_wall(
+            '<script src="https://js.hcaptcha.com/1/secure-api.js"></script>'
+        ) is None
+
     def test_submit_selector_is_scoped_to_the_form(self):
         """F356 — an unscoped button[type=submit] clicks a cookie-banner
         button on any page that has one. Recruitee proved it: a live

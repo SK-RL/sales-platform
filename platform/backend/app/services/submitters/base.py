@@ -150,8 +150,19 @@ _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
     "recaptcha/api2/bframe",
     'class="g-recaptcha"',
     "class='g-recaptcha'",
-    # hCaptcha and Turnstile render visible widgets by default.
-    "hcaptcha.com/1/api.js",
+    # hCaptcha's interactive checkbox widget. F359 — the old marker was
+    # the single script filename "hcaptcha.com/1/api.js", and Lever
+    # loads "js.hcaptcha.com/1/secure-api.js" instead, so a live Lever
+    # apply page carrying a real hCaptcha checkbox came back as NO wall.
+    # That is the dangerous direction: we'd have driven a form we cannot
+    # submit and looked like abuse to the ATS.
+    #
+    # These target the widget rather than any one script URL, so an
+    # invisible/score-based hCaptcha still doesn't trip them — the same
+    # discrimination the reCAPTCHA markers make.
+    'class="h-captcha"',
+    "class='h-captcha'",
+    "checkbox for hcaptcha",
     "cf-turnstile",
     # Plain-language walls.
     "verify you are human",
