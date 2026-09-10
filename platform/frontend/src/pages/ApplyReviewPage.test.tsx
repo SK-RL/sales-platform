@@ -69,6 +69,47 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+describe("single-application mode (?app=<id>)", () => {
+  /** F361 — the entry point from the Applications table. Without it the
+   *  feature was unreachable from the UI: the queue only lists things
+   *  already in needs_user, and nothing could get there except the
+   *  sweep, which is off by default. */
+
+  function renderFocused() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/applications/review?app=a1"]}>
+          <ApplyReviewPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("reviews the requested application even when the queue is empty", async () => {
+    queueItems = [];  // nothing in needs_user
+    appDetail = {
+      id: "a1",
+      status: "prepared",
+      platform_response: {},
+      job: {
+        id: "j1", title: "Cloud Engineering Manager", company_name: "Canonical",
+        platform: "greenhouse", url: "https://boards.greenhouse.io/canonical/jobs/1",
+      },
+    };
+    renderFocused();
+    expect(await screen.findByText("Cloud Engineering Manager")).toBeTruthy();
+    expect(screen.getByText(/Canonical/)).toBeTruthy();
+  });
+
+  it("says not found rather than 'nothing needs you' for a bad id", async () => {
+    queueItems = [];
+    appDetail = {};
+    renderFocused();
+    expect(await screen.findByText(/Application not found/i)).toBeTruthy();
+  });
+});
+
 describe("empty queue", () => {
   it("says nothing needs you rather than showing an empty form", async () => {
     queueItems = [];

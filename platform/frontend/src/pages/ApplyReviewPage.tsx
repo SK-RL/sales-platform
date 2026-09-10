@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Lock } from "lucide-react";
 import {
@@ -29,10 +29,35 @@ import type { ApplyGateResult, JobQuestionsPreview, PreparedQuestion } from "@/l
 export function ApplyReviewPage() {
   const queryClient = useQueryClient();
   const [index, setIndex] = useState(0);
+  // ?app=<id> reviews one specific application — the entry point from
+  // the Applications table. Without it this is the needs_user queue.
+  // Both modes render identically; only the source of the list differs.
+  const [params] = useSearchParams();
+  const focusId = params.get("app");
 
   const queueQ = useQuery({
-    queryKey: ["apply-review-queue"],
-    queryFn: () => getApplications({ status: "needs_user", page: 1, page_size: 100 }),
+    queryKey: ["apply-review-queue", focusId],
+    queryFn: async () => {
+      if (focusId) {
+        const one = await getApplication(focusId);
+        // A bad id must read as "not found", not as a row with an empty
+        // title and live buttons wired to `undefined`.
+        if (!one?.id) return { items: [] };
+        return {
+          items: [
+            {
+              id: one.id,
+              job_id: one.job?.id,
+              job_title: one.job?.title,
+              company_name: one.job?.company_name,
+              platform: one.job?.platform,
+              job_url: one.job?.url,
+            },
+          ],
+        };
+      }
+      return getApplications({ status: "needs_user", page: 1, page_size: 100 });
+    },
   });
 
   const queue = queueQ.data?.items ?? [];
@@ -141,7 +166,9 @@ export function ApplyReviewPage() {
   if (total === 0) {
     return (
       <div className="mx-auto max-w-3xl px-6 py-16 text-center">
-        <p className="text-lg font-medium text-gray-900">Nothing needs you</p>
+        <p className="text-lg font-medium text-gray-900">
+          {focusId ? "Application not found" : "Nothing needs you"}
+        </p>
         <p className="mt-2 text-sm text-gray-500">
           Applications appear here when the apply gate won't answer something on
           your behalf.

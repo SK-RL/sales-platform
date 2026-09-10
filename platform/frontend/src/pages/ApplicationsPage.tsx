@@ -402,6 +402,23 @@ export function ApplicationsPage() {
                           <ExternalLink className="h-4 w-4" />
                         </a>
                       )}
+                      {/* F361 — the way INTO server-side apply. Without
+                          this the feature was unreachable from the UI:
+                          the review queue only lists applications already
+                          in needs_user, and nothing could get there
+                          except the sweep, which is off by default.
+                          Deliberately a link to the review screen rather
+                          than a one-click send — an application should
+                          never leave a table row unseen. */}
+                      {["prepared", "needs_user", "failed"].includes(app.status) && (
+                        <Link
+                          to={`/applications/review?app=${app.id}`}
+                          className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                          title="Review & apply automatically"
+                        >
+                          <Bot className="h-4 w-4" />
+                        </Link>
+                      )}
                       {/* Feature C — "What we sent" modal trigger. Shown
                           for rows that carry a submit-time snapshot. Two
                           modal shapes:
