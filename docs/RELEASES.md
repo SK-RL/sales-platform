@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 9e22c25 · sha-9e22c25
+Merge: server-side auto-apply — gate, submitters, review queue
+
+
 ## 2026-09-10 · 0c2cdfe · sha-0c2cdfe
 Merge: job-apply skill learnings from the 2026-09-10 run
 
