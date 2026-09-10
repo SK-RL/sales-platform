@@ -51,12 +51,21 @@ Do not fill a form the moment you open it. For the whole batch:
    already inline; on legacy boards click "Apply for this job". If the
    URL bounces to the board root or `?error=true` the posting is gone —
    skip, log `posting_gone`.
+   **Aggregator URLs are a hop, not a form.** himalayas / remotedxb /
+   weworkremotely hand off to the employer's real ATS — follow it
+   (`ats/himalayas.md`), then use the destination's file. Logged out,
+   Himalayas is an account wall and a hard stop; use the Chrome profile
+   that has it signed in.
 2. **Identify the ATS** from the host and read `ats/<platform>.md` +
    `ats/_shared.md`.
-3. **Scan for an own-words / no-AI attestation** (`attestations.md`)
-   before composing anything. On a match the job is attestation-gated:
-   factual fields only; free text must be the user's own words entered
-   verbatim, or skip the job. Never affirm such an attestation yourself.
+3. **Scan the WHOLE form region for an own-words / no-AI clause**
+   (`attestations.md`) before composing anything — full rendered text,
+   not just `<label>` elements. Canonical puts it in a required dropdown
+   label; Tether puts it in a plain callout div, which a label-only scan
+   misses entirely. Then judge context: an instruction not to use AI
+   gates the job, a job description praising AI fluency does not. If
+   gated: factual fields only; free text must be the user's own words
+   entered verbatim, or skip. Never affirm such an attestation yourself.
 4. **Resolve every field**: Answer Book → `profile.yaml` → unknown.
    Sort unknowns into factual-unknown / composable / attestation
    (`answers.md`).
@@ -70,6 +79,11 @@ Do not fill a form the moment you open it. For the whole batch:
    inject values via raw JS.
 7. **Free text** per `voice.md`, then run the four-point quality check in
    `answers.md`. Rewrite anything that fails.
+   **Check what the control actually is first.** Tether's "Why are you
+   interested?" is a *video* question (Record / Upload Video) with a
+   hidden companion text input — filling the text does not answer it. A
+   question needing video, audio or a live task is the user's to do: say
+   so plainly rather than filling around it.
 8. **Resume**: `file_upload` on the file input with `resume.path`. After
    upload the file input is removed from the DOM and the filename shows
    as a chip — verify by page text.
