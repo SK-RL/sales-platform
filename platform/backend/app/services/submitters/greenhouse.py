@@ -27,6 +27,7 @@ filled somewhere else.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.services.playwright_browser import BrowserError, BrowserSession
@@ -67,6 +68,33 @@ _CONFIRMATION_MARKERS: tuple[str, ...] = (
 # first for older embedded boards that still render it.
 _SUBMIT_SELECTOR = "#submit_app, button[type=submit], input[type=submit]"
 
+# Anchor proving the application form is rendered, plus a settle for
+# React hydration. See the note in submit() — filling before hydration
+# silently discards the values.
+_FORM_READY_SELECTOR = "#first_name"
+_HYDRATION_SETTLE_SECONDS = 3.0
+
+# Reads every identified input/textarea back out of the DOM. For a
+# react-select combobox the typed text is cleared on commit and the
+# chosen option renders in a sibling `.select__single-value`, so we
+# look there when the input itself is empty.
+_READBACK_JS = """
+(() => {
+  const out = {};
+  document.querySelectorAll('input,textarea').forEach(e => {
+    if (!e.id) return;
+    let v = e.value || '';
+    if (!v) {
+      const ctrl = e.closest('.select__control');
+      const sv = ctrl ? ctrl.querySelector('.select__single-value') : null;
+      if (sv) v = sv.innerText.trim();
+    }
+    out[e.id] = v;
+  });
+  return out;
+})()
+"""
+
 
 class GreenhouseSubmitter(BaseSubmitter):
     platform = "greenhouse"
@@ -85,7 +113,20 @@ class GreenhouseSubmitter(BaseSubmitter):
 
         try:
             async with BrowserSession() as session:
-                await session.navigate(job_url, wait_until="domcontentloaded")
+                # Wait for the form to exist AND for React to finish
+                # hydrating before typing. Verified on a live posting:
+                # filling at `domcontentloaded` silently lost the first
+                # three fields (first_name, last_name, email) — hydration
+                # replaced the inputs after we'd set them. Playwright
+                # raised nothing and the fields read back empty, so the
+                # adapter reported success on an application that would
+                # have submitted with no name on it.
+                await session.navigate(
+                    job_url,
+                    wait_until="domcontentloaded",
+                    wait_for_selector=_FORM_READY_SELECTOR,
+                )
+                await asyncio.sleep(_HYDRATION_SETTLE_SECONDS)
 
                 html = await session.html()
                 wall = detect_human_wall(html)
@@ -103,9 +144,13 @@ class GreenhouseSubmitter(BaseSubmitter):
                     except BrowserError:
                         pass
 
+                expected_display: dict[str, str] = {}
                 for f in fields:
                     placed = await self._place(
-                        session, f, resume_uploaded=resume_uploaded
+                        session,
+                        f,
+                        resume_uploaded=resume_uploaded,
+                        expected_display=expected_display,
                     )
                     if not placed:
                         unplaceable.append(f.field_key)
@@ -119,6 +164,20 @@ class GreenhouseSubmitter(BaseSubmitter):
                         # Cover letter is optional on most Greenhouse
                         # boards; note it but don't fail the submission.
                         issues.append("cover_letter_field_absent")
+
+                # Never trust `fill()`. Read the DOM back and demote any
+                # field that doesn't actually hold what we intended —
+                # this is the check that caught the hydration bug, and
+                # the only thing standing between "we called fill" and
+                # "the form says what the user approved".
+                actual = await self._readback(session)
+                for f in fields:
+                    if f.field_key in unplaceable or f.field_type == "file":
+                        continue
+                    got = str(actual.get(f.field_key, ""))
+                    if not self._value_present(f, got, expected_display):
+                        unplaceable.append(f.field_key)
+                        issues.append(f"unverified:{f.field_key}")
 
                 # A required field we could not place means the form we
                 # send would not say what the user approved. Abort before
@@ -200,6 +259,7 @@ class GreenhouseSubmitter(BaseSubmitter):
         f: SubmitField,
         *,
         resume_uploaded: bool = False,
+        expected_display: dict[str, str] | None = None,
     ) -> bool:
         """Put one answer into the form. False when we couldn't."""
         if f.field_type == "file":
@@ -217,14 +277,23 @@ class GreenhouseSubmitter(BaseSubmitter):
                     # ATS's allowed values. Report unplaceable instead of
                     # choosing the nearest option (F346).
                     return False
-                return await self._place_choice(session, selector, option)
+                if expected_display is not None:
+                    # What the ATS will *render* once committed. For
+                    # Greenhouse's {"value","label"} options that's the
+                    # label, not the value we submit, so verification has
+                    # to compare against both.
+                    expected_display[f.field_key] = self._display_for(option, f.options)
+                return await self._place_choice(
+                    session, selector, option, field_key=f.field_key
+                )
             await session.fill(selector, f.value)
             return True
         except BrowserError:
             return False
 
     async def _place_choice(
-        self, session: BrowserSession, selector: str, option: str
+        self, session: BrowserSession, selector: str, option: str,
+        field_key: str = "",
     ) -> bool:
         """Choose ``option`` on a dropdown, native or react-select.
 
@@ -255,22 +324,65 @@ class GreenhouseSubmitter(BaseSubmitter):
         # field empty when the typed text matches no option, and an
         # unset required dropdown is exactly the silent-partial-submit
         # this adapter must never produce.
-        return await self._choice_committed(session, selector)
+        return await self._choice_committed(session, field_key)
 
     @staticmethod
-    async def _choice_committed(session: BrowserSession, selector: str) -> bool:
-        """True when react-select shows a committed value for the field."""
+    async def _choice_committed(session: BrowserSession, field_key: str) -> bool:
+        """True when react-select shows a committed value for THIS field.
+
+        The first version built a selector by interpolating an already
+        comma-separated selector into another comma list, producing
+        malformed CSS, and then fell back to reading the first
+        `.select__single-value` anywhere on the page — so any *other*
+        combobox holding a value made it return True. It reported every
+        dropdown as placed regardless of what happened.
+        """
+        script = (
+            "(() => { const e = document.getElementById(%r);"
+            " if (!e) return '';"
+            " const c = e.closest('.select__control');"
+            " const sv = c ? c.querySelector('.select__single-value') : null;"
+            " return (e.value || (sv ? sv.innerText.trim() : '')); })()"
+            % field_key
+        )
         try:
-            # `.select__single-value` is react-select's rendered choice;
-            # it only exists once an option is actually selected.
-            container = f"{selector} ~ .select__single-value, {selector}"
-            value = await session.attr(container, "value")
-            if value:
-                return True
-            text = await session.text(".select__single-value")
-            return bool(text and text.strip())
+            return bool(await session.eval_js(script))
         except BrowserError:
             return False
+
+    async def _readback(self, session: BrowserSession) -> dict:
+        """Every identified field's current value, straight from the DOM."""
+        try:
+            return await session.eval_js(_READBACK_JS) or {}
+        except BrowserError:
+            return {}
+
+    @staticmethod
+    def _display_for(submitted: str, options: list) -> str:
+        """The label the ATS renders for the option we chose."""
+        for opt in options or []:
+            if isinstance(opt, dict):
+                if str(opt.get("value", "")) == submitted:
+                    return str(opt.get("label") or submitted)
+        return submitted
+
+    @staticmethod
+    def _value_present(f: SubmitField, got: str, expected_display: dict) -> bool:
+        """Does the DOM actually hold what we meant to put there?"""
+        got_n = (got or "").strip().lower()
+        if not got_n:
+            return False
+        if f.field_type in ("select", "multi_select"):
+            wanted = {
+                (expected_display.get(f.field_key) or "").strip().lower(),
+                (f.value or "").strip().lower(),
+            }
+            return any(w and w in got_n for w in wanted)
+        # Text-ish: the value we typed must actually be there. Compare on
+        # a prefix so trailing normalisation (trimming, phone masks)
+        # doesn't produce false alarms.
+        wanted = (f.value or "").strip().lower()
+        return bool(wanted) and wanted[:24] in got_n
 
     @staticmethod
     def _field_selector(field_key: str) -> str:
