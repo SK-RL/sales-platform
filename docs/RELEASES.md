@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · ceb9f11 · sha-ceb9f11
+Merge: release-log step no longer fails a green deploy
+
+
 ## 2026-09-10 · 73ccab5 · sha-73ccab5
 fix(jobs): reopening a rejected job 500'd on the F316 dedupe index
 
