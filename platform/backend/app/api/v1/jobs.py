@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy import select, func, or_, literal, case, exists
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -906,6 +907,64 @@ async def get_job_reviews(job_id: UUID, user: User = Depends(get_current_user), 
     return items
 
 
+# F316 companion. `uq_jobs_active_company_title` is a partial UNIQUE on
+# (company_id, lower(trim(title))) restricted to the ACTIVE statuses below.
+# It exists to stop scans inserting duplicate live rows, but it also fires
+# on a perfectly ordinary user action: reopening a rejected job whose role
+# has since been re-listed under a second row. Both handlers below used to
+# let that IntegrityError escape as a bare 500 — the operator saw "Request
+# failed with status 500" with no hint that the role is already in their
+# queue under a different id.
+#
+# Worse, in the bulk path a SINGLE colliding row aborted the whole
+# transaction, so a 24-job "Reset" updated nothing at all. We now
+# pre-detect collisions and skip only the offenders.
+ACTIVE_STATUSES = ("new", "under_review", "accepted")
+
+
+def _norm_title(title: str) -> str:
+    """Mirror the index expression `lower(trim(title))` exactly."""
+    return (title or "").strip().lower()
+
+
+async def _active_duplicates(
+    jobs: list[Job], target_status: str, db: AsyncSession
+) -> dict:
+    """Map job.id -> the id of the ACTIVE row that blocks reopening it.
+
+    Returns {} when `target_status` isn't gated by the partial index, so
+    the archive/reject/hide paths pay nothing. One query, not one per row.
+    """
+    if target_status not in ACTIVE_STATUSES or not jobs:
+        return {}
+
+    company_ids = {j.company_id for j in jobs if j.company_id is not None}
+    if not company_ids:
+        return {}
+
+    moving = {j.id for j in jobs}
+    rows = (await db.execute(
+        select(Job.id, Job.company_id, Job.title).where(
+            Job.company_id.in_(company_ids),
+            Job.status.in_(ACTIVE_STATUSES),
+        )
+    )).all()
+
+    # Key on the same (company, normalised title) pair the index uses.
+    # Skip rows that are themselves part of this update — a job already
+    # sitting in an active status doesn't block its own no-op rewrite.
+    holders = {
+        (cid, _norm_title(title)): jid
+        for jid, cid, title in rows
+        if jid not in moving
+    }
+    return {
+        j.id: holders[(j.company_id, _norm_title(j.title))]
+        for j in jobs
+        if (j.company_id, _norm_title(j.title)) in holders
+    }
+
+
 @router.patch("/{job_id}")
 async def update_job_status(
     job_id: UUID, body: JobStatusUpdate,
@@ -918,8 +977,34 @@ async def update_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     old_status = job.status
+
+    # Reopening into an active status can collide with F316's partial
+    # UNIQUE when the same role is already live under another row.
+    blocked = await _active_duplicates([job], body.status, db)
+    if job.id in blocked:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This role is already active in the queue under job "
+                f"{blocked[job.id]}. Reopening would create a duplicate "
+                "listing for the same company and title."
+            ),
+        )
+
     job.status = body.status
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # TOCTOU backstop: a concurrent scan may have inserted the
+        # active twin between the check above and this commit.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This role is already active in the queue under another "
+                "job. Reopening would create a duplicate listing."
+            ),
+        )
 
     await log_action(
         db, user,
@@ -1091,9 +1176,37 @@ async def bulk_action(
             "count": len(jobs),
         }
 
-    for j in jobs:
+    # Skip rows that would violate F316's partial UNIQUE rather than
+    # letting one collision roll back the entire batch. The caller gets
+    # an explicit `skipped` list so the UI can say WHICH rows didn't
+    # move and why, instead of showing a blanket failure.
+    blocked = await _active_duplicates(list(jobs), body.action, db)
+    applied = [j for j in jobs if j.id not in blocked]
+    for j in applied:
         j.status = body.action
-    await db.commit()
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "One or more of these roles is already active in the queue "
+                "under a different job. No rows were changed."
+            ),
+        )
+
+    skipped = [
+        {
+            "job_id": str(jid),
+            "reason": "duplicate_active_listing",
+            "conflicting_job_id": str(other),
+        }
+        for jid, other in blocked.items()
+    ]
+    metadata["updated"] = len(applied)
+    metadata["skipped"] = len(skipped)
 
     await log_action(
         db, user,
@@ -1103,7 +1216,7 @@ async def bulk_action(
         metadata=metadata,
     )
 
-    return {"updated": len(jobs)}
+    return {"updated": len(applied), "skipped": skipped}
 
 
 # --- Feature A: manual job link submission -----------------------------------

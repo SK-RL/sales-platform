@@ -494,7 +494,13 @@ export function JobsPage() {
   // 5000" instead of silently failing. `bulkMutation.error` also
   // carries it, but extracting the .detail payload and clearing on
   // success is clearer as its own state.
-  const [bulkErrorMsg, setBulkErrorMsg] = useState<string | null>(null);
+  // F316: the banner reports two different outcomes now — a hard
+  // failure (red) and a partial apply where some rows were skipped
+  // as duplicates (amber). Kept as one object so the message and
+  // its tone can never desync.
+  const [bulkNotice, setBulkNotice] = useState<
+    { msg: string; tone: "error" | "warning" } | null
+  >(null);
 
   // Regression finding 70: clear checkbox selections when filters change —
   // stale selections from a previous filter-set could silently target
@@ -509,7 +515,7 @@ export function JobsPage() {
   useEffect(() => {
     setSelectedIds(new Set());
     setSelectAllMatching(false);
-    setBulkErrorMsg(null);
+    setBulkNotice(null);
   }, [
     filters.search, filters.status, filters.platform, filters.geography,
     filters.role_cluster, filters.is_classified,
@@ -586,7 +592,7 @@ export function JobsPage() {
 
   const bulkMutation = useMutation({
     mutationFn: bulkAction,
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       setSelectedIds(new Set());
       // F69: clear full-matching intent after it fires — otherwise
@@ -594,7 +600,21 @@ export function JobsPage() {
       // (now-invalidated) filter set, which is a foot-gun. The user
       // re-opts in by clicking "Select all N matching" again.
       setSelectAllMatching(false);
-      setBulkErrorMsg(null);
+      // F316: the batch can partially apply. Rows skipped because the
+      // role is already live under another job are NOT a failure, but
+      // staying silent would leave the user thinking every selected
+      // row moved. Report the split explicitly.
+      const skipped = result?.skipped?.length ?? 0;
+      setBulkNotice(
+        skipped > 0
+          ? {
+              tone: "warning",
+              msg:
+                `${result.updated} updated. ${skipped} skipped \u2014 ` +
+                `already active in the queue under another listing.`,
+            }
+          : null
+      );
     },
     onError: (err: any) => {
       // F69: surface backend 400s from the filter branch (cap exceeded
@@ -605,7 +625,10 @@ export function JobsPage() {
         err?.detail ||
         err?.message ||
         "Bulk action failed. Please try again.";
-      setBulkErrorMsg(typeof detail === "string" ? detail : "Bulk action failed.");
+      setBulkNotice({
+        tone: "error",
+        msg: typeof detail === "string" ? detail : "Bulk action failed.",
+      });
     },
   });
 
@@ -680,11 +703,11 @@ export function JobsPage() {
       // Confirm message calls out the total so the user sees the actual
       // row count they're about to mutate. Backend caps at 5000; if the
       // filter exceeds that, the mutation rejects with a 400 surfaced
-      // via `bulkErrorMsg` (no need to pre-check — single round trip).
+      // via `bulkNotice` (no need to pre-check — single round trip).
       if (!window.confirm(
         `${verbLabel} all ${total.toLocaleString()} jobs matching the current filter? This cannot be undone.`
       )) return;
-      setBulkErrorMsg(null);
+      setBulkNotice(null);
       bulkMutation.mutate({
         filter: buildFilterCriteria(),
         action: status,
@@ -698,7 +721,7 @@ export function JobsPage() {
     if (!window.confirm(
       `${verbLabel} ${count} selected job${count !== 1 ? "s" : ""}? This cannot be undone.`
     )) return;
-    setBulkErrorMsg(null);
+    setBulkNotice(null);
     bulkMutation.mutate({
       job_ids: Array.from(selectedIds),
       action: status,
@@ -1164,7 +1187,7 @@ export function JobsPage() {
                 onClick={() => {
                   setSelectedIds(new Set());
                   setSelectAllMatching(false);
-                  setBulkErrorMsg(null);
+                  setBulkNotice(null);
                 }}
               >
                 Cancel
@@ -1175,9 +1198,16 @@ export function JobsPage() {
                 bulk cap of 5000. Narrow the filter before retrying." —
                 pre-fix that message was swallowed and the user saw
                 only a dead spinner. */}
-            {bulkErrorMsg && (
-              <div className="w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {bulkErrorMsg}
+            {bulkNotice && (
+              <div
+                className={
+                  "w-full rounded-md border px-3 py-2 text-sm " +
+                  (bulkNotice.tone === "warning"
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-red-200 bg-red-50 text-red-700")
+                }
+              >
+                {bulkNotice.msg}
               </div>
             )}
           </div>

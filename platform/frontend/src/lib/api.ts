@@ -20,6 +20,7 @@ import type {
   ReviewQueueResponse,
   JobFilters,
   BulkActionPayload,
+  BulkActionResult,
   ReviewPayload,
   ScoreBreakdown,
   PlatformStats,
@@ -258,8 +259,10 @@ export async function updateJobStatus(
   });
 }
 
-export async function bulkAction(payload: BulkActionPayload): Promise<void> {
-  return request<void>("/jobs/bulk-action", {
+export async function bulkAction(
+  payload: BulkActionPayload
+): Promise<BulkActionResult> {
+  return request<BulkActionResult>("/jobs/bulk-action", {
     method: "POST",
     body: JSON.stringify(payload),
   });

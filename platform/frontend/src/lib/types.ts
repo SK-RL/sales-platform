@@ -568,6 +568,20 @@ export type BulkActionStatus =
   | "hidden"
   | "archived";
 
+// F316 companion. A bulk status change can partially apply: rows whose
+// (company, title) is already live under another job are skipped rather
+// than aborting the batch. `skipped` is empty on a clean run.
+export interface BulkActionSkipped {
+  job_id: string;
+  reason: "duplicate_active_listing";
+  conflicting_job_id: string;
+}
+
+export interface BulkActionResult {
+  updated: number;
+  skipped: BulkActionSkipped[];
+}
+
 export type BulkActionPayload =
   | {
       job_ids: string[];
