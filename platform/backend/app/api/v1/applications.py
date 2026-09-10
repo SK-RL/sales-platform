@@ -34,8 +34,30 @@ _TEAM_PIPELINE_GUARD = require_role("admin")
 router = APIRouter(prefix="/applications", tags=["applications"])
 
 # Valid status transitions -- terminal states have no outgoing transitions
+#
+# F347 adds the three server-side-apply states. They sit *before*
+# "submitted" in the lifecycle and exist because unattended submission
+# has outcomes the old vocabulary couldn't express:
+#
+#   in_flight  : the worker is driving the ATS form right now. Transient;
+#                the worker always moves it on. A row stuck here means a
+#                worker died mid-submit — see the sweeper in F347.
+#   needs_user : the apply gate refused. NOT a failure — we understood
+#                the form well enough to know we shouldn't answer it
+#                unattended (a legal question with no saved answer, a
+#                form we couldn't extract, a CAPTCHA). Only a human
+#                clears it, so retrying is pointless.
+#   failed     : we tried and the attempt errored. Retryable, and the
+#                task does retry with backoff before landing here.
+#
+# `needs_user` and `failed` both allow "applied" so a user who finishes
+# the application by hand can mark it done, matching the escape hatch
+# Tsenta offers ("Skip" / "I've Applied").
 VALID_TRANSITIONS = {
-    "prepared": ["applied", "withdrawn"],
+    "prepared": ["in_flight", "needs_user", "applied", "withdrawn"],
+    "in_flight": ["submitted", "needs_user", "failed", "withdrawn"],
+    "needs_user": ["in_flight", "submitted", "applied", "withdrawn"],
+    "failed": ["in_flight", "needs_user", "applied", "withdrawn"],
     "submitted": ["applied", "withdrawn"],
     "applied": ["interview", "rejected", "withdrawn"],
     "interview": ["offer", "rejected", "withdrawn"],
