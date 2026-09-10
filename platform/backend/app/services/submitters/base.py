@@ -164,6 +164,16 @@ _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
     "class='h-captcha'",
     "checkbox for hcaptcha",
     "cf-turnstile",
+    # DataDome challenge interstitial. F364 — SmartRecruiters' apply
+    # flow serves headless Chromium a 3 KB page with an empty body, no
+    # app root and these two fingerprints, where a real browser gets the
+    # full form. Same vendor the scraper docstring already notes blocks
+    # Wellfound. Without a marker an adapter would sit on a 10 s selector
+    # timeout and report "browser error" instead of the real reason.
+    # Getting past it is detection evasion, which we do not do; the
+    # correct outcome is blocked -> review queue.
+    "captcha-delivery.com",
+    "var dd={'rt':'c'",
     # Plain-language walls.
     "verify you are human",
     "are you a robot",

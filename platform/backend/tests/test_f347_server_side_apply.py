@@ -305,6 +305,18 @@ class TestVerifiedAgainstLiveGreenhouseDOM:
         )
         assert detect_human_wall(live) is not None
 
+    def test_datadome_challenge_page_is_a_wall(self):
+        """F364 — the literal head of the 3 KB interstitial SmartRecruiters
+        served headless Chromium (real browser got the full 15-field
+        form). Same vendor the scraper docstring notes blocks Wellfound."""
+        interstitial = (
+            "<html><head><title>smartrecruiters.com</title>"
+            '<script src="https://ct.captcha-delivery.com/c.js"></script>'
+            "<script>var dd={'rt':'c','cid':'AHrlqAAAAAMAB9lD','hsh':'E5A9F170'}</script>"
+            "</head><body></body></html>"
+        )
+        assert detect_human_wall(interstitial) is not None
+
     def test_hcaptcha_script_alone_is_not_a_wall(self):
         """Invisible/score-based hCaptcha needs no human, so the markers
         target the widget rather than any script URL — the same

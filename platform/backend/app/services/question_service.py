@@ -56,6 +56,37 @@ def _cached_row_to_dict(q: JobQuestion) -> dict:
     }
 
 
+def _with_alternative_groups(rows: list[dict]) -> list[dict]:
+    """Re-derive F350 alternative groups for cached rows.
+
+    F363. The extractor tags fields that are alternatives for one ATS
+    question (Greenhouse "Resume/CV" -> resume | resume_text) with a
+    shared ``alternative_group``, and the gate treats the group as one
+    requirement. But ``job_questions`` has no such column, so the tag
+    survived only the first, uncached fetch. Every later view — which
+    in production is nearly every view — read the rows back untagged,
+    and ``resume_text`` blocked on its own even with a resume attached.
+    Found on a live application whose review screen listed "Resume/CV"
+    as blocking after the F362 fix should have cleared it.
+
+    The signal is recoverable without a migration: alternatives are the
+    rows of one job that share a label. A label carried by exactly one
+    row stays ungrouped.
+    """
+    from collections import Counter
+
+    from app.fetchers.questions import _normalise_field_key
+
+    counts = Counter((r.get("label") or "").strip() for r in rows)
+    for r in rows:
+        label = (r.get("label") or "").strip()
+        if label and counts[label] > 1:
+            r["alternative_group"] = f"altgroup_{_normalise_field_key(label)}"
+        else:
+            r.setdefault("alternative_group", "")
+    return rows
+
+
 async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list[dict]:
     """Get cached questions or fetch from ATS API, then cache.
 
@@ -83,7 +114,7 @@ async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list
     cached = result.scalars().all()
 
     if cached:
-        return [_cached_row_to_dict(q) for q in cached]
+        return _with_alternative_groups([_cached_row_to_dict(q) for q in cached])
 
     # Fetch from ATS API
     from app.fetchers.questions import fetch_application_questions
@@ -152,7 +183,7 @@ def get_or_fetch_questions_sync(session: Session, job, board_slug: str) -> list[
     ).scalars().all()
 
     if cached:
-        return [_cached_row_to_dict(q) for q in cached]
+        return _with_alternative_groups([_cached_row_to_dict(q) for q in cached])
 
     from app.fetchers.questions import fetch_application_questions
     questions = fetch_application_questions(job.platform, job.external_id, board_slug)
