@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 0791226 · sha-0791226
+fix(apply): review screen overstated what was blocking
+
+
 ## 2026-09-10 · 9b3c215 · sha-9b3c215
 fix(apply): the feature was unreachable from the UI
 
