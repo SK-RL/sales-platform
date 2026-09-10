@@ -134,6 +134,14 @@ had just been rejected. On a validation error
 fix the flagged field once and re-review; never loop on submit. Leave
 20–40 s between submissions.
 
+**Before filling anything, confirm the posting is alive.** `get_page_text`
+first: closed roles render "Job not found" (Ashby) or silently redirect to
+the board index (Greenhouse, Lever) with no error. In a 2026-09-10 sweep
+**9 of 14 postings from the platform were already dead** while still
+sitting at `status=new`, and several fills went into a 404 page before
+this check existed. Set a dead posting to `archived` — that is posting
+hygiene, not a rejection of the lead.
+
 Then confirm to the platform:
 ```
 await fetch('/api/v1/applications/<application_id>/confirm-submitted', {method:'POST',
@@ -148,6 +156,22 @@ await fetch('/api/v1/applications/<application_id>/confirm-submitted', {method:'
 ```
 This owns the `applied` transition and its side effects. Do not set
 status by hand.
+
+`source` must be `'generated'` when `source_ref_id` is null. Using
+`'manual_required'` or `'learned'` without a real `answer_book_entries.id`
+is rejected.
+
+Two constraints in the platform used to make this call 500 (both fixed
+2026-09-10, F343/F344) — if you see a 409 from it now, that is the fix
+talking, not a new bug:
+
+* Re-applying to a job the user had **previously reviewed** hit
+  `uq_reviews_job_reviewer`. Common, because rejecting a role and later
+  reopening it is routine. The Review is now upserted.
+* Flipping the job to `accepted` can collide with
+  `uq_jobs_active_company_title` when the same role is live under a
+  second row. That is now reported in `detected_issues` instead of
+  failing the call.
 
 **If the submit succeeded but this call fails**, the user has applied and
 the platform doesn't know — the 30-day dedupe will offer the job again.
