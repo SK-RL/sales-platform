@@ -154,7 +154,13 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
         matched = match_questions_to_answers(questions, list(merged.values()))
 
         # ── Gate 3: every required field confidently resolved ──────
-        gaps = blocking_gaps(matched)
+        # The resume is satisfied by the upload, not by an answer-book
+        # entry, so it is declared here rather than left to look unmet.
+        resume_row = session.execute(
+            select(Resume).where(Resume.id == app_row.resume_id)
+        ).scalar_one_or_none()
+        satisfied = {"resume"} if getattr(resume_row, "file_data", None) else set()
+        gaps = blocking_gaps(matched, satisfied_field_keys=satisfied)
         if gaps:
             return _halt(
                 session,
@@ -163,9 +169,7 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
                 gaps,
             )
 
-        resume = session.execute(
-            select(Resume).where(Resume.id == app_row.resume_id)
-        ).scalar_one_or_none()
+        resume = resume_row
 
         app_row.status = STATUS_IN_FLIGHT
         session.commit()
@@ -178,11 +182,13 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
                 value=m["answer"],
                 required=bool(m["required"]),
                 options=m.get("options") or [],
+                alternative_group=m.get("alternative_group") or "",
             )
             for m in matched
-            # File inputs are handled separately via resume_path — the
-            # matcher carries a placeholder string for them, not a path.
-            if m["field_type"] != "file" and m["answer"]
+            # File fields are passed through even with no answer: the
+            # adapter uploads the resume itself and needs to see the
+            # field to know its alternative group is satisfied (F350).
+            if m["field_type"] == "file" or m["answer"]
         ]
 
         submitter = get_submitter(job.platform)

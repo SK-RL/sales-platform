@@ -46,6 +46,9 @@ class SubmitField:
     value: str
     required: bool = False
     options: list[str] = field(default_factory=list)
+    # F350 — non-empty when several fields are alternatives satisfying a
+    # single ATS question (Greenhouse "Resume/CV" -> resume | resume_text).
+    alternative_group: str = ""
 
 
 @dataclass

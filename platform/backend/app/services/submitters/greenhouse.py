@@ -92,16 +92,23 @@ class GreenhouseSubmitter(BaseSubmitter):
                 if wall:
                     raise BlockedBySite(f"page requires a human: {wall}")
 
-                for f in fields:
-                    placed = await self._place(session, f)
-                    if not placed:
-                        unplaceable.append(f.field_key)
-
+                # Upload first: `_place` reports file fields as placed
+                # based on this, which is what lets the alternative-group
+                # logic below see that "Resume/CV" is satisfied.
+                resume_uploaded = False
                 if resume_path:
                     try:
                         await session.upload(_FIXED_SELECTORS["resume"], resume_path)
+                        resume_uploaded = True
                     except BrowserError:
-                        unplaceable.append("resume")
+                        pass
+
+                for f in fields:
+                    placed = await self._place(
+                        session, f, resume_uploaded=resume_uploaded
+                    )
+                    if not placed:
+                        unplaceable.append(f.field_key)
 
                 if cover_letter_text:
                     try:
@@ -116,10 +123,24 @@ class GreenhouseSubmitter(BaseSubmitter):
                 # A required field we could not place means the form we
                 # send would not say what the user approved. Abort before
                 # the click rather than submit a partial application.
+                #
+                # F350 — except when a sibling in the same alternative
+                # group WAS placed. Greenhouse's "Resume/CV" question
+                # offers `resume` (file) and `resume_text` (textarea) as
+                # alternatives; the textarea isn't even rendered until
+                # you pick "enter manually", so demanding both aborted
+                # every application that attached a real resume.
+                placed_groups = {
+                    f.alternative_group
+                    for f in fields
+                    if f.alternative_group and f.field_key not in unplaceable
+                }
                 required_missing = [
                     f.field_key
                     for f in fields
-                    if f.required and f.field_key in unplaceable
+                    if f.required
+                    and f.field_key in unplaceable
+                    and f.alternative_group not in placed_groups
                 ]
                 if required_missing:
                     return SubmitOutcome(
@@ -173,8 +194,20 @@ class GreenhouseSubmitter(BaseSubmitter):
 
     # ── internals ──────────────────────────────────────────────────
 
-    async def _place(self, session: BrowserSession, f: SubmitField) -> bool:
+    async def _place(
+        self,
+        session: BrowserSession,
+        f: SubmitField,
+        *,
+        resume_uploaded: bool = False,
+    ) -> bool:
         """Put one answer into the form. False when we couldn't."""
+        if f.field_type == "file":
+            # The adapter owns file handling: the resume went in via
+            # `resume_path` above, and nothing else is uploadable. Report
+            # it placed so alternative-group logic can see it.
+            return f.field_key == "resume" and resume_uploaded
+
         selector = _FIXED_SELECTORS.get(f.field_key) or self._field_selector(f.field_key)
         try:
             if f.field_type in ("select", "multi_select"):

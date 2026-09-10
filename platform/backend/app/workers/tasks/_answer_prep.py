@@ -184,6 +184,9 @@ def match_questions_to_answers(
             # Carried through from the schema so callers can tell an
             # extracted form from a guessed one (see fetchers/questions).
             "extraction_mode": q.get("extraction_mode", "extracted"),
+            # F350 — non-empty when this field is one of several
+            # alternatives satisfying a single ATS question.
+            "alternative_group": q.get("alternative_group", ""),
             "answer": match["answer"],
             "match_source": match["source"],
             "question_key": match["question_key"],
@@ -195,7 +198,10 @@ def match_questions_to_answers(
     return results
 
 
-def blocking_gaps(matched: list[dict[str, Any]]) -> list[dict[str, str]]:
+def blocking_gaps(
+    matched: list[dict[str, Any]],
+    satisfied_field_keys: frozenset[str] | set[str] | None = None,
+) -> list[dict[str, str]]:
     """Required fields that must not be auto-submitted.
 
     F346. The apply path calls this and refuses to submit while the
@@ -203,9 +209,36 @@ def blocking_gaps(matched: list[dict[str, Any]]) -> list[dict[str, str]]:
     resolve this, so a human decides". Returning a structured reason
     (rather than a bare count) lets the UI say *which* field and *why*,
     the way a locked field explains itself.
+
+    ``satisfied_field_keys`` names fields answered outside the form
+    answers. The resume is the case: ``apply_task`` uploads the stored
+    file rather than typing it, so ``resume`` is satisfied even though
+    no answer-book entry matches it.
+
+    F350 — fields sharing an ``alternative_group`` are ONE requirement.
+    Greenhouse's "Resume/CV" question exposes ``resume`` (file) and
+    ``resume_text`` (textarea); either satisfies it. Treating them as
+    two separate required fields blocked every application that had a
+    resume attached, because nothing ever fills the paste-it-manually
+    textarea.
     """
+    satisfied = set(satisfied_field_keys or ())
+
+    # Groups that any member has already satisfied.
+    satisfied_groups: set[str] = set()
+    for m in matched:
+        group = m.get("alternative_group") or ""
+        if not group:
+            continue
+        if m.get("answer") or m.get("field_key") in satisfied:
+            satisfied_groups.add(group)
+
     gaps: list[dict[str, str]] = []
     for m in matched:
+        if m.get("field_key") in satisfied:
+            continue
+        if (m.get("alternative_group") or "") in satisfied_groups and m.get("alternative_group"):
+            continue
         if not m.get("needs_user"):
             continue
         if m.get("never_infer"):

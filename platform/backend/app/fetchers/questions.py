@@ -149,6 +149,19 @@ def _fetch_greenhouse_questions(job_id: str, slug: str) -> list[dict[str, Any]]:
         if not fields:
             continue
 
+        # F350 — a Greenhouse *question* can carry several *fields* that
+        # are alternatives, not all-of. "Resume/CV" (required) exposes
+        # both `resume` (input_file) and `resume_text` (textarea):
+        # satisfying either satisfies the question. Flattening them into
+        # two independently-required fields made an attached resume
+        # insufficient, so the gate blocked and the adapter aborted on a
+        # `resume_text` box that isn't even rendered until you choose
+        # "enter manually". Tag the siblings so downstream can treat the
+        # group as one requirement.
+        group = (
+            f"altgroup_{_normalise_field_key(label)}" if len(fields) > 1 else ""
+        )
+
         for f in fields:
             f_name = f.get("name", "") or ""
             f_type_raw = f.get("type", "input_text") or "input_text"
@@ -170,6 +183,7 @@ def _fetch_greenhouse_questions(job_id: str, slug: str) -> list[dict[str, Any]]:
                 "required": required,
                 "options": options,
                 "description": description,
+                "alternative_group": group,
             })
 
     return results
