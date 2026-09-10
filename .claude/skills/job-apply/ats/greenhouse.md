@@ -40,3 +40,28 @@ Verified live against Canonical 4717512 on 2026-09-10 (42 inputs).
 - **reCAPTCHA v3 is active** (`.grecaptcha-badge`, `window.grecaptcha`).
   It is invisible and scores behaviour rather than showing a challenge —
   see "Bot detection" below.
+
+## Verified 2026-09-10 (Cloudflare)
+
+`form_input` works on plain text/tel inputs here, but **silently fails
+on two widget types** — it reports success and changes nothing:
+
+- **Comboboxes** (sponsorship, gender, race, veteran, disability). Click
+  the field, then click the option row. Some accept type-then-`Return`.
+- **Checkboxes.** `form_input` reported "Checkbox checked (previous:
+  false)" and the box stayed empty. Clicking the box itself also did
+  nothing — only clicking the **label text** toggled it.
+
+Always screenshot and confirm every combobox and checkbox actually
+shows its value before submitting. A required field left as "Select..."
+fails the submit with no useful message.
+
+**Canonical prohibits AI-written applications.** Their form carries a
+required attestation: "I agree to use only my own words. I understand
+that plagiarism, the use of AI or other generated content will
+disqualify my application." Do not compose free-text answers for
+Canonical — hand it to Sarthak. They also ask for high-school
+mathematics and native-language performance with a written rationale,
+which he has to answer himself regardless.
+
+Success signal: a `/confirmation` URL plus "Thank you for applying!".

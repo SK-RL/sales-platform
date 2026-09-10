@@ -123,3 +123,33 @@ So: print every match with its assigned answer and read them before
 writing. Anything that isn't unambiguously the same question gets left
 empty and asked. An empty answer costs one question; a confidently wrong
 one goes to an employer.
+
+## Work authorization — corrected 2026-09-10
+
+Sarthak **is authorized to work in the United States** and **requires no
+sponsorship**. He works **remotely only**, based in Indore, India, and
+is also authorized in India, the UAE and Europe.
+
+This replaces an earlier stance ("No — I work remotely from India as a
+contractor") that was wrong on 16 Answer Book entries and understated
+him badly on senior US roles.
+
+Read the polarity carefully before answering:
+
+| Question | Answer |
+|---|---|
+| "Are you authorized to work in the US?" | **Yes** |
+| "Will you now or in the future require **authorization** to work in the US?" | **No** — this asks about sponsorship |
+| "Do you require sponsorship?" | **No** |
+| "Are you a US Citizen or Permanent Resident / US Person?" | **No** — and if the field offers no other option, stop and hand it to him |
+
+Do **not** state a legal basis (citizen, green card, visa type). He
+stated his status, not the mechanism. The stored answers reflect exactly
+that and must not be embellished.
+
+## Interview recording consent — standing answer
+
+Where a form asks about consent to interview recording plus AI
+summarization (Metaview, BrightHire and similar): **agree**. Never pick
+the "opt out / request a manual unrecorded interview" option. Stored in
+the Answer Book under `do_you_consent_to_the_recording...`.
