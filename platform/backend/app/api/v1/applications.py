@@ -1529,17 +1529,47 @@ async def confirm_submitted(
         if body.routine_run_id:
             app.routine_run_id = body.routine_run_id
 
-        # 5b. Accepted Review (matches /reviews/apply pattern). Fresh
-        # row — reviews table is an event log, not per-(job,user) state.
-        review = Review(
-            id=uuid.uuid4(),
-            job_id=app.job_id,
-            reviewer_id=user.id,
-            decision="accepted",
-            comment="Applied via Claude routine",
-            tags=[],
-        )
-        db.add(review)
+        # 5b. Accepted Review (matches /reviews/apply pattern).
+        #
+        # F344: this used to blind-INSERT, with a comment claiming
+        # "reviews is an event log, not per-(job,user) state". That
+        # stopped being true when F281 added
+        # `UNIQUE INDEX uq_reviews_job_reviewer ON reviews (job_id,
+        # reviewer_id)`. Any job the user had already reviewed — every
+        # job they'd previously rejected, in particular — raised
+        # IntegrityError here and the whole handler 500'd.
+        #
+        # That is the most damaging ordering possible: the ATS form has
+        # ALREADY been submitted by the time we get here, so the
+        # application really was sent and the platform recorded none of
+        # it. Re-applying to a role you'd previously passed on is
+        # completely routine, so this fired constantly.
+        #
+        # Upsert instead: applying is a stronger, later signal than any
+        # earlier decision, so it wins.
+        review = (await db.execute(
+            select(Review).where(
+                Review.job_id == app.job_id,
+                Review.reviewer_id == user.id,
+            )
+        )).scalar_one_or_none()
+        if review is None:
+            review = Review(
+                id=uuid.uuid4(),
+                job_id=app.job_id,
+                reviewer_id=user.id,
+                decision="accepted",
+                comment="Applied via Claude routine",
+                tags=[],
+            )
+            db.add(review)
+        else:
+            prior = review.decision
+            review.decision = "accepted"
+            review.comment = (
+                "Applied via Claude routine"
+                + (f" (superseded earlier decision: {prior})" if prior != "accepted" else "")
+            )
 
         # 5c. Flip Job.status (same side-effect as /reviews/apply).
         # Guarded: may be None in unusual test scenarios.
@@ -1547,7 +1577,19 @@ async def confirm_submitted(
             select(Job).where(Job.id == app.job_id)
         )).scalar_one_or_none()
         if job:
-            job.status = "accepted"
+            # F344: "accepted" is one of the ACTIVE statuses covered by
+            # F316's `uq_jobs_active_company_title`, so this flip can
+            # collide with a twin row for the same (company, title).
+            # A duplicate listing must not sink a submission that has
+            # already left the browser — skip the flip and report it.
+            from app.api.v1.jobs import _active_duplicates
+            if (await _active_duplicates([job], "accepted", db)):
+                detected.append(
+                    "job_status_not_advanced: another active listing "
+                    "exists for the same company and title"
+                )
+            else:
+                job.status = "accepted"
             # 5d. Pipeline — create or advance.
             if job.company_id:
                 client = (await db.execute(
@@ -1632,7 +1674,21 @@ async def confirm_submitted(
                     ),
                 ))
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # F344 backstop. The submission already went out to the ATS, so
+        # a 500 here loses a real application. Surface a specific 409
+        # the caller can act on rather than a bare Internal Server Error.
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The application was submitted to the ATS but could not be "
+                "recorded: it conflicts with an existing row for this job. "
+                "Re-check the job's review and application state."
+            ),
+        )
     await db.refresh(submission)
 
     # ── 8. Post-commit hooks (feedback task + audit) ─────────────────
