@@ -1232,7 +1232,26 @@ async def preview_job_questions(
     # `safe_to_auto_submit` is the single boolean the apply path reads:
     # a guessed form is never safe to auto-submit, because a form we
     # invented cannot be a form we filled correctly.
-    blocking = blocking_gaps(matched)
+    # F362 — the preview must agree with the gate. `apply_task` passes
+    # satisfied_field_keys={"resume"} because it uploads the stored file
+    # rather than typing it, so the Resume/CV alternative group is
+    # satisfied there. Without the same signal here the UI listed
+    # "Resume/CV" twice as blocking on an application the worker would
+    # have accepted — the screen told the user to fix something that
+    # wasn't broken.
+    satisfied: set[str] = set()
+    if user.active_resume_id:
+        has_file = (await db.execute(
+            select(Resume.id).where(
+                Resume.id == user.active_resume_id,
+                Resume.user_id == user.id,
+                Resume.file_data.isnot(None),
+            )
+        )).scalar_one_or_none()
+        if has_file:
+            satisfied.add("resume")
+
+    blocking = blocking_gaps(matched, satisfied_field_keys=satisfied)
     extraction_mode = (
         "fallback"
         if any(m.get("extraction_mode") == "fallback" for m in matched)
