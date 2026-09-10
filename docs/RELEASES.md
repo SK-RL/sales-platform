@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 0e9fab4 · sha-0e9fab4
+feat(apply): Workable extraction + submitter — third auto-apply platform
+
+
 ## 2026-09-10 · 1f347b6 · sha-1f347b6
 fix(apply): alternative groups vanished on cached reads; fast-fail DataDome
 
