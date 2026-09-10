@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 1f347b6 · sha-1f347b6
+fix(apply): alternative groups vanished on cached reads; fast-fail DataDome
+
+
 ## 2026-09-10 · 0791226 · sha-0791226
 fix(apply): review screen overstated what was blocking
 
