@@ -2,9 +2,25 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system deps
+# postgresql-client-16 ships the pg_dump/psql that backup_task.py shells
+# out to. Pinned to the server's major version and taken from PGDG because
+# trixie's default is 17, whose custom-format archives (header 1.16) are
+# rejected by the pg_restore 16 that restore.sh and validate_backup.sh run
+# inside the postgres:16 container — a 17 client yields backups that look
+# healthy and cannot be restored. Bump only with the postgres image.
+# The PGDG list is removed again in the same layer so the later
+# `playwright install --with-deps` apt run resolves against Debian alone.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev curl && \
+      build-essential libpq-dev curl ca-certificates gnupg && \
+    install -d /usr/share/postgresql-common/pgdg && \
+    curl -sSf -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      postgresql-client-16 && \
+    rm -f /etc/apt/sources.list.d/pgdg.list && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python deps via pip (extract deps from pyproject.toml)

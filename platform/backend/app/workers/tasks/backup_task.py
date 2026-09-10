@@ -244,16 +244,22 @@ def run_backup(self, label: str = "scheduled") -> dict:
     # 7. Record in scan_logs
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     with SyncSession() as db:
+        # Five of these kwargs previously named non-existent columns, so the
+        # constructor raised TypeError outside any try — the task died here
+        # every run, after the except block had swallowed the real failure.
+        # `errors` must be non-zero on failure or /monitoring/scan-errors
+        # filters the row out and the failure stays invisible.
         log_entry = ScanLog(
+            source=f"backup/{ts}",
             platform="backup",
-            board_slug=ts,
-            jobs_found=0,
-            jobs_new=0,
-            jobs_updated=0,
-            status=status,
-            error_message=error_msg if error_msg else None,
             started_at=started,
-            finished_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            jobs_found=0,
+            new_jobs=0,
+            updated_jobs=0,
+            errors=0 if status == "ok" else 1,
+            error_message=error_msg,
+            duration_ms=int(elapsed * 1000),
         )
         db.add(log_entry)
         db.commit()

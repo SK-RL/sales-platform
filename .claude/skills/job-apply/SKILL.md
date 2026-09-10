@@ -6,7 +6,8 @@ description: Fill and submit job applications from the sales platform's relevant
 # job-apply
 
 Operator procedure. Answers come from the platform **Answer Book**
-(`answers.md`) and `profile.yaml`. Read `voice.md` before writing any
+(`answers.md`) and `profile.yaml`. Screen before filling and record every
+verdict back to the platform (`screening.md`). Read `voice.md` before writing any
 free text, `attestations.md` before composing anything at all, and the
 one `ats/<platform>.md` matching the job's host plus `ats/_shared.md`.
 
@@ -66,28 +67,37 @@ Do not fill a form the moment you open it. For the whole batch:
    gates the job, a job description praising AI fluency does not. If
    gated: factual fields only; free text must be the user's own words
    entered verbatim, or skip. Never affirm such an attestation yourself.
-4. **Resolve every field**: Answer Book → `profile.yaml` → unknown.
+4. **Screen against the user's real constraints** (`screening.md`) before
+   filling anything: base location, region scope, hybrid/onsite, and any
+   work-authorisation requirement buried in the legal text. The platform's
+   geography is not reliable — on a measured run, 9 of 11 high-relevance
+   candidates were geographically impossible and every one was labelled
+   remote or unclassified. If it fails, **reject it in the platform** with
+   tags and the verbatim reason, then move on.
+5. **Resolve every field**: Answer Book → `profile.yaml` → unknown.
    Sort unknowns into factual-unknown / composable / attestation
    (`answers.md`).
-5. **Ask the factual unknowns once**, as one numbered list across the
+6. **Ask the factual unknowns once**, as one numbered list across the
    whole batch, noting the job and whether each is required. Write the
    user's answers back to the Answer Book.
-6. **Fill.** `form_input` on a fresh ref keeps React's value tracker in
-   sync, so values really submit; coordinate clicks drift on long forms.
+7. **Fill.** On Greenhouse, `form_input` on a fresh ref keeps React's
+   value tracker in sync. **On Ashby it silently fails** — the field shows
+   the value but the submit rejects it as missing, so click and `type`
+   there (`ats/ashby.md`). Coordinate clicks drift on long forms.
    Type at human pace — Greenhouse scores the session with invisible
    reCAPTCHA v3 and machine-gunning a form can bin it silently. Never
    inject values via raw JS.
-7. **Free text** per `voice.md`, then run the four-point quality check in
+8. **Free text** per `voice.md`, then run the four-point quality check in
    `answers.md`. Rewrite anything that fails.
    **Check what the control actually is first.** Tether's "Why are you
    interested?" is a *video* question (Record / Upload Video) with a
    hidden companion text input — filling the text does not answer it. A
    question needing video, audio or a live task is the user's to do: say
    so plainly rather than filling around it.
-8. **Resume**: `file_upload` on the file input with `resume.path`. After
+9. **Resume**: `file_upload` on the file input with `resume.path`. After
    upload the file input is removed from the DOM and the filename shows
    as a chip — verify by page text.
-9. **EEO / self-identification**: use the user's four EEO answers from
+10. **EEO / self-identification**: use the user's four EEO answers from
    the Answer Book. Never guess demographics, never default them.
 
 ## Record in the platform — BEFORE the review gate
@@ -116,8 +126,11 @@ Accept `submit`, `submit 1,3`, `submit all`, `skip N`,
 `edit <field>: <text>`. After an edit, re-record and re-review.
 
 ## Submit
-Click submit, wait, and confirm a success state — thank-you page,
-"Application submitted", or the form disappearing. On a validation error
+Click submit, wait, and confirm success by **three** signals together: an
+explicit confirmation string, the form gone, and zero validation errors.
+A loose keyword match is not enough — "Thanks for your interest" inside an
+unrelated application-limits notice once read as success on a form that
+had just been rejected. On a validation error
 fix the flagged field once and re-review; never loop on submit. Leave
 20–40 s between submissions.
 
