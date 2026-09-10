@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 6bad990 · sha-6bad990
+Merge: submitted answers on pipeline card drill-down
+
+
 ## 2026-09-09 · 7ead145 · sha-7ead145
 Merge: harden job-apply against live Greenhouse testing
 
