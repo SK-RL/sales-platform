@@ -24,10 +24,12 @@ from app.services.submitters.base import (
 )
 from app.services.submitters.greenhouse import GreenhouseSubmitter
 from app.services.submitters.recruitee import RecruiteeSubmitter
+from app.services.submitters.workable import WorkableSubmitter
 
 _REGISTRY: dict[str, type[BaseSubmitter]] = {
     GreenhouseSubmitter.platform: GreenhouseSubmitter,
     RecruiteeSubmitter.platform: RecruiteeSubmitter,
+    WorkableSubmitter.platform: WorkableSubmitter,
 }
 
 

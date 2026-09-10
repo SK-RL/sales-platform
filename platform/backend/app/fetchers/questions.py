@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever"}
+    {"greenhouse", "recruitee", "lever", "workable"}
 )
 
 
@@ -77,6 +77,7 @@ def fetch_application_questions(
     fetchers = {
         "greenhouse": _fetch_greenhouse_questions,
         "lever": _fetch_lever_questions,
+        "workable": _fetch_workable_questions,
         # F357 — ashby is deliberately NOT wired; its application-form
         # endpoint needs auth we do not hold (401 on every public board).
         "recruitee": _fetch_recruitee_questions,
@@ -510,3 +511,192 @@ def _fetch_recruitee_questions(job_external_id: str, slug: str) -> list[dict[str
         })
 
     return fields
+
+
+# ---------------------------------------------------------------------------
+# Workable
+# ---------------------------------------------------------------------------
+# F365. Workable exposes the job (GET /api/v2/accounts/{slug}/jobs/{code})
+# but not its application form — every /form variant 404s — and the apply
+# page is client-rendered: plain HTTP returns a 7.5 KB shell with zero
+# inputs, while a browser renders ~190 KB with the real form. So this
+# extractor loads the page in Chromium. Verified on two live boards
+# (deeplight, payabl): no bot wall, no shadow DOM, no native <select>.
+#
+# Every field sits in a wrapper carrying data-ui. Fixed fields use their
+# own name (firstname, lastname, email, headline, phone, address,
+# summary, cover_letter; the resume is `[data-ui=resume] input[type=file]`).
+# Custom questions are `QA_<id>`: free text as <textarea id=name=QA_…>
+# with a label[for] carrying the question; choices as radios sharing the
+# QA name, each option inside `[data-ui=option]`, the question on the
+# enclosing `[data-ui=QA_…]`.
+#
+# Called synchronously from inside an *async* endpoint (get_or_fetch_
+# questions is async; this dispatcher is sync), so asyncio.run() would
+# raise "already running". The coroutine runs on a throwaway thread with
+# its own loop; the browser pool is loop-bound (F353) and shut down
+# inside that loop so nothing leaks.
+
+_WORKABLE_APPLY_URL = "https://apply.workable.com/{slug}/j/{shortcode}/apply/"
+_WORKABLE_FORM_READY = '[data-ui="firstname"] input, input[name="firstname"]'
+
+_WORKABLE_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').replace(/^\*\s*/, '').trim();
+  const rows = [];
+  for (const e of document.querySelectorAll('input,select,textarea')) {
+    if (e.type === 'hidden') continue;
+    const name = e.name || '';
+    const dataUi = e.getAttribute('data-ui') || '';
+    let question = '';
+    let option = '';
+    if (e.type === 'radio' || e.type === 'checkbox') {
+      const grp = e.closest('fieldset[data-ui^="QA_"], fieldset');
+      const optionTexts = grp ? [...grp.querySelectorAll('label')].map(l => norm(l.innerText)) : [];
+      // The fieldset holds only the options ("YES NO"); the question text
+      // lives on an ancestor — verified live it is two levels up. Walk up
+      // until stripping the option texts leaves something, but stop at
+      // anything long enough to be a whole section.
+      let host = grp, q = '';
+      for (let i = 0; host && i < 4 && !q; i++) {
+        let t = norm(host.innerText);
+        for (const o of optionTexts) { if (o) t = t.replace(o, ''); }
+        t = norm(t);
+        if (t && t.length < 220) q = t;
+        host = host.parentElement;
+      }
+      question = q;
+      option = norm((e.closest('label') || e.nextElementSibling)?.innerText || e.value || '');
+    } else {
+      const lab = e.closest('label');
+      if (lab) question = norm(lab.innerText.replace(e.value || '', ''));
+      if (!question && e.id) question = norm(document.querySelector(`label[for="${CSS.escape(e.id)}"]`)?.innerText || '');
+    }
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type, name, id: e.id || '', dataUi,
+                required: !!(e.required || e.getAttribute('aria-required') === 'true'),
+                question, option, value: e.value || '' });
+  }
+  return rows;
+})()
+"""
+
+# Fixed Workable fields -> our canonical keys + labels. Anything else with a
+# non-QA name is passed through under its own name.
+_WORKABLE_FIXED: dict[str, tuple[str, str, str]] = {
+    "firstname":    ("first_name",   "First Name",   "text"),
+    "lastname":     ("last_name",    "Last Name",    "text"),
+    "email":        ("email",        "Email",        "text"),
+    "phone":        ("phone",        "Phone",        "text"),
+    "headline":     ("headline",     "Headline",     "text"),
+    "address":      ("address",      "Address",      "text"),
+    "city":         ("city",         "City",         "text"),
+    "postcode":     ("postcode",     "Postcode",     "text"),
+    "country":      ("country",      "Country",      "text"),
+    "summary":      ("summary",      "Summary",      "textarea"),
+    "cover_letter": ("cover_letter", "Cover Letter", "textarea"),
+}
+
+
+def _run_in_fresh_loop(coro):
+    """Run a coroutine to completion on a throwaway thread + loop.
+
+    Needed because this sync fetcher is invoked from inside a running
+    event loop (the async questions endpoint). The pool is torn down
+    inside the same loop so Chromium doesn't leak (F353).
+    """
+    import asyncio
+    import concurrent.futures
+
+    from app.services.playwright_browser import shutdown_pool
+
+    async def _wrapped():
+        try:
+            return await coro
+        finally:
+            try:
+                await shutdown_pool()
+            except Exception:  # never mask the extraction result
+                logger.warning("workable: browser shutdown failed", exc_info=True)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_wrapped())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(asyncio.run, _wrapped()).result()
+
+
+def workable_form_rows(shortcode: str, slug: str) -> list[dict[str, Any]]:
+    """Raw per-input rows from the rendered apply page (browser)."""
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(
+                _WORKABLE_APPLY_URL.format(slug=slug, shortcode=shortcode),
+                wait_until="domcontentloaded",
+                wait_for_selector=_WORKABLE_FORM_READY,
+            )
+            return await session.eval_js(_WORKABLE_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_workable_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn raw input rows into our question schema (pure, testable)."""
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    groups: dict[str, dict[str, Any]] = {}
+
+    for r in rows:
+        name = r.get("name") or ""
+        typ = (r.get("type") or "").lower()
+        data_ui = r.get("dataUi") or ""
+
+        if typ == "file":
+            if data_ui == "resume" and "resume" not in seen:
+                seen.add("resume")
+                results.append({"field_key": "resume", "label": "Resume / CV", "field_type": "file",
+                                "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+
+        if typ in ("radio", "checkbox"):
+            # Radios share the QA name; checkbox options each carry their own
+            # numeric name, so group them by the enclosing question instead.
+            gkey = name if name.startswith("QA_") else (r.get("question") or data_ui or name)
+            g = groups.get(gkey)
+            if g is None:
+                g = groups[gkey] = {
+                    "field_key": name if name.startswith("QA_") else f"group_{_normalise_field_key(gkey)}",
+                    "label": r.get("question") or gkey, "field_type": "select" if typ == "radio" else "multi_select",
+                    "required": bool(r.get("required")), "options": [], "description": "",
+                    "_names": [],
+                }
+                results.append(g)
+            opt = r.get("option") or r.get("value") or ""
+            if opt and opt not in g["options"]:
+                g["options"].append(opt)
+            g["_names"].append(name)
+            continue
+
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        if name in _WORKABLE_FIXED:
+            key, label, ftype = _WORKABLE_FIXED[name]
+        elif name.startswith("QA_"):
+            key, label, ftype = name, (r.get("question") or name), ("textarea" if r["tag"] == "textarea" else "text")
+        else:
+            key, label, ftype = name, (r.get("question") or name), ("textarea" if r["tag"] == "textarea" else "text")
+        results.append({"field_key": key, "label": label, "field_type": ftype,
+                        "required": bool(r.get("required")), "options": [], "description": ""})
+
+    for g in groups.values():
+        g.pop("_names", None)
+    return results
+
+
+def _fetch_workable_questions(shortcode: str, slug: str) -> list[dict[str, Any]]:
+    if not shortcode or not slug:
+        return []
+    return normalise_workable_rows(workable_form_rows(shortcode, slug))
