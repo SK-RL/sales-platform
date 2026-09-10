@@ -1118,7 +1118,8 @@ async def preview_job_questions(
     """
     import logging
     from app.services.question_service import get_or_fetch_questions, auto_populate_answer_book
-    from app.workers.tasks._answer_prep import match_questions_to_answers
+    from app.workers.tasks._answer_prep import blocking_gaps, match_questions_to_answers
+    from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS
 
     logger = logging.getLogger(__name__)
 
@@ -1198,6 +1199,19 @@ async def preview_job_questions(
     answered = sum(1 for m in matched if m.get("answer"))
     high_conf = sum(1 for m in matched if m.get("confidence") == "high" and m.get("answer"))
 
+    # F346 — the apply gate. `blocking` lists required fields we won't
+    # answer on the user's behalf; `schema` says whether the form we're
+    # showing was extracted from the ATS or guessed from a template.
+    # `safe_to_auto_submit` is the single boolean the apply path reads:
+    # a guessed form is never safe to auto-submit, because a form we
+    # invented cannot be a form we filled correctly.
+    blocking = blocking_gaps(matched)
+    extraction_mode = (
+        "fallback"
+        if any(m.get("extraction_mode") == "fallback" for m in matched)
+        else "extracted"
+    )
+
     return {
         "questions": matched,
         "coverage": {
@@ -1206,6 +1220,13 @@ async def preview_job_questions(
             "high_confidence": high_conf,
             "new_entries": new_entries,
         },
+        "schema": {
+            "extraction_mode": extraction_mode,
+            "platform": job.platform,
+            "supported": job.platform in SUPPORTED_QUESTION_PLATFORMS,
+        },
+        "blocking": blocking,
+        "safe_to_auto_submit": not blocking and extraction_mode == "extracted",
     }
 
 

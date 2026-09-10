@@ -15,6 +15,21 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Platforms with a real question extractor below. Everything else falls
+# back to `_STANDARD_FIELDS`, which is a *guess* at the form, not the
+# form. Callers must branch on this rather than assume the returned
+# schema reflects the actual posting — see `extraction_mode`.
+#
+# F346. We list jobs from ~20 platforms (see fetchers/__init__) but can
+# only extract real application questions from these three. The gap is
+# the single biggest limit on safe auto-apply: for a Workday or
+# SmartRecruiters posting we currently return eight generic fields and
+# nothing in the response says "these were invented".
+SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
+    {"greenhouse", "lever", "ashby"}
+)
+
+
 # ---------------------------------------------------------------------------
 # Standard fallback fields for platforms without public form APIs
 # ---------------------------------------------------------------------------
@@ -60,16 +75,36 @@ def fetch_application_questions(
     fetcher_fn = fetchers.get(platform)
     if fetcher_fn is None:
         logger.debug("No question fetcher for platform %s; using standard fields", platform)
-        return list(_STANDARD_FIELDS)
+        return _fallback_fields("unsupported_platform")
 
     try:
         questions = fetcher_fn(job_external_id, board_slug)
         if questions:
-            return questions
+            return [{**q, "extraction_mode": "extracted"} for q in questions]
+        # An empty (but successful) response is still a miss: we asked
+        # the ATS and it told us nothing, so the standard fields below
+        # are guesswork exactly as they are for an unsupported platform.
+        return _fallback_fields("empty_response")
     except Exception:
         logger.warning("Failed to fetch questions for %s/%s/%s; using fallback", platform, board_slug, job_external_id, exc_info=True)
 
-    return list(_STANDARD_FIELDS)
+    return _fallback_fields("fetch_failed")
+
+
+def _fallback_fields(reason: str) -> list[dict[str, Any]]:
+    """Standard fields, explicitly stamped as a guess.
+
+    F346. Returning `_STANDARD_FIELDS` bare made a guessed form
+    indistinguishable from an extracted one, so the apply path treated
+    "we think most forms ask for an email" as "this form asks for an
+    email". Every fallback field now carries
+    ``extraction_mode="fallback"`` plus the reason we fell back, and the
+    apply gate refuses to auto-submit a fallback schema.
+    """
+    return [
+        {**field, "extraction_mode": "fallback", "fallback_reason": reason}
+        for field in _STANDARD_FIELDS
+    ]
 
 
 # ---------------------------------------------------------------------------
