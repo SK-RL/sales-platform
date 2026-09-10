@@ -964,6 +964,37 @@ function ClientApplicationsPanel({
                   {row.notes}
                 </p>
               )}
+              {/* What we actually told this employer.
+                  `prepared_answers` is written by POST /applications/record
+                  when the browser-side apply lane fills a form. Before this,
+                  answering "what did we submit here?" meant leaving the board,
+                  finding the job and opening Job Detail — even though the rows
+                  were already on the Application. Collapsed by default so a
+                  card with several applications stays scannable. */}
+              {(row.answer_count ?? 0) > 0 && (
+                <details className="mt-2 group">
+                  <summary className="cursor-pointer list-none text-[11px] font-medium text-primary-700 hover:text-primary-900">
+                    <span className="group-open:hidden">
+                      Show the {row.answer_count} answers we submitted
+                    </span>
+                    <span className="hidden group-open:inline">
+                      Hide submitted answers
+                    </span>
+                  </summary>
+                  <dl className="mt-2 space-y-2 border-l-2 border-gray-100 pl-3">
+                    {(row.prepared_answers ?? []).map((a, i) => (
+                      <div key={a.question_key || i}>
+                        <dt className="text-[11px] font-medium text-gray-500">
+                          {a.label || a.question_key}
+                        </dt>
+                        <dd className="text-xs text-gray-800 whitespace-pre-wrap break-words">
+                          {a.answer?.trim() ? a.answer : <span className="text-gray-400 italic">left blank</span>}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              )}
             </div>
           ))}
         </div>

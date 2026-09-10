@@ -1037,6 +1037,11 @@ export interface TeamApplicationItem {
   submitted_at: string | null;
   created_at: string;
   notes: string;
+  // What was typed into this employer's form, as written by
+  // POST /applications/record. Optional because rows prepared before
+  // that lane existed carry none, and /applications/team may omit them.
+  prepared_answers?: PreparedAnswer[];
+  answer_count?: number;
 }
 
 export interface TeamApplicationsResponse {
