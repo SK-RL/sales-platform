@@ -152,7 +152,27 @@ class TestSubmitOutcome:
 
 
 class TestGreenhouseConfirmation:
-    """Only positive evidence counts as a submission."""
+    """Only positive evidence counts as a submission.
+
+    Verified live on 2026-09-10 against a real Greenhouse posting
+    (Figma 5426468004), with dry_run=False so the submit button was
+    genuinely clicked. The form carried a deliberately malformed email
+    so the ATS would reject it and no application could be created:
+
+        status             : failed
+        confirmation_text  : None
+        detected_issues    : ['no_confirmation']
+        error              : submitted the form but saw no confirmation
+
+    `no_confirmation` is only set on the post-click branch, so that
+    output proves the click executed and the adapter still refused to
+    report success. This is the failure this class exists for — a
+    Greenhouse form that fails inline validation stays on the page and
+    raises nothing, so "no exception" must never read as "submitted".
+
+    Still unproven: the POSITIVE path. A genuinely successful submission
+    producing a confirmation string requires applying to a real job.
+    """
 
     @pytest.mark.parametrize(
         "html",
