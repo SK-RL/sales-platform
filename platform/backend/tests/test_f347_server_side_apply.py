@@ -49,6 +49,28 @@ class TestOptionCoercion:
     def test_free_text_passes_through_when_no_options(self):
         assert coerce_option("Bengaluru", []) == "Bengaluru"
 
+    # Greenhouse ships {"value","label"} options; Recruitee ships plain
+    # strings. Both must work — the dict shape used to fall through an
+    # isinstance(str) filter, so no Greenhouse select ever auto-filled.
+    GH_YES_NO = [{"value": "1", "label": "Yes"}, {"value": "0", "label": "No"}]
+
+    def test_dict_options_match_on_label_and_return_value(self):
+        assert coerce_option("Yes", self.GH_YES_NO) == "1"
+
+    def test_dict_options_match_on_value(self):
+        assert coerce_option("0", self.GH_YES_NO) == "0"
+
+    def test_dict_options_synonym_maps_to_value(self):
+        assert coerce_option("true", self.GH_YES_NO) == "1"
+
+    def test_dict_options_reject_unmappable(self):
+        assert coerce_option("Prefer not to say", self.GH_YES_NO) is None
+
+    def test_recruitee_style_multi_choice(self):
+        opts = ["Market research", "SEO / SEM", "Social Media"]
+        assert coerce_option("SEO / SEM", opts) == "SEO / SEM"
+        assert coerce_option("Growth hacking", opts) is None
+
 
 class TestHumanWallDetection:
     @pytest.mark.parametrize(

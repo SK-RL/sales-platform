@@ -144,7 +144,7 @@ def detect_human_wall(page_html: str) -> str | None:
     return None
 
 
-def coerce_option(value: str, options: list[str]) -> str | None:
+def coerce_option(value: str, options: list[Any]) -> str | None:
     """Map a free-text answer onto one of the ATS's allowed options.
 
     Returns ``None`` when no confident mapping exists — the caller must
@@ -152,20 +152,63 @@ def coerce_option(value: str, options: list[str]) -> str | None:
     option. A select whose options are ["Yes", "No"] and an answer of
     "Prefer not to say" has no correct choice, and guessing one is
     exactly the class of bug F346 exists to prevent.
+
+    Handles both option shapes our extractors produce, because the two
+    ATSes genuinely differ and normalising them away would lose
+    information:
+
+    * Greenhouse — ``[{"value": "1", "label": "Yes"}, ...]``. The label
+      is what the candidate reads, the value is what the ``<option>``
+      carries, so we match on either and always return the *value*.
+    * Recruitee — ``["SEO / SEM", "Social Media", ...]``. Value and
+      label are the same string.
+
+    This was a live defect: the dict shape fell through the old
+    ``isinstance(opt, str)`` filter, so every Greenhouse select resolved
+    to ``None``. It failed safe (required selects blocked rather than
+    guessed) but no Greenhouse select would ever have auto-filled.
     """
     if not options:
         return value or None
     v = (value or "").strip()
     if not v:
         return None
-    lowered = {opt.lower().strip(): opt for opt in options if isinstance(opt, str)}
-    if v.lower() in lowered:
-        return lowered[v.lower()]
+
+    # submit_value -> the texts that should select it
+    candidates: list[tuple[str, set[str]]] = []
+    for opt in options:
+        if isinstance(opt, dict):
+            submit_value = str(opt.get("value", "")).strip()
+            label = str(opt.get("label", "")).strip()
+            texts = {t.lower() for t in (submit_value, label) if t}
+            if submit_value or label:
+                candidates.append((submit_value or label, texts))
+        elif isinstance(opt, str) and opt.strip():
+            candidates.append((opt.strip(), {opt.strip().lower()}))
+
+    if not candidates:
+        return None
+
+    needle = v.lower()
+    for submit_value, texts in candidates:
+        if needle in texts:
+            return submit_value
+
     # Common yes/no phrasings — an exact semantic match, not a guess.
-    truthy = {"yes", "true", "y", "1"}
-    falsy = {"no", "false", "n", "0"}
-    if v.lower() in truthy and "yes" in lowered:
-        return lowered["yes"]
-    if v.lower() in falsy and "no" in lowered:
-        return lowered["no"]
+    # "1"/"0" are deliberately NOT synonyms here: Greenhouse uses them
+    # as literal option *values* (value="1" label="Yes"), so they are
+    # already handled by the exact pass above. Treating them as words
+    # would make "0" ambiguous between "the option whose value is 0"
+    # and "no" — precisely the ambiguity this function refuses.
+    truthy = {"yes", "true", "y"}
+    falsy = {"no", "false", "n"}
+    target: set[str] | None = None
+    if needle in truthy:
+        target = {"yes"}
+    elif needle in falsy:
+        target = {"no"}
+    if target:
+        for submit_value, texts in candidates:
+            if texts & target:
+                return submit_value
     return None

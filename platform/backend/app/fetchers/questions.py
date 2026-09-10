@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 # form. Callers must branch on this rather than assume the returned
 # schema reflects the actual posting — see `extraction_mode`.
 #
-# F346. We list jobs from ~20 platforms (see fetchers/__init__) but can
-# only extract real application questions from these three. The gap is
-# the single biggest limit on safe auto-apply: for a Workday or
-# SmartRecruiters posting we currently return eight generic fields and
-# nothing in the response says "these were invented".
+# F346/F348. We list jobs from ~20 platforms (see fetchers/__init__) but
+# can only extract real application questions from these. The gap is the
+# single biggest limit on safe auto-apply: for a Workday or
+# SmartRecruiters posting we return eight generic fields, and before
+# F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "lever", "ashby"}
+    {"greenhouse", "lever", "ashby", "recruitee"}
 )
 
 
@@ -70,6 +70,7 @@ def fetch_application_questions(
         "greenhouse": _fetch_greenhouse_questions,
         "lever": _fetch_lever_questions,
         "ashby": _fetch_ashby_questions,
+        "recruitee": _fetch_recruitee_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -318,3 +319,97 @@ def _normalise_field_key(text: str) -> str:
     key = re.sub(r"[^\w\s]", "", key)
     key = re.sub(r"\s+", "_", key)
     return key[:255]
+
+
+# ---------------------------------------------------------------------------
+# Recruitee
+# ---------------------------------------------------------------------------
+# Recruitee public offers API: GET https://{slug}.recruitee.com/api/offers/{id}
+# The offer detail carries an ``open_questions`` array — the custom
+# questions a candidate must answer. Verified against a live board
+# (multiplier.recruitee.com, offer 2697445) rather than from docs; the
+# shapes below are what that endpoint actually returns.
+#
+#   {"id": 4281786, "kind": "multi_choice", "required": true,
+#    "body": "Which areas you feel are your strongest:",
+#    "open_question_options": [{"id": 6588542, "body": "Market research"}, ...]}
+#
+# ``kind`` values observed: text, string, multi_choice, boolean, video.
+
+_RECRUITEE_OFFER_URL = "https://{slug}.recruitee.com/api/offers/{offer_id}"
+
+_RECRUITEE_KIND_MAP = {
+    # `text` is Recruitee's long-form answer, `string` its single-line one.
+    "text": "textarea",
+    "string": "text",
+    "multi_choice": "select",
+    "boolean": "boolean",
+    # A video answer cannot be produced unattended. Typing it as `file`
+    # means the apply gate leaves it unanswered, and if it's required
+    # `blocking_gaps` routes the application to needs_user — which is
+    # the correct outcome, not a bug.
+    "video": "file",
+}
+
+# Recruitee renders the same identity block on every offer regardless of
+# the custom questions, and the offers API does not describe it. These
+# are platform behaviour, not a guess about a particular posting, so
+# they ship as extracted fields.
+_RECRUITEE_FIXED_FIELDS: list[dict[str, Any]] = [
+    {"field_key": "name", "label": "Full Name", "field_type": "text", "required": True, "options": [], "description": ""},
+    {"field_key": "email", "label": "Email", "field_type": "text", "required": True, "options": [], "description": ""},
+    {"field_key": "phone", "label": "Phone", "field_type": "text", "required": False, "options": [], "description": ""},
+    {"field_key": "resume", "label": "Resume / CV", "field_type": "file", "required": True, "options": [], "description": ""},
+    {"field_key": "cover_letter", "label": "Cover Letter", "field_type": "textarea", "required": False, "options": [], "description": ""},
+]
+
+
+def _recruitee_offer_id(job_external_id: str) -> str:
+    """Strip the ``recruitee-`` prefix our fetcher adds to external_id.
+
+    ``app/fetchers/recruitee.py`` stores ``f"recruitee-{job_id}"`` so the
+    global UNIQUE on ``jobs.external_id`` can't collide with another
+    ATS's numeric ids. The API wants the bare id back.
+    """
+    raw = (job_external_id or "").strip()
+    return raw[len("recruitee-"):] if raw.startswith("recruitee-") else raw
+
+
+def _fetch_recruitee_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    offer_id = _recruitee_offer_id(job_external_id)
+    if not offer_id or not slug:
+        return []
+
+    url = _RECRUITEE_OFFER_URL.format(slug=slug, offer_id=offer_id)
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    offer = payload.get("offer") or {}
+    fields: list[dict[str, Any]] = list(_RECRUITEE_FIXED_FIELDS)
+
+    for q in offer.get("open_questions") or []:
+        if not isinstance(q, dict):
+            continue
+        qid = q.get("id")
+        body = (q.get("body") or "").strip()
+        if qid is None or not body:
+            continue
+        options = [
+            (opt.get("body") or "").strip()
+            for opt in (q.get("open_question_options") or [])
+            if isinstance(opt, dict) and (opt.get("body") or "").strip()
+        ]
+        fields.append({
+            # Key by the ATS's own question id so the schema we show and
+            # the DOM we fill stay addressable by the same value.
+            "field_key": f"open_question_{qid}",
+            "label": body,
+            "field_type": _RECRUITEE_KIND_MAP.get(q.get("kind") or "", "text"),
+            "required": bool(q.get("required")),
+            "options": options,
+            "description": "",
+        })
+
+    return fields
