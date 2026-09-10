@@ -122,10 +122,35 @@ class BaseSubmitter(ABC):
 # Substrings that mean "a human is required". Checked against the page
 # text before we attempt to fill. Cheap, and catches the common walls
 # before we waste a browser session on them.
+#
+# NOTE the absence of a bare "recaptcha" here. That was the original
+# marker and it made this function useless: a live Greenhouse board
+# (job-boards.greenhouse.io) loads reCAPTCHA **Enterprise v3** on every
+# posting —
+#
+#   <script src="…/recaptcha/enterprise.js?render=6Lfmcbcp…">
+#   <textarea name="g-recaptcha-response" …>
+#
+# — which is score-based and invisible. There is no challenge to solve;
+# the token is minted from behavioural signals. Treating its mere
+# presence as a wall meant every single Greenhouse application would
+# have returned `blocked` -> needs_user, i.e. the whole feature would
+# have quietly done nothing while looking correctly cautious.
+#
+# What genuinely needs a human is the *interactive* variants, which are
+# identifiable by their challenge iframe / explicit widget rather than
+# by the word "recaptcha" appearing anywhere on the page.
 _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
-    "recaptcha",
-    "hcaptcha",
+    # reCAPTCHA v2 checkbox — the anchor iframe is the clickable widget.
+    "recaptcha/api2/anchor",
+    # reCAPTCHA v2 image challenge popup.
+    "recaptcha/api2/bframe",
+    'class="g-recaptcha"',
+    "class='g-recaptcha'",
+    # hCaptcha and Turnstile render visible widgets by default.
+    "hcaptcha.com/1/api.js",
     "cf-turnstile",
+    # Plain-language walls.
     "verify you are human",
     "are you a robot",
     "create an account to apply",
@@ -136,7 +161,13 @@ _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
 
 
 def detect_human_wall(page_html: str) -> str | None:
-    """Return the marker that means we can't proceed unattended, if any."""
+    """Return the marker that means we can't proceed unattended, if any.
+
+    Deliberately does NOT fire on invisible/score-based bot protection —
+    see ``_HUMAN_REQUIRED_MARKERS``. A false positive here is not a safe
+    failure: it turns every application into ``needs_user`` and the
+    feature silently accomplishes nothing.
+    """
     haystack = (page_html or "").lower()
     for marker in _HUMAN_REQUIRED_MARKERS:
         if marker in haystack:

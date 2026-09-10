@@ -1,18 +1,28 @@
 """Greenhouse application submitter.
 
-Greenhouse renders its application form either on ``job-boards.greenhouse.io``
-(the hosted board) or embedded in a company page via ``#grnhse_app`` iframe.
-Both end up with the same field naming: the ATS's own question ids become
-input ``name`` attributes (``job_application[answers_attributes][0][text_value]``
-and friends), while the fixed identity fields keep stable ids —
-``#first_name``, ``#last_name``, ``#email``, ``#phone``, ``#resume``.
+Verified against a live posting (job-boards.greenhouse.io, Figma
+5426468004) rather than written from documentation. Four things that
+inspection settled, each of which the first draft had wrong:
 
-We locate fields by the ``field_key`` the extractor gave us, because
-``fetchers/questions._fetch_greenhouse_questions`` reads the same
-``questions[].fields[].name`` values off the Job Board API. That symmetry
-is the point: the schema we showed the user and the DOM we fill are keyed
-identically, so a field can never be shown as answered and then filled
-somewhere else.
+1. **Fields are addressed by ``id``, not ``name``.** The Job Board API
+   returns field names like ``question_12497121004`` and the hosted
+   board renders those as the DOM *id*. That page carried 22
+   ``[id^="question_"]`` elements and **zero** ``[name^="question_"]``,
+   so the original ``[name="..."]`` selector matched nothing and every
+   custom question would have been unplaceable.
+2. **There are no native ``<select>`` elements.** Every dropdown —
+   including the EEO ones — is react-select: an ``<input role="combobox"
+   class="select__input">``. ``select_option`` cannot drive those.
+3. **There is no ``#submit_app``.** The control is
+   ``<button type="submit">Submit application</button>``.
+4. **reCAPTCHA Enterprise v3 is on every posting**, invisible and
+   score-based. See ``base._HUMAN_REQUIRED_MARKERS`` — treating its
+   presence as a wall would make this adapter a no-op.
+
+The symmetry that matters still holds: ``field_key`` from
+``fetchers/questions._fetch_greenhouse_questions`` is the same token the
+DOM uses, so a field can never be shown to the user as answered and then
+filled somewhere else.
 """
 
 from __future__ import annotations
@@ -52,6 +62,9 @@ _CONFIRMATION_MARKERS: tuple[str, ...] = (
     "thanks for applying",
 )
 
+# Verified live: modern boards have no `#submit_app`; the control is a
+# `<button type="submit">Submit application</button>`. The id is kept
+# first for older embedded boards that still render it.
 _SUBMIT_SELECTOR = "#submit_app, button[type=submit], input[type=submit]"
 
 
@@ -162,7 +175,7 @@ class GreenhouseSubmitter(BaseSubmitter):
 
     async def _place(self, session: BrowserSession, f: SubmitField) -> bool:
         """Put one answer into the form. False when we couldn't."""
-        selector = _FIXED_SELECTORS.get(f.field_key) or self._name_selector(f.field_key)
+        selector = _FIXED_SELECTORS.get(f.field_key) or self._field_selector(f.field_key)
         try:
             if f.field_type in ("select", "multi_select"):
                 option = coerce_option(f.value, f.options)
@@ -171,20 +184,80 @@ class GreenhouseSubmitter(BaseSubmitter):
                     # ATS's allowed values. Report unplaceable instead of
                     # choosing the nearest option (F346).
                     return False
-                await session.select(selector, option)
-            else:
-                await session.fill(selector, f.value)
+                return await self._place_choice(session, selector, option)
+            await session.fill(selector, f.value)
             return True
         except BrowserError:
             return False
 
+    async def _place_choice(
+        self, session: BrowserSession, selector: str, option: str
+    ) -> bool:
+        """Choose ``option`` on a dropdown, native or react-select.
+
+        Modern Greenhouse boards render **zero** native ``<select>``
+        elements — verified on a live posting, where every dropdown
+        (including the EEO ones) is an ``<input role="combobox"
+        class="select__input">`` backed by react-select. ``select_option``
+        cannot drive those, so we fall back to the interaction a person
+        performs: focus, type the label, commit with Enter.
+
+        Older embedded boards still use real selects, so we try that
+        first and only fall through on failure.
+        """
+        try:
+            await session.select(selector, option)
+            return True
+        except BrowserError:
+            pass
+
+        try:
+            await session.click(selector)
+            await session.fill(selector, option)
+            await session.press(selector, "Enter")
+        except BrowserError:
+            return False
+
+        # Verify rather than assume. react-select silently keeps the
+        # field empty when the typed text matches no option, and an
+        # unset required dropdown is exactly the silent-partial-submit
+        # this adapter must never produce.
+        return await self._choice_committed(session, selector)
+
     @staticmethod
-    def _name_selector(field_key: str) -> str:
-        # Greenhouse custom questions carry their API field name in the
-        # `name` attribute. Escape quotes so a malformed key can't break
-        # out of the attribute selector.
-        safe = field_key.replace('"', '\\"')
-        return f'[name="{safe}"]'
+    async def _choice_committed(session: BrowserSession, selector: str) -> bool:
+        """True when react-select shows a committed value for the field."""
+        try:
+            # `.select__single-value` is react-select's rendered choice;
+            # it only exists once an option is actually selected.
+            container = f"{selector} ~ .select__single-value, {selector}"
+            value = await session.attr(container, "value")
+            if value:
+                return True
+            text = await session.text(".select__single-value")
+            return bool(text and text.strip())
+        except BrowserError:
+            return False
+
+    @staticmethod
+    def _field_selector(field_key: str) -> str:
+        """Address a custom question.
+
+        Greenhouse's Job Board API returns field names like
+        ``question_12497121004``, and on the hosted board those become
+        the DOM **id**, not the ``name`` — verified live: a page with 22
+        ``[id^="question_"]`` elements had **zero** ``[name^="question_"]``.
+        The original ``[name="..."]`` selector therefore matched nothing
+        and every custom question would have been unplaceable.
+
+        We emit an id selector with a name-attribute fallback, since
+        older embedded boards do still use ``name``.
+        """
+        safe = field_key.replace("\\", "\\\\").replace('"', '\\"')
+        # CSS.escape equivalent for the id half: ids here are
+        # alphanumeric + underscore in practice, but guard anyway.
+        ident = "".join(c if (c.isalnum() or c in "_-") else f"\\{c}" for c in field_key)
+        return f'#{ident}, [name="{safe}"]'
 
     @staticmethod
     async def _await_confirmation(session: BrowserSession) -> str | None:

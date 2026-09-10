@@ -446,6 +446,23 @@ class BrowserSession:
             except Exception as exc2:
                 raise BrowserError(f"select({selector!r}, {value!r}): {exc2}") from exc2
 
+    async def press(self, selector: str, key: str) -> None:
+        """Send a single key to the element matching ``selector``.
+
+        Needed for JS-widget form controls that have no native element
+        to drive. Greenhouse's modern boards render every dropdown as a
+        react-select combobox — an ``<input role="combobox">`` with no
+        ``<select>`` anywhere on the page — so the only way to choose an
+        option is click, type the label, then Enter. ``select()`` above
+        cannot touch those.
+        """
+        if self._page is None:
+            raise BrowserError("Session not entered")
+        try:
+            await self._page.press(selector, key)
+        except Exception as exc:
+            raise BrowserError(f"press({selector!r}, {key!r}): {exc}") from exc
+
     async def click(
         self,
         selector: str,

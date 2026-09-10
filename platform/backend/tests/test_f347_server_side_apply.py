@@ -183,19 +183,6 @@ class TestGreenhouseConfirmation:
         assert _confirm(session) is not None
 
 
-class TestFieldSelectors:
-    def test_custom_question_addressed_by_name(self):
-        sel = GreenhouseSubmitter._name_selector(
-            "job_application[answers_attributes][0][text_value]"
-        )
-        assert sel.startswith("[name=")
-        assert "answers_attributes" in sel
-
-    def test_quotes_in_key_cannot_break_the_selector(self):
-        sel = GreenhouseSubmitter._name_selector('evil"]injected[')
-        assert '\\"' in sel
-
-
 class TestStatusMachine:
     def test_new_states_exist(self):
         for state in ("in_flight", "needs_user", "failed"):
@@ -240,3 +227,52 @@ class _FakeSession:
 
     async def url(self) -> str:
         return self._url
+
+
+class TestVerifiedAgainstLiveGreenhouseDOM:
+    """Facts read off a real posting (job-boards.greenhouse.io, Figma
+    5426468004) on 2026-09-10. Each of these was wrong in the first
+    draft of the adapter, which is why they're pinned as tests rather
+    than left as comments."""
+
+    def test_custom_question_is_addressed_by_id_first(self):
+        """The live page had 22 [id^="question_"] and ZERO
+        [name^="question_"]. A name-only selector matched nothing."""
+        sel = GreenhouseSubmitter._field_selector("question_12497121004")
+        assert sel.startswith("#question_12497121004")
+
+    def test_name_attribute_is_kept_as_a_fallback(self):
+        """Older embedded boards still render `name`."""
+        sel = GreenhouseSubmitter._field_selector("question_12497121004")
+        assert '[name="question_12497121004"]' in sel
+
+    def test_selector_escaping_does_not_double_backslashes(self):
+        assert GreenhouseSubmitter._field_selector('a"b').count("\\") == 2
+
+    def test_invisible_recaptcha_is_not_a_human_wall(self):
+        """THE critical one. Every Greenhouse posting loads reCAPTCHA
+        Enterprise v3 — invisible, score-based, no challenge to solve.
+        The original bare "recaptcha" marker matched it, so every
+        application would have returned blocked -> needs_user and the
+        feature would have silently done nothing."""
+        live_page = (
+            '<script src="https://www.recaptcha.net/recaptcha/enterprise.js'
+            '?render=6LfmcbcpAAAAAChNTbhUShz"></script>'
+            '<textarea name="g-recaptcha-response" id="g-recaptcha-response-100000">'
+            "</textarea>"
+        )
+        assert detect_human_wall(live_page) is None
+
+    def test_interactive_recaptcha_v2_is_still_a_wall(self):
+        v2 = '<iframe src="https://www.google.com/recaptcha/api2/anchor?k=abc"></iframe>'
+        assert detect_human_wall(v2) is not None
+
+    def test_explicit_recaptcha_widget_is_a_wall(self):
+        assert detect_human_wall('<div class="g-recaptcha"></div>') is not None
+
+    def test_session_exposes_a_press_primitive(self):
+        """react-select needs click -> type -> Enter; there is no native
+        <select> on a modern Greenhouse board to call select_option on."""
+        from app.services.playwright_browser import BrowserSession
+
+        assert callable(getattr(BrowserSession, "press", None))
