@@ -77,8 +77,8 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
     from app.models.answer_book import AnswerBookEntry
     from app.models.application import Application
     from app.models.application_submission import ApplicationSubmission
+    from app.models.company import CompanyATSBoard
     from app.models.job import Job
-    from app.models.job import CompanyATSBoard
     from app.models.resume import Resume
     from app.services.question_service import get_or_fetch_questions_sync
     from app.services.submitters import (
