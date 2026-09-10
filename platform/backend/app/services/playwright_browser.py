@@ -124,6 +124,12 @@ class _PoolState:
     playwright: Any | None = None
     browser: Any | None = None
     launch_lock: asyncio.Lock | None = None
+    # The event loop that owns `browser` and `launch_lock`. Both are
+    # loop-bound: an asyncio.Lock binds on first await, and the browser's
+    # subprocess transport belongs to the loop that launched it. A caller
+    # using `asyncio.run()` per invocation (Celery tasks do) gets a fresh
+    # loop each time, so reusing either across loops hangs.
+    loop: Any | None = None
 
 
 _pool = _PoolState()
@@ -138,11 +144,45 @@ def _get_lock() -> asyncio.Lock:
     return _pool.launch_lock
 
 
+def _discard_stale_pool() -> None:
+    """Drop pool handles that belong to a dead event loop.
+
+    Verified failure this prevents: a Celery worker calling
+    ``asyncio.run(submit(...))`` once per task. The first task launches
+    Chromium and binds the lock to loop A; ``asyncio.run`` then closes
+    loop A. The second task runs on loop B, where ``_pool.browser``
+    still reports ``is_connected()`` (the OS process is alive) but every
+    operation on it awaits a transport attached to a closed loop — so
+    the task hangs indefinitely rather than failing.
+
+    We can't ``await browser.close()`` here: the loop that owns it is
+    gone. Callers using ``asyncio.run`` must call ``shutdown_pool()``
+    inside their own loop (``apply_task`` does); reaching this function
+    means one didn't, so it warns.
+    """
+    try:
+        current = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if _pool.loop is not None and _pool.loop is not current:
+        logger.warning(
+            "playwright_browser: pool belonged to a closed event loop; "
+            "discarding. A caller using asyncio.run() should call "
+            "shutdown_pool() before its loop exits, or Chromium leaks."
+        )
+        _pool.playwright = None
+        _pool.browser = None
+        _pool.launch_lock = None
+    _pool.loop = current
+
+
 async def _ensure_browser() -> Any:
     """Launch Chromium once per process; return the cached handle on
     every subsequent call. Coalesced via an asyncio.Lock so concurrent
     callers during cold start don't race-launch two browsers.
     """
+    _discard_stale_pool()
+
     if _pool.browser is not None and _pool.browser.is_connected():
         return _pool.browser
 
@@ -197,6 +237,8 @@ async def shutdown_pool() -> None:
         except Exception as exc:
             logger.warning("playwright_browser: close failed: %s", exc)
         _pool.browser = None
+    _pool.loop = None
+    _pool.launch_lock = None
     if _pool.playwright is not None:
         try:
             await _pool.playwright.stop()

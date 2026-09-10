@@ -194,15 +194,7 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
         submitter = get_submitter(job.platform)
         resume_path = _materialise_resume(resume)
         try:
-            outcome = asyncio.run(
-                submitter.submit(
-                    job_url=job.url,
-                    fields=fields,
-                    resume_path=resume_path,
-                    cover_letter_text=None,
-                    dry_run=dry_run,
-                )
-            )
+            outcome = asyncio.run(_drive(submitter, job.url, fields, resume_path, dry_run))
         finally:
             if resume_path:
                 try:
@@ -285,6 +277,40 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
         }
     finally:
         session.close()
+
+
+async def _drive(submitter, job_url, fields, resume_path, dry_run):
+    """Run one submission and tear the browser down inside this loop.
+
+    ``asyncio.run`` creates and closes a loop per call, while
+    ``playwright_browser`` pools one Chromium per *process*. Both the
+    browser's subprocess transport and the pool's asyncio.Lock bind to
+    the loop that created them, so the pooled handles are unusable on
+    the next task — verified: the second submission in a worker hangs
+    indefinitely rather than erroring, because ``is_connected()`` still
+    reports True while every await sits on a closed transport.
+
+    Closing here means each application pays a fresh ~2s Chromium start.
+    That is the right trade for a task that already spends far longer
+    driving a form, and correctness beats the saving. The pool also
+    discards stale handles defensively, but only shutting down inside
+    the owning loop avoids leaking the Chromium process.
+    """
+    from app.services.playwright_browser import shutdown_pool
+
+    try:
+        return await submitter.submit(
+            job_url=job_url,
+            fields=fields,
+            resume_path=resume_path,
+            cover_letter_text=None,
+            dry_run=dry_run,
+        )
+    finally:
+        try:
+            await shutdown_pool()
+        except Exception:  # never mask the real outcome
+            logger.warning("apply_task: browser shutdown failed", exc_info=True)
 
 
 def _materialise_resume(resume) -> str | None:
