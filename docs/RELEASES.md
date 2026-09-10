@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 0a0e673 · sha-0a0e673
+Merge: render submitted answers in pipeline card panel
+
+
 ## 2026-09-10 · 6bad990 · sha-6bad990
 Merge: submitted answers on pipeline card drill-down
 
