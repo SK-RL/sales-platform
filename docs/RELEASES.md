@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 3c4fe78 · sha-3c4fe78
+Merge: narrow remote_policy using the job body
+
+
 ## 2026-09-10 · 7752e95 · sha-7752e95
 fix(pipeline): label legacy prepared_answers rows in the card panel
 
