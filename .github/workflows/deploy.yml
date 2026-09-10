@@ -589,42 +589,20 @@ jobs:
       - name: Prepend stub entry to docs/RELEASES.md
         run: |
           set -euo pipefail
-          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
-          TAG="${{ needs.build.outputs.tag }}"
-          DATE_UTC="$(date -u +%Y-%m-%d)"
-          SUBJECT="$(git log -1 --pretty=%s '${{ github.sha }}')"
-          # Escape characters that would break the markdown or the sed
-          # replacement below. `|` is our sed delimiter; `\` must be
-          # literal; newlines must not appear in SUBJECT.
-          SUBJECT_ESCAPED=$(printf '%s' "$SUBJECT" | tr '\n' ' ' | sed 's/|/\\|/g')
-
-          STUB="## ${DATE_UTC} · ${SHORT_SHA} · ${TAG}
-          ${SUBJECT_ESCAPED}
-          "
-          # Prepend BELOW the start marker and BEFORE the first existing
-          # entry. Using awk rather than sed because multi-line insertion
-          # via sed is dialect-specific (GNU vs BSD).
-          awk -v stub="$STUB" '
-            /<!-- RELEASES_LOG_START -->/ {
-              print
-              print ""
-              print stub
-              inserted = 1
-              next
-            }
-            { print }
-          ' docs/RELEASES.md > docs/RELEASES.md.tmp
-
-          mv docs/RELEASES.md.tmp docs/RELEASES.md
-
-          echo "Prepended:"
-          echo "$STUB"
+          .github/scripts/append-release-entry.sh \
+            "$(echo '${{ github.sha }}' | cut -c1-7)" \
+            "${{ needs.build.outputs.tag }}" \
+            "$(git log -1 --pretty=%s '${{ github.sha }}')"
 
       - name: Commit + push
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SHORT_SHA="$(echo '${{ github.sha }}' | cut -c1-7)"
+          TAG="${{ needs.build.outputs.tag }}"
+          SUBJECT="$(git log -1 --pretty=%s '${{ github.sha }}')"
 
           # No-op guard: if RELEASES.md didn't actually change (e.g. the
           # marker was removed in a prior edit), don't create an empty
@@ -634,22 +612,47 @@ jobs:
             exit 0
           fi
 
-          git add docs/RELEASES.md
-          # [skip ci] prevents the Deploy workflow from re-triggering
-          # on our own push — otherwise each deploy would loop once.
-          git commit -m "docs(releases): append ${{ needs.build.outputs.tag }} [skip ci]"
-          # Race-hardening (2026-07-26): three consecutive deploys
-          # reported "failure" solely because main moved (another merge
-          # landed) between checkout and this push — a non-fast-forward
-          # reject on a DOCS commit made a fully-green deploy look
-          # broken, which is exactly how the May pipeline outage went
-          # unnoticed. Rebase-retry a few times; the release entry is
-          # content-independent of whatever else landed on main.
+          commit_entry() {
+            git add docs/RELEASES.md
+            # [skip ci] prevents the Deploy workflow from re-triggering
+            # on our own push — otherwise each deploy would loop once.
+            git commit -m "docs(releases): append ${TAG} [skip ci]"
+          }
+          commit_entry
+
+          # Race-hardening, second attempt (2026-09-10). The 2026-07-26
+          # version rebase-retried on rejection, on the stated assumption
+          # that "the release entry is content-independent of whatever
+          # else landed on main". That holds for ordinary merges but NOT
+          # for the case the retry exists to handle: every entry is
+          # inserted at the same RELEASES_LOG_START anchor, so two
+          # back-to-back deploys conflict on the identical line range
+          # every single time.
+          #
+          # It also never got a second attempt — under `set -e` the
+          # failing `git pull --rebase` aborted the step immediately, so
+          # attempts 2 and 3 were dead code and a fully-green deploy
+          # still reported "failure".
+          #
+          # Regenerate instead of rebase: drop our commit, hard-reset to
+          # the latest main, and re-insert the entry on top of whatever
+          # is now there. Conflict-free by construction.
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
+              echo "Release entry pushed (attempt ${attempt})."
               exit 0
             fi
-            echo "push rejected (attempt $attempt) — rebasing on latest main"
-            git pull --rebase origin main
+            echo "push rejected (attempt ${attempt}) — regenerating on latest main"
+            git fetch origin main
+            git reset --hard origin/main
+            .github/scripts/append-release-entry.sh "$SHORT_SHA" "$TAG" "$SUBJECT"
+            commit_entry
           done
-          git push origin HEAD:main
+
+          # Out of attempts. The deploy itself already succeeded and was
+          # verified; only this docs commit failed. Say so loudly and
+          # exit non-zero so it is visible, but make the distinction
+          # explicit in the log so nobody reads it as a failed release.
+          echo "::error::Release entry could not be pushed after 3 attempts."
+          echo "::notice::The deploy itself SUCCEEDED and was verified — only docs/RELEASES.md is missing this entry."
+          exit 1
