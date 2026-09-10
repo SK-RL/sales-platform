@@ -750,6 +750,16 @@ async def list_client_applications(
             "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
             "created_at": app.created_at.isoformat(),
             "notes": app.notes,
+            # What was actually typed into this employer's form. The card's
+            # side panel is where an operator asks "what did we tell them?"
+            # — previously they had to leave the board, find the job, and
+            # open Job Detail to see it. The rows are the PreparedAnswer
+            # shape (label / field_type / answer / question_key), written by
+            # /applications/record when the browser-side lane fills a form.
+            # Empty list for applications prepared before that lane existed.
+            "prepared_answers": app.prepared_answers or [],
+            "answer_count": len(app.prepared_answers or []),
+            "apply_method": app.apply_method,
         })
     return {"items": items, "total": len(items)}
 
