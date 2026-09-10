@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 9b3c215 · sha-9b3c215
+fix(apply): the feature was unreachable from the UI
+
+
 ## 2026-09-10 · a133952 · sha-a133952
 fix(tests): route test enumerated app.routes; red on main, green locally
 
