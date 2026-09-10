@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "lever", "ashby", "recruitee"}
+    {"greenhouse", "recruitee"}
 )
 
 
@@ -68,8 +68,8 @@ def fetch_application_questions(
     """
     fetchers = {
         "greenhouse": _fetch_greenhouse_questions,
-        "lever": _fetch_lever_questions,
-        "ashby": _fetch_ashby_questions,
+        # F357 — lever and ashby are deliberately NOT wired. See the
+        # note on SUPPORTED_QUESTION_PLATFORMS.
         "recruitee": _fetch_recruitee_questions,
     }
 
@@ -211,51 +211,37 @@ _LEVER_STANDARD_FIELDS: list[dict[str, Any]] = [
 
 
 def _fetch_lever_questions(posting_id: str, slug: str) -> list[dict[str, Any]]:
-    url = _LEVER_POSTING_URL.format(slug=slug, posting_id=posting_id)
+    """Deliberately returns nothing. See F357.
 
-    with httpx.Client(timeout=15, follow_redirects=True) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
+    The previous implementation did NOT read Lever's application form —
+    Lever's public postings API doesn't expose one. It returned a
+    hardcoded seven-field template and then invented questions from the
+    job description: every entry in ``lists`` became a form field, and
+    any line in ``additionalPlain`` ending in "?" became one too.
 
-    data = resp.json()
+    Verified against a live board (matchgroup): ``lists`` holds the JD's
+    own sections, so the "questions" produced for a real posting were
 
-    # Lever individual posting responses include custom question lists
-    results = list(_LEVER_STANDARD_FIELDS)
+        key_responsibilities      'Key Responsibilities'
+        required_qualifications   'Required Qualifications'
+        work_arrangement          'Work Arrangement'
 
-    # "lists" contains custom multi-select / single-select questions
-    for lst in data.get("lists", []):
-        label = lst.get("text", "") or ""
-        content = lst.get("content", "")
-        if not label:
-            continue
-        results.append({
-            "field_key": _normalise_field_key(label),
-            "label": label,
-            "field_type": "textarea",
-            "required": False,
-            "options": [],
-            "description": content or "",
-        })
+    — job description headings, presented to the user as things to
+    answer, while the form's actual questions were never read. All of it
+    was stamped ``extraction_mode="extracted"``, the trust level the
+    F347 apply gate requires before it will submit unattended.
 
-    # "additional" and "additionalPlain" contain custom text question content
-    additional = data.get("additional", "") or ""
-    additional_plain = data.get("additionalPlain", "") or ""
-    if additional_plain:
-        # Try to extract questions from the additional plain text
-        # Each line that ends with '?' is likely a question
-        for line in additional_plain.split("\n"):
-            line = line.strip()
-            if line.endswith("?") and len(line) > 10:
-                results.append({
-                    "field_key": _normalise_field_key(line),
-                    "label": line,
-                    "field_type": "textarea",
-                    "required": False,
-                    "options": [],
-                    "description": "",
-                })
+    That is precisely the failure the gate exists to prevent, hiding
+    inside a platform we listed as supported, and worse than an honest
+    fallback because it was labelled as real extraction.
 
-    return results
+    Returning nothing makes the dispatcher fall back and mark the schema
+    ``fallback``, so the gate refuses to auto-submit Lever and routes it
+    to the review queue instead. Reading Lever properly means scraping
+    the apply page's DOM — worth doing, but as a real extractor, not as
+    a guess wearing an extractor's label.
+    """
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +266,10 @@ _ASHBY_FIELD_TYPE_MAP = {
 
 
 def _fetch_ashby_questions(job_id: str, slug: str) -> list[dict[str, Any]]:
+    # F357 — correct code, but unwired: the endpoint requires auth we
+    # do not have. Verified 401 on every public board tried (ramp,
+    # linear, vanta, openai, supabase, 1password, anyscale). Kept so
+    # it can be re-enabled the day we hold an Ashby key.
     url = _ASHBY_FORM_URL.format(slug=slug)
 
     with httpx.Client(timeout=15, follow_redirects=True) as client:

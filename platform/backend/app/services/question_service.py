@@ -105,6 +105,15 @@ async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list
         seen_keys.add(fk)
         deduped.append(q)
 
+    # F357 — only cache a REAL extraction. `extraction_mode` is derived
+    # on read from the platform, so caching a fallback schema would make
+    # it read back as "extracted" the next time and hand the apply gate
+    # a guessed form wearing an extracted label. Not caching fallbacks
+    # keeps the derivation honest without needing a migration, and costs
+    # one cheap upstream call per view on platforms we can't read anyway.
+    if any(q.get("extraction_mode") == "fallback" for q in questions):
+        return questions
+
     # Cache in DB
     for q in deduped:
         jq = JobQuestion(
@@ -147,6 +156,10 @@ def get_or_fetch_questions_sync(session: Session, job, board_slug: str) -> list[
 
     from app.fetchers.questions import fetch_application_questions
     questions = fetch_application_questions(job.platform, job.external_id, board_slug)
+
+    # F357 — same rule as the async path: never cache a guessed schema.
+    if any(q.get("extraction_mode") == "fallback" for q in questions):
+        return questions
 
     for q in questions:
         jq = JobQuestion(

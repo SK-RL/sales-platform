@@ -270,6 +270,15 @@ class TestVerifiedAgainstLiveGreenhouseDOM:
     def test_explicit_recaptcha_widget_is_a_wall(self):
         assert detect_human_wall('<div class="g-recaptcha"></div>') is not None
 
+    def test_submit_selector_is_scoped_to_the_form(self):
+        """F356 — an unscoped button[type=submit] clicks a cookie-banner
+        button on any page that has one. Recruitee proved it: a live
+        board carried a dozen of them ("Allow all", "Necessary")."""
+        from app.services.submitters.greenhouse import _SUBMIT_SELECTOR
+
+        parts = [p.strip() for p in _SUBMIT_SELECTOR.split(",")]
+        assert parts and all(p.startswith("form ") for p in parts), _SUBMIT_SELECTOR
+
     def test_session_exposes_a_press_primitive(self):
         """react-select needs click -> type -> Enter; there is no native
         <select> on a modern Greenhouse board to call select_option on."""

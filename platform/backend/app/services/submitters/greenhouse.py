@@ -66,7 +66,17 @@ _CONFIRMATION_MARKERS: tuple[str, ...] = (
 # Verified live: modern boards have no `#submit_app`; the control is a
 # `<button type="submit">Submit application</button>`. The id is kept
 # first for older embedded boards that still render it.
-_SUBMIT_SELECTOR = "#submit_app, button[type=submit], input[type=submit]"
+#
+# F356 — scoped to the form. The unscoped fallback was safe on
+# Greenhouse's own hosted board but is not safe in general: a Greenhouse
+# form embedded in a company careers page sits alongside that site's
+# cookie dialog, and Recruitee proved what that costs — one such page
+# carried a dozen `button[type=submit]` elements ("Allow all",
+# "Necessary", "Manage preferences") and an unscoped selector clicks one
+# of those instead of the application.
+_SUBMIT_SELECTOR = (
+    "form #submit_app, form button[type=submit], form input[type=submit]"
+)
 
 # Anchor proving the application form is rendered, plus a settle for
 # React hydration. See the note in submit() — filling before hydration
