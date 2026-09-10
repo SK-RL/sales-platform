@@ -27,6 +27,58 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     "disability_status": ["disability", "disability_status"],
 }
 
+# F346 — fields we must never answer by inference.
+#
+# `_find_best_match` has five strategies, in descending precision:
+# exact key, alias, normalised label, substring, category fallback.
+# The last two are *fuzzy*: substring matches any key that shares a
+# fragment, and the category fallback returns the first non-empty
+# answer in a guessed category. Both are fine for "what's your
+# LinkedIn" and actively dangerous for "do you have the legal right
+# to work in the US".
+#
+# Concrete failure this prevents: a Greenhouse field
+# `do_you_have_a_legal_right_to_work_in_the_us` hits
+# `_CATEGORY_HINTS["authorized"] -> work_auth` and, under the old
+# code, returned whichever work-auth entry happened to sort first —
+# e.g. an India work-authorization answer — marked `confidence="low"`
+# and then submitted, because nothing downstream read `confidence`.
+#
+# These are legal attestations, protected-class disclosures and
+# compensation figures. Getting one wrong is not a bad guess, it is a
+# false statement on an employment application. For any field matching
+# these patterns we allow ONLY the three precise strategies (exact,
+# alias, label) and otherwise return unresolved so a human fills it in.
+_NEVER_INFER_PATTERNS: tuple[str, ...] = (
+    # Work authorization / immigration status
+    "work_auth", "authorized", "authorisation", "authorization",
+    "legal_right", "right_to_work", "eligible_to_work", "work_permit",
+    "sponsor", "visa", "immigration", "citizen", "residency",
+    # Protected-class / EEO self-identification
+    "veteran", "disability", "disabled", "gender", "race", "ethnicity",
+    "hispanic", "latino", "protected", "self_identif",
+    # Background attestations
+    "criminal", "conviction", "felony", "background_check",
+    "security_clearance", "clearance", "export_control",
+    "non_compete", "noncompete", "drug_test",
+    # Compensation — a wrong number here is quoted back at offer stage
+    "salary", "compensation", "expected_pay", "desired_pay", "rate",
+)
+
+
+def is_never_infer_field(field_key: str, label: str) -> bool:
+    """True when a field is too consequential to answer by inference.
+
+    See :data:`_NEVER_INFER_PATTERNS`. Matches on the field key and the
+    human label together, because ATSes vary wildly in which of the two
+    carries the meaning: Greenhouse tends to put it in the key
+    (``are_you_legally_authorized_to_work``) while Workday uses opaque
+    keys (``primaryQuestion--1``) and puts the question in the label.
+    """
+    combined = f"{field_key} {label}".lower()
+    return any(pattern in combined for pattern in _NEVER_INFER_PATTERNS)
+
+
 # Category hints: if field_key contains these terms, prefer answer-book entries from these categories.
 _CATEGORY_HINTS: dict[str, str] = {
     "first_name": "personal_info",
@@ -109,8 +161,19 @@ def match_questions_to_answers(
         field_key = q.get("field_key", "")
         label = q.get("label", "")
 
-        match = _find_best_match(field_key, label, by_key, by_category)
+        never_infer = is_never_infer_field(field_key, label)
+        match = _find_best_match(
+            field_key, label, by_key, by_category, never_infer=never_infer
+        )
 
+        # F346 — `needs_user` is the gate the apply path reads. A field
+        # needs a human when it is required and we have no answer we'd
+        # stand behind: either nothing matched, or the only match came
+        # from a fuzzy strategy on a never-infer field (which
+        # `_find_best_match` already refuses to return, so this reduces
+        # to "required and not confidently answered").
+        answered = bool(match["answer"])
+        trusted = match["confidence"] in ("high", "medium")
         results.append({
             "field_key": field_key,
             "label": label,
@@ -118,13 +181,81 @@ def match_questions_to_answers(
             "required": q.get("required", False),
             "options": q.get("options", []),
             "description": q.get("description", ""),
+            # Carried through from the schema so callers can tell an
+            # extracted form from a guessed one (see fetchers/questions).
+            "extraction_mode": q.get("extraction_mode", "extracted"),
+            # F350 — non-empty when this field is one of several
+            # alternatives satisfying a single ATS question.
+            "alternative_group": q.get("alternative_group", ""),
             "answer": match["answer"],
             "match_source": match["source"],
             "question_key": match["question_key"],
             "confidence": match["confidence"],
+            "never_infer": never_infer,
+            "needs_user": bool(q.get("required", False)) and not (answered and trusted),
         })
 
     return results
+
+
+def blocking_gaps(
+    matched: list[dict[str, Any]],
+    satisfied_field_keys: frozenset[str] | set[str] | None = None,
+) -> list[dict[str, str]]:
+    """Required fields that must not be auto-submitted.
+
+    F346. The apply path calls this and refuses to submit while the
+    list is non-empty — the platform equivalent of "we could not
+    resolve this, so a human decides". Returning a structured reason
+    (rather than a bare count) lets the UI say *which* field and *why*,
+    the way a locked field explains itself.
+
+    ``satisfied_field_keys`` names fields answered outside the form
+    answers. The resume is the case: ``apply_task`` uploads the stored
+    file rather than typing it, so ``resume`` is satisfied even though
+    no answer-book entry matches it.
+
+    F350 — fields sharing an ``alternative_group`` are ONE requirement.
+    Greenhouse's "Resume/CV" question exposes ``resume`` (file) and
+    ``resume_text`` (textarea); either satisfies it. Treating them as
+    two separate required fields blocked every application that had a
+    resume attached, because nothing ever fills the paste-it-manually
+    textarea.
+    """
+    satisfied = set(satisfied_field_keys or ())
+
+    # Groups that any member has already satisfied.
+    satisfied_groups: set[str] = set()
+    for m in matched:
+        group = m.get("alternative_group") or ""
+        if not group:
+            continue
+        if m.get("answer") or m.get("field_key") in satisfied:
+            satisfied_groups.add(group)
+
+    gaps: list[dict[str, str]] = []
+    for m in matched:
+        if m.get("field_key") in satisfied:
+            continue
+        if (m.get("alternative_group") or "") in satisfied_groups and m.get("alternative_group"):
+            continue
+        if not m.get("needs_user"):
+            continue
+        if m.get("never_infer"):
+            reason = (
+                "This is a legal or protected-class question. We only answer it "
+                "from an exact saved answer, never by inference — please set it."
+            )
+        elif m.get("answer"):
+            reason = "We found only a loose match for this required field."
+        else:
+            reason = "No saved answer matches this required field."
+        gaps.append({
+            "field_key": m.get("field_key", ""),
+            "label": m.get("label", ""),
+            "reason": reason,
+        })
+    return gaps
 
 
 def _find_best_match(
@@ -132,9 +263,21 @@ def _find_best_match(
     label: str,
     by_key: dict[str, dict],
     by_category: dict[str, list[dict]],
+    never_infer: bool = False,
 ) -> dict[str, str]:
-    """Find the best answer-book match for a given form field."""
-    empty = {"answer": "", "source": "unmatched", "question_key": "", "confidence": "low"}
+    """Find the best answer-book match for a given form field.
+
+    ``never_infer`` (F346) restricts matching to the three precise
+    strategies — exact key, alias, normalised label — and skips the two
+    fuzzy ones. Used for legal / EEO / compensation fields where a
+    plausible-looking wrong answer is worse than no answer at all.
+    """
+    # F346: unmatched is `confidence="none"`, not `"low"`. Previously
+    # both "the category fallback guessed this" and "we found nothing"
+    # reported `"low"`, so a caller could not distinguish a weak answer
+    # from an absent one. `"low"` now means exactly one thing: a
+    # category-fallback guess.
+    empty = {"answer": "", "source": "unmatched", "question_key": "", "confidence": "none"}
 
     # 1. Exact key match
     if field_key in by_key:
@@ -168,6 +311,12 @@ def _find_best_match(
             "question_key": entry.get("question_key", label_key),
             "confidence": "high",
         }
+
+    # F346 — strategies 4 and 5 below are fuzzy. For never-infer fields
+    # we stop here and report unresolved rather than produce a
+    # confident-looking answer to a legal question.
+    if never_infer:
+        return empty
 
     # 4. Partial / substring match on answer-book keys
     for qk, entry in by_key.items():

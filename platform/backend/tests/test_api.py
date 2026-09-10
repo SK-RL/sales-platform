@@ -111,9 +111,15 @@ def test_jobs(client: httpx.Client):
     resp5 = client.get(f"{BASE_URL}/jobs?geography=global_remote&page_size=3")
     check("GET /jobs?geography=global_remote → 200", resp5.status_code == 200)
 
-    # Worldwide scope (standardized)
+    # F233(b): the legacy "worldwide" geography string was retired by
+    # F218's strict-Literal validation on the geography query param.
+    # Post-F218 the canonical values are exactly
+    # {global_remote, usa_only, uae_only}. Probing ``?geography=
+    # worldwide`` should now return HTTP 422, not 200 — the harness
+    # asserts the expected reject so a future regression that loosens
+    # the Literal back to free-text would surface.
     resp6 = client.get(f"{BASE_URL}/jobs?geography=worldwide&page_size=3")
-    check("GET /jobs?geography=worldwide → 200", resp6.status_code == 200)
+    check("GET /jobs?geography=worldwide → 422 (post-F218 strict)", resp6.status_code == 422)
 
     # Search
     resp7 = client.get(f"{BASE_URL}/jobs?search=engineer&page_size=5")
@@ -303,7 +309,12 @@ def test_monitoring(client: httpx.Client):
 def test_remote_scope(client: httpx.Client):
     section("Remote Scope Standardization")
 
-    # Check that 'global remote' no longer exists, only 'global_remote' (or 'worldwide')
+    # F233(b): the canonical scope value is ``global_remote`` —
+    # ``worldwide`` was retired by F218's strict-Literal validation
+    # and is no longer accepted as input. ``remote_scope`` on
+    # individual job rows may still surface other text (legacy
+    # imports, fetcher-side enrichment) — that's a data shape we
+    # observe rather than enforce on the way in.
     resp = client.get(f"{BASE_URL}/jobs?geography=global_remote&page_size=3")
     check("global_remote geography filter works", resp.status_code == 200)
 

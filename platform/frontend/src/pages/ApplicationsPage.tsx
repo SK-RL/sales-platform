@@ -43,6 +43,10 @@ import type { ApplicationDetail, SubmissionDetail } from "@/lib/types";
 const STATUS_TABS: { label: string; value: string }[] = [
   { label: "All", value: "" },
   { label: "Prepared", value: "prepared" },
+  // F347 server-side apply states, ordered as they occur.
+  { label: "In flight", value: "in_flight" },
+  { label: "Needs you", value: "needs_user" },
+  { label: "Failed", value: "failed" },
   { label: "Submitted", value: "submitted" },
   { label: "Applied", value: "applied" },
   { label: "Interview", value: "interview" },
@@ -53,6 +57,12 @@ const STATUS_TABS: { label: string; value: string }[] = [
 
 const STATUS_COLORS: Record<string, string> = {
   prepared: "bg-gray-100 text-gray-700",
+  in_flight: "bg-sky-100 text-sky-700",
+  // Amber, not red: "needs you" is not a failure. The gate understood
+  // the form well enough to know it shouldn't answer something on your
+  // behalf. Colouring it like an error trains people to ignore it.
+  needs_user: "bg-amber-100 text-amber-800",
+  failed: "bg-red-100 text-red-700",
   submitted: "bg-blue-100 text-blue-700",
   applied: "bg-indigo-100 text-indigo-700",
   interview: "bg-yellow-100 text-yellow-700",
@@ -61,8 +71,16 @@ const STATUS_COLORS: Record<string, string> = {
   withdrawn: "bg-gray-100 text-gray-500",
 };
 
+// Mirrors app/api/v1/applications.py VALID_TRANSITIONS. Kept in sync by
+// hand — the two drifted before F355, which let the UI offer a
+// transition the API then rejected.
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  prepared: ["applied", "withdrawn"],
+  prepared: ["in_flight", "needs_user", "applied", "withdrawn"],
+  in_flight: ["submitted", "needs_user", "failed", "withdrawn"],
+  // Both allow "applied" so you can finish an application by hand and
+  // mark it done — the escape hatch, not a dead end.
+  needs_user: ["in_flight", "submitted", "applied", "withdrawn"],
+  failed: ["in_flight", "needs_user", "applied", "withdrawn"],
   submitted: ["applied", "withdrawn"],
   applied: ["interview", "rejected", "withdrawn"],
   interview: ["offer", "rejected", "withdrawn"],
@@ -214,6 +232,15 @@ export function ApplicationsPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-4">
+        {/* F355 — one link into the review queue. Reviewing 10
+            applications one at a time is a different job from browsing a
+            table, so it gets its own screen rather than a modal here. */}
+        <Link
+          to="/applications/review"
+          className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+        >
+          Review queue
+        </Link>
         <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1">
           {STATUS_TABS.map((tab) => (
             <button

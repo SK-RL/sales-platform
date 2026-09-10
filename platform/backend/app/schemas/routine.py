@@ -278,6 +278,21 @@ class RoutinePreferences(BaseModel):
     # — useful after a bad reviewer experience or a no-fly-list
     # decision. Capped at 200 entries to keep the IN-clause fast.
     excluded_company_ids: list[UUID] = Field(default_factory=list, max_length=200)
+    # ── F360: server-side auto-apply ────────────────────────────────
+    # Both default OFF. Unattended submission sends real applications to
+    # real employers under the user's name and cannot be undone, so it
+    # is opt-in per user and requires an explicit non-zero cap — there is
+    # deliberately no "sensible default" that starts applying for
+    # someone who never asked.
+    auto_apply_enabled: bool = False
+    # Ceiling on applications the sweeper may submit per rolling 24h.
+    # 0 means auto-apply does nothing even when enabled.
+    auto_apply_daily_cap: int = Field(default=0, ge=0, le=50)
+    # Floor on Job.relevance_score for auto-apply specifically. Separate
+    # from min_relevance_score (which filters what a human is *shown*)
+    # because the bar for "send this unattended" should be higher than
+    # the bar for "put this in front of me".
+    auto_apply_min_score: int = Field(default=80, ge=0, le=100)
 
 
 class RoutineTargetCreate(BaseModel):

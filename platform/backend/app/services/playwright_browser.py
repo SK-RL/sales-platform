@@ -124,6 +124,12 @@ class _PoolState:
     playwright: Any | None = None
     browser: Any | None = None
     launch_lock: asyncio.Lock | None = None
+    # The event loop that owns `browser` and `launch_lock`. Both are
+    # loop-bound: an asyncio.Lock binds on first await, and the browser's
+    # subprocess transport belongs to the loop that launched it. A caller
+    # using `asyncio.run()` per invocation (Celery tasks do) gets a fresh
+    # loop each time, so reusing either across loops hangs.
+    loop: Any | None = None
 
 
 _pool = _PoolState()
@@ -138,11 +144,45 @@ def _get_lock() -> asyncio.Lock:
     return _pool.launch_lock
 
 
+def _discard_stale_pool() -> None:
+    """Drop pool handles that belong to a dead event loop.
+
+    Verified failure this prevents: a Celery worker calling
+    ``asyncio.run(submit(...))`` once per task. The first task launches
+    Chromium and binds the lock to loop A; ``asyncio.run`` then closes
+    loop A. The second task runs on loop B, where ``_pool.browser``
+    still reports ``is_connected()`` (the OS process is alive) but every
+    operation on it awaits a transport attached to a closed loop — so
+    the task hangs indefinitely rather than failing.
+
+    We can't ``await browser.close()`` here: the loop that owns it is
+    gone. Callers using ``asyncio.run`` must call ``shutdown_pool()``
+    inside their own loop (``apply_task`` does); reaching this function
+    means one didn't, so it warns.
+    """
+    try:
+        current = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if _pool.loop is not None and _pool.loop is not current:
+        logger.warning(
+            "playwright_browser: pool belonged to a closed event loop; "
+            "discarding. A caller using asyncio.run() should call "
+            "shutdown_pool() before its loop exits, or Chromium leaks."
+        )
+        _pool.playwright = None
+        _pool.browser = None
+        _pool.launch_lock = None
+    _pool.loop = current
+
+
 async def _ensure_browser() -> Any:
     """Launch Chromium once per process; return the cached handle on
     every subsequent call. Coalesced via an asyncio.Lock so concurrent
     callers during cold start don't race-launch two browsers.
     """
+    _discard_stale_pool()
+
     if _pool.browser is not None and _pool.browser.is_connected():
         return _pool.browser
 
@@ -197,6 +237,8 @@ async def shutdown_pool() -> None:
         except Exception as exc:
             logger.warning("playwright_browser: close failed: %s", exc)
         _pool.browser = None
+    _pool.loop = None
+    _pool.launch_lock = None
     if _pool.playwright is not None:
         try:
             await _pool.playwright.stop()
@@ -445,6 +487,42 @@ class BrowserSession:
                 await self._page.select_option(selector, label=value)
             except Exception as exc2:
                 raise BrowserError(f"select({selector!r}, {value!r}): {exc2}") from exc2
+
+    async def check(self, selector: str, *, force: bool = True) -> None:
+        """Tick a radio/checkbox, including visually-hidden ones.
+
+        Modern form UIs render a real ``<input type=radio>`` at 1x1px,
+        absolutely positioned behind a styled fake, with no wrapping
+        ``<label>`` to click instead — verified on Recruitee, where
+        ``click()`` cannot reach the control at all. ``check()`` drives
+        the input's own semantics and fires the events React listens
+        for. ``force`` skips the actionability check that the decorative
+        overlay would otherwise fail; callers must verify the resulting
+        state by readback rather than trusting the call.
+        """
+        if self._page is None:
+            raise BrowserError("Session not entered")
+        try:
+            await self._page.check(selector, force=force)
+        except Exception as exc:
+            raise BrowserError(f"check({selector!r}): {exc}") from exc
+
+    async def press(self, selector: str, key: str) -> None:
+        """Send a single key to the element matching ``selector``.
+
+        Needed for JS-widget form controls that have no native element
+        to drive. Greenhouse's modern boards render every dropdown as a
+        react-select combobox — an ``<input role="combobox">`` with no
+        ``<select>`` anywhere on the page — so the only way to choose an
+        option is click, type the label, then Enter. ``select()`` above
+        cannot touch those.
+        """
+        if self._page is None:
+            raise BrowserError("Session not entered")
+        try:
+            await self._page.press(selector, key)
+        except Exception as exc:
+            raise BrowserError(f"press({selector!r}, {key!r}): {exc}") from exc
 
     async def click(
         self,

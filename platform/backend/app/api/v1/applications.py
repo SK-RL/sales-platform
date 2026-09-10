@@ -34,8 +34,30 @@ _TEAM_PIPELINE_GUARD = require_role("admin")
 router = APIRouter(prefix="/applications", tags=["applications"])
 
 # Valid status transitions -- terminal states have no outgoing transitions
+#
+# F347 adds the three server-side-apply states. They sit *before*
+# "submitted" in the lifecycle and exist because unattended submission
+# has outcomes the old vocabulary couldn't express:
+#
+#   in_flight  : the worker is driving the ATS form right now. Transient;
+#                the worker always moves it on. A row stuck here means a
+#                worker died mid-submit — see the sweeper in F347.
+#   needs_user : the apply gate refused. NOT a failure — we understood
+#                the form well enough to know we shouldn't answer it
+#                unattended (a legal question with no saved answer, a
+#                form we couldn't extract, a CAPTCHA). Only a human
+#                clears it, so retrying is pointless.
+#   failed     : we tried and the attempt errored. Retryable, and the
+#                task does retry with backoff before landing here.
+#
+# `needs_user` and `failed` both allow "applied" so a user who finishes
+# the application by hand can mark it done, matching the escape hatch
+# Tsenta offers ("Skip" / "I've Applied").
 VALID_TRANSITIONS = {
-    "prepared": ["applied", "withdrawn"],
+    "prepared": ["in_flight", "needs_user", "applied", "withdrawn"],
+    "in_flight": ["submitted", "needs_user", "failed", "withdrawn"],
+    "needs_user": ["in_flight", "submitted", "applied", "withdrawn"],
+    "failed": ["in_flight", "needs_user", "applied", "withdrawn"],
     "submitted": ["applied", "withdrawn"],
     "applied": ["interview", "rejected", "withdrawn"],
     "interview": ["offer", "rejected", "withdrawn"],
@@ -57,6 +79,11 @@ VALID_TRANSITIONS = {
 ApplicationStatus = Literal[
     "prepared", "submitted", "applied", "interview",
     "offer", "rejected", "withdrawn",
+    # F347 server-side apply states. Listed here as well as in
+    # VALID_TRANSITIONS because this Literal types the `status` query
+    # param on the list endpoints — without them `?status=needs_user`
+    # 422s and the review queue can't load its own rows.
+    "in_flight", "needs_user", "failed",
 ]
 
 
@@ -1118,7 +1145,8 @@ async def preview_job_questions(
     """
     import logging
     from app.services.question_service import get_or_fetch_questions, auto_populate_answer_book
-    from app.workers.tasks._answer_prep import match_questions_to_answers
+    from app.workers.tasks._answer_prep import blocking_gaps, match_questions_to_answers
+    from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS
 
     logger = logging.getLogger(__name__)
 
@@ -1198,6 +1226,19 @@ async def preview_job_questions(
     answered = sum(1 for m in matched if m.get("answer"))
     high_conf = sum(1 for m in matched if m.get("confidence") == "high" and m.get("answer"))
 
+    # F346 — the apply gate. `blocking` lists required fields we won't
+    # answer on the user's behalf; `schema` says whether the form we're
+    # showing was extracted from the ATS or guessed from a template.
+    # `safe_to_auto_submit` is the single boolean the apply path reads:
+    # a guessed form is never safe to auto-submit, because a form we
+    # invented cannot be a form we filled correctly.
+    blocking = blocking_gaps(matched)
+    extraction_mode = (
+        "fallback"
+        if any(m.get("extraction_mode") == "fallback" for m in matched)
+        else "extracted"
+    )
+
     return {
         "questions": matched,
         "coverage": {
@@ -1206,6 +1247,13 @@ async def preview_job_questions(
             "high_confidence": high_conf,
             "new_entries": new_entries,
         },
+        "schema": {
+            "extraction_mode": extraction_mode,
+            "platform": job.platform,
+            "supported": job.platform in SUPPORTED_QUESTION_PLATFORMS,
+        },
+        "blocking": blocking,
+        "safe_to_auto_submit": not blocking and extraction_mode == "extracted",
     }
 
 
@@ -1810,6 +1858,77 @@ async def get_application_submission(
         detected_issues=row.detected_issues or [],
         profile_snapshot=row.profile_snapshot or {},
         created_at=row.created_at,
+    )
+
+
+class SubmitApplicationRequest(BaseModel):
+    """Trigger server-side submission of a prepared application.
+
+    ``dry_run`` fills every field in the real form and stops immediately
+    before the submit click. It is the only safe way to exercise an
+    adapter against a live posting, and it does NOT move the application
+    to ``submitted`` — a dry run proves the form can be filled, it did
+    not apply to anything.
+    """
+
+    dry_run: bool = False
+    model_config = ConfigDict(extra="forbid")
+
+
+class SubmitApplicationResponse(BaseModel):
+    task_id: str
+    status: str
+    application_id: str
+    dry_run: bool
+
+
+@router.post("/{app_id}/submit", response_model=SubmitApplicationResponse)
+async def submit_application(
+    app_id: UUID,
+    body: SubmitApplicationRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue an application for unattended submission (F347).
+
+    This endpoint only *enqueues*. Every gate — extracted-not-guessed
+    schema, adapter exists, all required fields confidently resolved,
+    no CAPTCHA/login wall — runs inside the task, because the answers
+    and the form must be re-read at submit time rather than trusted from
+    whenever the user last previewed them. An application that fails a
+    gate comes back as ``needs_user`` with a per-field reason, not as an
+    error here.
+    """
+    app_row = (await db.execute(
+        select(Application).where(
+            Application.id == app_id,
+            Application.user_id == user.id,
+        )
+    )).scalar_one_or_none()
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    # Re-submitting something already sent would create a duplicate
+    # application at the employer, which we cannot undo.
+    if app_row.status in ("submitted", "applied", "interview", "offer"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Application is already {app_row.status} — refusing to submit it again",
+        )
+    if app_row.status == "in_flight":
+        raise HTTPException(
+            status_code=409,
+            detail="Submission already in progress for this application",
+        )
+
+    from app.workers.tasks.apply_task import submit_application_task
+
+    task = submit_application_task.delay(str(app_id), dry_run=body.dry_run)
+    return SubmitApplicationResponse(
+        task_id=task.id,
+        status="queued",
+        application_id=str(app_id),
+        dry_run=body.dry_run,
     )
 
 

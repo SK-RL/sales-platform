@@ -122,6 +122,25 @@ if SCAN_MODE == "aggressive":
     # ``normal`` (3/day vs 2/day) so the SCAN_MODE flag's semantics
     # don't invert.
     celery_app.conf.beat_schedule = {
+        # F347 — rescue applications abandoned mid-submit. `in_flight`
+        # is transient by design, but a worker OOM or container restart
+        # between the status flip and the submitter's return strands the
+        # row, and POST /applications/{id}/submit refuses to re-submit
+        # anything already in_flight. Every 15 min: the window matters
+        # because a stuck row is a user unable to retry their own
+        # application.
+        # F360 — server-side auto-apply sweep. Hourly, not continuous:
+        # the daily cap is the real throttle, and an hourly cadence
+        # means a user who turns it off mid-day stops within the hour.
+        # No-op for everyone who hasn't opted in (default off).
+        "sweep_auto_apply": {
+            "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
+            "schedule": crontab(minute=20),
+        },
+        "sweep_stuck_in_flight": {
+            "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
+            "schedule": crontab(minute="*/15"),
+        },
         "scan_all_platforms": {
             "task": "app.workers.tasks.scan_task.scan_all_platforms",
             "schedule": crontab(minute=0, hour="0,8,16"),  # F317: thrice daily (00:00, 08:00, 16:00 UTC)
@@ -276,6 +295,25 @@ else:
     # ELSE (career-pages/discovery/etc.) but the headline "how often
     # do we scrape jobs" answer is consistent: thrice daily, both modes.
     celery_app.conf.beat_schedule = {
+        # F347 — rescue applications abandoned mid-submit. `in_flight`
+        # is transient by design, but a worker OOM or container restart
+        # between the status flip and the submitter's return strands the
+        # row, and POST /applications/{id}/submit refuses to re-submit
+        # anything already in_flight. Every 15 min: the window matters
+        # because a stuck row is a user unable to retry their own
+        # application.
+        # F360 — server-side auto-apply sweep. Hourly, not continuous:
+        # the daily cap is the real throttle, and an hourly cadence
+        # means a user who turns it off mid-day stops within the hour.
+        # No-op for everyone who hasn't opted in (default off).
+        "sweep_auto_apply": {
+            "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
+            "schedule": crontab(minute=20),
+        },
+        "sweep_stuck_in_flight": {
+            "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
+            "schedule": crontab(minute="*/15"),
+        },
         "scan_all_platforms": {
             "task": "app.workers.tasks.scan_task.scan_all_platforms",
             "schedule": crontab(minute=0, hour="0,8,16"),  # F317: thrice daily

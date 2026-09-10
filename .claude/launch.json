@@ -3,10 +3,22 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [".claude/proxy.py"],
-      "port": 3100,
-      "autoPort": true
+      "url": "https://salesplatform.reventlabs.com"
+    },
+    {
+      "name": "frontend-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5199",
+        "--strictPort"
+      ],
+      "port": 5199,
+      "autoPort": false,
+      "cwd": "platform/frontend"
     }
   ]
 }

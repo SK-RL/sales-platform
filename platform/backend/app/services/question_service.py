@@ -23,6 +23,39 @@ def _normalise_key(text: str) -> str:
     return key[:255]
 
 
+def _cached_row_to_dict(q: JobQuestion) -> dict:
+    """Render a cached ``JobQuestion`` row as a question dict.
+
+    Shared by the async and sync cache-read paths so the two can't
+    drift — they returned subtly different shapes before F346 (the sync
+    one didn't coerce ``None`` the way F182 required of the async one).
+
+    ``extraction_mode`` is derived rather than stored: ``job_questions``
+    has no such column, and the value is a pure function of the platform
+    (we either have an extractor for it or we don't), so deriving on
+    read is equivalent to a column plus a backfill, and free.
+    """
+    from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS
+
+    return {
+        # F182 (b): coerce None back to "" / [] — DB columns are
+        # nominally non-null but legacy rows may carry NULLs from when
+        # `default=list` wasn't honoured on insert. Cheap coercion here
+        # prevents a downstream `.get()` on `None` from 500ing.
+        "field_key": q.field_key or "",
+        "label": q.label or "",
+        "field_type": q.field_type or "text",
+        "required": bool(q.required),
+        "options": q.options if isinstance(q.options, list) else [],
+        "description": q.description or "",
+        "extraction_mode": (
+            "extracted"
+            if (q.platform or "") in SUPPORTED_QUESTION_PLATFORMS
+            else "fallback"
+        ),
+    }
+
+
 async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list[dict]:
     """Get cached questions or fetch from ATS API, then cache.
 
@@ -50,22 +83,7 @@ async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list
     cached = result.scalars().all()
 
     if cached:
-        return [
-            {
-                # F182 (b): coerce None back to "" / [] — DB columns
-                # are nominally non-null but legacy rows may carry
-                # NULLs from when `default=list` wasn't honoured on
-                # insert. Cheap coercion here prevents a downstream
-                # `.get()` on `None` from 500ing.
-                "field_key": q.field_key or "",
-                "label": q.label or "",
-                "field_type": q.field_type or "text",
-                "required": bool(q.required),
-                "options": q.options if isinstance(q.options, list) else [],
-                "description": q.description or "",
-            }
-            for q in cached
-        ]
+        return [_cached_row_to_dict(q) for q in cached]
 
     # Fetch from ATS API
     from app.fetchers.questions import fetch_application_questions
@@ -86,6 +104,15 @@ async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list
             continue
         seen_keys.add(fk)
         deduped.append(q)
+
+    # F357 — only cache a REAL extraction. `extraction_mode` is derived
+    # on read from the platform, so caching a fallback schema would make
+    # it read back as "extracted" the next time and hand the apply gate
+    # a guessed form wearing an extracted label. Not caching fallbacks
+    # keeps the derivation honest without needing a migration, and costs
+    # one cheap upstream call per view on platforms we can't read anyway.
+    if any(q.get("extraction_mode") == "fallback" for q in questions):
+        return questions
 
     # Cache in DB
     for q in deduped:
@@ -125,20 +152,14 @@ def get_or_fetch_questions_sync(session: Session, job, board_slug: str) -> list[
     ).scalars().all()
 
     if cached:
-        return [
-            {
-                "field_key": q.field_key,
-                "label": q.label,
-                "field_type": q.field_type,
-                "required": q.required,
-                "options": q.options or [],
-                "description": q.description or "",
-            }
-            for q in cached
-        ]
+        return [_cached_row_to_dict(q) for q in cached]
 
     from app.fetchers.questions import fetch_application_questions
     questions = fetch_application_questions(job.platform, job.external_id, board_slug)
+
+    # F357 — same rule as the async path: never cache a guessed schema.
+    if any(q.get("extraction_mode") == "fallback" for q in questions):
+        return questions
 
     for q in questions:
         jq = JobQuestion(

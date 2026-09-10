@@ -16,6 +16,7 @@ import { PlatformsPage } from "./pages/PlatformsPage";
 import { MonitoringPage } from "./pages/MonitoringPage";
 import { ResumeScorePage } from "./pages/ResumeScorePage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
+import { ApplyReviewPage } from "@/pages/ApplyReviewPage";
 import { AnswerBookPage } from "./pages/AnswerBookPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
 import { RoleClustersPage } from "./pages/RoleClustersPage";
@@ -147,6 +148,17 @@ export default function App() {
         element={
           <ProtectedLayout>
             <ApplicationsPage />
+          </ProtectedLayout>
+        }
+      />
+      {/* F355 — the "Needs you" review queue. Nested under
+          /applications so the sidebar's Applications item stays
+          highlighted while reviewing. */}
+      <Route
+        path="/applications/review"
+        element={
+          <ProtectedLayout>
+            <ApplyReviewPage />
           </ProtectedLayout>
         }
       />
