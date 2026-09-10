@@ -143,7 +143,12 @@ class TestExtraction:
         }
         assert by_key["open_question_4281785"]["field_type"] == "textarea"  # text
         assert by_key["open_question_4281788"]["field_type"] == "text"      # string
-        assert by_key["open_question_4281786"]["field_type"] == "select"
+        # F354: Recruitee ships BOTH `single_choice` and `multi_choice`.
+        # Their coexistence settles the ambiguity — `multi_choice` really
+        # is pick-many, so mapping it to `select` (as this test first
+        # asserted, from a board that only had `multi_choice`) would
+        # submit one answer to a question expecting several.
+        assert by_key["open_question_4281786"]["field_type"] == "multi_select"
         assert by_key["open_question_4281787"]["field_type"] == "boolean"
 
     def test_video_question_is_typed_as_file(self, stub_recruitee):

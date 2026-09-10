@@ -23,9 +23,11 @@ from app.services.submitters.base import (
     SubmitOutcome,
 )
 from app.services.submitters.greenhouse import GreenhouseSubmitter
+from app.services.submitters.recruitee import RecruiteeSubmitter
 
 _REGISTRY: dict[str, type[BaseSubmitter]] = {
     GreenhouseSubmitter.platform: GreenhouseSubmitter,
+    RecruiteeSubmitter.platform: RecruiteeSubmitter,
 }
 
 

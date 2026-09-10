@@ -352,17 +352,30 @@ def _normalise_field_key(text: str) -> str:
 
 _RECRUITEE_OFFER_URL = "https://{slug}.recruitee.com/api/offers/{offer_id}"
 
+# F354 — enumerated across every offer on two live boards (channable,
+# tellenthr) rather than inferred from one posting. Frequencies observed:
+# string 47, boolean 13, text 9, single_choice 8, video 7, file 6,
+# multi_choice 1. Unmapped kinds fall through to "text", which silently
+# discards a choice question's options — so the map has to be complete,
+# not representative.
 _RECRUITEE_KIND_MAP = {
     # `text` is Recruitee's long-form answer, `string` its single-line one.
     "text": "textarea",
     "string": "text",
-    "multi_choice": "select",
+    # Recruitee ships BOTH kinds, which settles the ambiguity: with
+    # `single_choice` present as its own kind, `multi_choice` really does
+    # mean pick-many. Mapping it to `select` (as the first draft did)
+    # would have submitted one answer to a question expecting several.
+    "single_choice": "select",
+    "multi_choice": "multi_select",
     "boolean": "boolean",
-    # A video answer cannot be produced unattended. Typing it as `file`
-    # means the apply gate leaves it unanswered, and if it's required
-    # `blocking_gaps` routes the application to needs_user — which is
-    # the correct outcome, not a bug.
+    # Neither of these can be produced unattended. Typing them as `file`
+    # means the apply gate leaves them unanswered, and if required,
+    # `blocking_gaps` routes the application to needs_user — the correct
+    # outcome, not a bug. `file` is a real kind here: several postings
+    # ask for a motivation letter as an attachment.
     "video": "file",
+    "file": "file",
 }
 
 # Recruitee renders the same identity block on every offer regardless of

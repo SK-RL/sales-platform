@@ -488,6 +488,25 @@ class BrowserSession:
             except Exception as exc2:
                 raise BrowserError(f"select({selector!r}, {value!r}): {exc2}") from exc2
 
+    async def check(self, selector: str, *, force: bool = True) -> None:
+        """Tick a radio/checkbox, including visually-hidden ones.
+
+        Modern form UIs render a real ``<input type=radio>`` at 1x1px,
+        absolutely positioned behind a styled fake, with no wrapping
+        ``<label>`` to click instead — verified on Recruitee, where
+        ``click()`` cannot reach the control at all. ``check()`` drives
+        the input's own semantics and fires the events React listens
+        for. ``force`` skips the actionability check that the decorative
+        overlay would otherwise fail; callers must verify the resulting
+        state by readback rather than trusting the call.
+        """
+        if self._page is None:
+            raise BrowserError("Session not entered")
+        try:
+            await self._page.check(selector, force=force)
+        except Exception as exc:
+            raise BrowserError(f"check({selector!r}): {exc}") from exc
+
     async def press(self, selector: str, key: str) -> None:
         """Send a single key to the element matching ``selector``.
 
