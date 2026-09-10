@@ -984,8 +984,16 @@ function ClientApplicationsPanel({
                   <dl className="mt-2 space-y-2 border-l-2 border-gray-100 pl-3">
                     {(row.prepared_answers ?? []).map((a, i) => (
                       <div key={a.question_key || i}>
+                        {/* Two shapes live in prepared_answers. Rows written by
+                            /applications/record carry `label`; older rows from
+                            the legacy /prepare flow carry `question` instead
+                            (e.g. {question: "What is your email?", source:
+                            "base"}) and have no label or question_key at all.
+                            Falling back through both keeps historic
+                            applications readable rather than rendering an
+                            answer under a blank heading. */}
                         <dt className="text-[11px] font-medium text-gray-500">
-                          {a.label || a.question_key}
+                          {a.label || a.question || a.question_key || "Field"}
                         </dt>
                         <dd className="text-xs text-gray-800 whitespace-pre-wrap break-words">
                           {a.answer?.trim() ? a.answer : <span className="text-gray-400 italic">left blank</span>}

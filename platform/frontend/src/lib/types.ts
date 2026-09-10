@@ -1055,6 +1055,12 @@ export interface TeamApplicationsResponse {
 export interface PreparedAnswer {
   field_key: string;
   label: string;
+  // Legacy rows from the /prepare flow carry `question` in place of
+  // `label` (and no field_key/question_key). Optional so both shapes
+  // type-check off one interface.
+  question?: string;
+  category?: string;
+  source?: string;
   field_type: "text" | "textarea" | "select" | "multi_select" | "file" | "boolean";
   required: boolean;
   options: { value: string; label: string }[];
