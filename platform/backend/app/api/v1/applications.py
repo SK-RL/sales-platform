@@ -79,6 +79,11 @@ VALID_TRANSITIONS = {
 ApplicationStatus = Literal[
     "prepared", "submitted", "applied", "interview",
     "offer", "rejected", "withdrawn",
+    # F347 server-side apply states. Listed here as well as in
+    # VALID_TRANSITIONS because this Literal types the `status` query
+    # param on the list endpoints — without them `?status=needs_user`
+    # 422s and the review queue can't load its own rows.
+    "in_flight", "needs_user", "failed",
 ]
 
 

@@ -1018,6 +1018,25 @@ export async function deleteApplication(id: string): Promise<void> {
   return request<void>(`/applications/${id}`, { method: "DELETE" });
 }
 
+/**
+ * F347 — queue an application for unattended submission.
+ *
+ * Only enqueues. Every gate runs inside the worker, because the answers
+ * and the form are re-read at submit time rather than trusted from
+ * whenever the user last previewed them. A gate refusal comes back on
+ * the application as status "needs_user" with a per-field reason, not as
+ * an error here.
+ */
+export async function submitApplication(
+  id: string,
+  opts: { dryRun?: boolean } = {}
+): Promise<{ task_id: string; status: string; application_id: string; dry_run: boolean }> {
+  return request(`/applications/${id}/submit`, {
+    method: "POST",
+    body: JSON.stringify({ dry_run: Boolean(opts.dryRun) }),
+  });
+}
+
 export async function getApplicationStats(): Promise<ApplicationStats> {
   return request<ApplicationStats>("/applications/stats");
 }

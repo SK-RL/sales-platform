@@ -954,7 +954,21 @@ export interface AnswerBookEntry {
 }
 
 // Applications
-export type ApplicationStatus = "prepared" | "submitted" | "applied" | "interview" | "offer" | "rejected" | "withdrawn";
+// F347 adds in_flight / needs_user / failed — the server-side apply
+// states. They sit before "submitted" in the lifecycle: `needs_user` is
+// NOT a failure, it means the apply gate understood the form well enough
+// to know it shouldn't answer something unattended.
+export type ApplicationStatus =
+  | "prepared"
+  | "in_flight"
+  | "needs_user"
+  | "failed"
+  | "submitted"
+  | "applied"
+  | "interview"
+  | "offer"
+  | "rejected"
+  | "withdrawn";
 // `claude_routine` added for the v6 MCP-Chrome routine. Still a
 // union — ApplicationsPage renders an "Auto" badge for this value.
 export type ApplyMethod = "api_submit" | "manual_copy" | "career_page" | "claude_routine";
@@ -1104,7 +1118,26 @@ export interface PreparedQuestion {
   answer: string;
   match_source: string;
   question_key: string;
-  confidence: "high" | "medium" | "low";
+  // "none" means nothing matched. Before F346 an absent answer and a
+  // category-fallback guess both reported "low".
+  confidence: "high" | "medium" | "low" | "none";
+  // F346 — this field is a legal / EEO / compensation question, so we
+  // only ever answer it from an exact saved answer.
+  never_infer?: boolean;
+  // F346 — required and not confidently answered. The apply gate blocks
+  // while any of these are true.
+  needs_user?: boolean;
+  // "fallback" means we guessed the form rather than reading it.
+  extraction_mode?: "extracted" | "fallback";
+  // F350 — non-empty when several fields are alternatives satisfying one
+  // ATS question (Greenhouse "Resume/CV" -> resume | resume_text).
+  alternative_group?: string;
+}
+
+export interface BlockingGap {
+  field_key: string;
+  label: string;
+  reason: string;
 }
 
 export interface JobQuestionsPreview {
@@ -1115,6 +1148,26 @@ export interface JobQuestionsPreview {
     high_confidence: number;
     new_entries: number;
   };
+  // F346 — everything the UI needs to explain a refusal.
+  schema?: {
+    extraction_mode: "extracted" | "fallback";
+    platform: string;
+    supported: boolean;
+  };
+  blocking?: BlockingGap[];
+  safe_to_auto_submit?: boolean;
+}
+
+// F347 — what the apply gate recorded on an application it refused.
+// Lives on Application.platform_response.
+export interface ApplyGateResult {
+  gate?: string;
+  reason?: string;
+  blocking?: BlockingGap[];
+  checked_at?: string;
+  error?: string;
+  detected_issues?: string[];
+  unplaceable_fields?: string[];
 }
 
 // Feedback
