@@ -15,6 +15,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Lever's apply page gates plain scripted clients on User-Agent.
+_BROWSER_UA = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+}
+
 # Platforms with a real question extractor below. Everything else falls
 # back to `_STANDARD_FIELDS`, which is a *guess* at the form, not the
 # form. Callers must branch on this rather than assume the returned
@@ -26,7 +34,7 @@ logger = logging.getLogger(__name__)
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee"}
+    {"greenhouse", "recruitee", "lever"}
 )
 
 
@@ -68,8 +76,9 @@ def fetch_application_questions(
     """
     fetchers = {
         "greenhouse": _fetch_greenhouse_questions,
-        # F357 — lever and ashby are deliberately NOT wired. See the
-        # note on SUPPORTED_QUESTION_PLATFORMS.
+        "lever": _fetch_lever_questions,
+        # F357 — ashby is deliberately NOT wired; its application-form
+        # endpoint needs auth we do not hold (401 on every public board).
         "recruitee": _fetch_recruitee_questions,
     }
 
@@ -211,37 +220,108 @@ _LEVER_STANDARD_FIELDS: list[dict[str, Any]] = [
 
 
 def _fetch_lever_questions(posting_id: str, slug: str) -> list[dict[str, Any]]:
-    """Deliberately returns nothing. See F357.
+    """Read Lever's real application form.
 
-    The previous implementation did NOT read Lever's application form —
-    Lever's public postings API doesn't expose one. It returned a
-    hardcoded seven-field template and then invented questions from the
-    job description: every entry in ``lists`` became a form field, and
-    any line in ``additionalPlain`` ending in "?" became one too.
+    F358. The previous implementation (removed in F357) never read a
+    form at all — it returned a template and turned job-description
+    headings into questions. Lever's postings API genuinely doesn't
+    expose the form, but the apply *page* is server-rendered: a plain
+    GET of ``/{slug}/{id}/apply`` returns the complete markup, so this
+    needs no browser.
 
-    Verified against a live board (matchgroup): ``lists`` holds the JD's
-    own sections, so the "questions" produced for a real posting were
+    Every field lives in an ``<li class="application-question">`` (or
+    ``application-field``) carrying a ``.application-label`` and one or
+    more inputs. Three families matter:
 
-        key_responsibilities      'Key Responsibilities'
-        required_qualifications   'Required Qualifications'
-        work_arrangement          'Work Arrangement'
+    * fixed identity — ``name``, ``email``, ``phone``, ``location``,
+      ``org``, ``urls[LinkedIn]`` and friends, ``resume`` (file)
+    * custom questions — ``cards[<uuid>][...]``, rendered as radios,
+      checkboxes or textareas
+    * EEO surveys — ``surveysResponses[<uuid>]``
 
-    — job description headings, presented to the user as things to
-    answer, while the form's actual questions were never read. All of it
-    was stamped ``extraction_mode="extracted"``, the trust level the
-    F347 apply gate requires before it will submit unattended.
-
-    That is precisely the failure the gate exists to prevent, hiding
-    inside a platform we listed as supported, and worse than an honest
-    fallback because it was labelled as real extraction.
-
-    Returning nothing makes the dispatcher fall back and mark the schema
-    ``fallback``, so the gate refuses to auto-submit Lever and routes it
-    to the review queue instead. Reading Lever properly means scraping
-    the apply page's DOM — worth doing, but as a real extractor, not as
-    a guess wearing an extractor's label.
+    The field_key IS the input's ``name``, so the schema we show and the
+    DOM a submitter would fill stay keyed identically.
     """
-    return []
+    from bs4 import BeautifulSoup
+
+    url = f"https://jobs.lever.co/{slug}/{posting_id}/apply"
+    with httpx.Client(timeout=20, follow_redirects=True, headers=_BROWSER_UA) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        html = resp.text
+
+    soup = BeautifulSoup(html, "html.parser")
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for block in soup.select("li.application-question, li.application-field"):
+        label_el = block.select_one(".application-label")
+        label = " ".join((label_el.get_text(" ") if label_el else "").split())
+        # Lever marks required with a "✱" glyph inside the label.
+        required = "✱" in label or block.select_one("[required]") is not None
+        label = label.replace("✱", "").strip()
+
+        inputs = [
+            el for el in block.select("input, textarea, select")
+            if (el.get("type") or "").lower() != "hidden"
+        ]
+        if not inputs:
+            continue
+
+        by_name: dict[str, list] = {}
+        for el in inputs:
+            name = el.get("name")
+            if name:
+                by_name.setdefault(name, []).append(el)
+
+        for name, els in by_name.items():
+            if name in seen:
+                continue
+            seen.add(name)
+            first = els[0]
+            tag = first.name.lower()
+            itype = (first.get("type") or "").lower()
+
+            if tag == "textarea":
+                ftype = "textarea"
+            elif tag == "select":
+                ftype = "select"
+            elif itype == "file":
+                ftype = "file"
+            elif itype == "radio":
+                ftype = "select"
+            elif itype == "checkbox":
+                # One checkbox is a yes/no; several sharing a name is a
+                # pick-many list (Lever's pronouns block, for example).
+                ftype = "multi_select" if len(els) > 1 else "boolean"
+            else:
+                ftype = "text"
+
+            options: list[str] = []
+            if itype in ("radio", "checkbox") and len(els) > 1:
+                for el in els:
+                    # The visible choice text is the input's own label.
+                    holder = el.find_parent("label") or el.parent
+                    text = " ".join((holder.get_text(" ") if holder else "").split())
+                    if text:
+                        options.append(text)
+            elif tag == "select":
+                options = [
+                    " ".join(o.get_text(" ").split())
+                    for o in first.select("option")
+                    if o.get_text(strip=True)
+                ]
+
+            results.append({
+                "field_key": name,
+                "label": label or name,
+                "field_type": ftype,
+                "required": bool(required),
+                "options": options,
+                "description": "",
+            })
+
+    return results
 
 
 # ---------------------------------------------------------------------------

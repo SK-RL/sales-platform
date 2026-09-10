@@ -27,7 +27,10 @@ requires auth we don't hold — HTTP 401 on every public board tried
 honestly (the dispatcher marks the fallback) but listing it as supported
 was still misleading.
 
-Real extraction coverage is therefore Greenhouse and Recruitee.
+Real extraction coverage after this change was Greenhouse and
+Recruitee. F358 then gave Lever a genuine extractor (it reads the
+server-rendered apply page), so it is legitimately supported again — the
+tests below assert the RULE, not that snapshot.
 
 The same investigation exposed a second bug: `extraction_mode` is
 derived on read from the platform, so a fetch that failed and was cached
@@ -36,44 +39,75 @@ guessed form wearing an extracted label. Fallback schemas are no longer
 cached at all.
 """
 
-import httpx
-import pytest
-
-from app.fetchers.questions import (
-    SUPPORTED_QUESTION_PLATFORMS,
-    _fetch_lever_questions,
-    fetch_application_questions,
-)
+from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS
 
 
 class TestOnlyRealExtractorsAreClaimed:
-    def test_supported_is_exactly_the_platforms_that_work(self):
-        assert SUPPORTED_QUESTION_PLATFORMS == frozenset({"greenhouse", "recruitee"})
+    """The durable rule, not a snapshot of the platform list: a platform
+    may only appear in SUPPORTED_QUESTION_PLATFORMS if something in the
+    dispatcher actually reads its form.
 
-    @pytest.mark.parametrize("platform", ["lever", "ashby"])
-    def test_unproven_platforms_are_not_claimed(self, platform):
-        assert platform not in SUPPORTED_QUESTION_PLATFORMS
+    (F358 subsequently gave Lever a real extractor — it reads the
+    server-rendered apply page — so it is legitimately back on the list.
+    Ashby is not: its form endpoint 401s on every public board.)
+    """
+
+    def test_ashby_is_not_claimed(self):
+        assert "ashby" not in SUPPORTED_QUESTION_PLATFORMS
+
+    def test_every_supported_platform_has_a_wired_extractor(self):
+        import inspect
+
+        from app.fetchers import questions as q
+
+        src = inspect.getsource(q.fetch_application_questions)
+        for platform in SUPPORTED_QUESTION_PLATFORMS:
+            assert f'"{platform}":' in src, (
+                f"{platform} is claimed as supported but is not wired into "
+                "the dispatcher, so it can never be extracted"
+            )
+
+    def test_no_platform_is_wired_without_being_claimed(self):
+        """The inverse leak: a wired extractor whose platform isn't in
+        SUPPORTED gets stamped `extracted` by the dispatcher but reads
+        back as `fallback` from cache."""
+        import inspect
+        import re
+
+        from app.fetchers import questions as q
+
+        src = inspect.getsource(q.fetch_application_questions)
+        block = src[src.index("fetchers = {"):src.index("}", src.index("fetchers = {"))]
+        wired = set(re.findall(r'"([a-z_]+)":', block))
+        assert wired <= set(SUPPORTED_QUESTION_PLATFORMS), wired - set(SUPPORTED_QUESTION_PLATFORMS)
 
 
 class TestLeverNoLongerFabricates:
-    def test_returns_nothing_rather_than_inventing_questions(self):
-        assert _fetch_lever_questions("some-id", "matchgroup") == []
-
-    def test_dispatcher_marks_lever_as_a_guess(self):
-        fields = fetch_application_questions("lever", "id", "matchgroup")
-        assert fields, "still returns the standard set so the UI has something"
-        assert all(f["extraction_mode"] == "fallback" for f in fields)
+    """Whatever Lever's extractor does, it must never manufacture a
+    question out of job-description prose."""
 
     def test_no_jd_heading_ever_becomes_a_field(self):
         """The concrete regression: 'Key Responsibilities' was a form
         field on every Lever posting."""
-        keys = {f["field_key"] for f in fetch_application_questions("lever", "id", "x")}
-        for invented in ("key_responsibilities", "required_qualifications", "work_arrangement"):
-            assert invented not in keys
+        import inspect
 
-    def test_lever_cannot_be_auto_submitted(self):
-        """A fallback schema fails the F347 gate, so Lever routes to the
-        review queue instead of being submitted against invented fields."""
+        from app.fetchers import questions as q
+
+        src = inspect.getsource(q._fetch_lever_questions)
+        # The fabrication read `lists` and split `additionalPlain` on "?".
+        assert "additionalPlain" not in src
+        assert 'data.get("lists"' not in src
+
+    def test_extraction_is_from_the_apply_page_not_the_posting_api(self):
+        import inspect
+
+        from app.fetchers import questions as q
+
+        src = inspect.getsource(q._fetch_lever_questions)
+        assert "/apply" in src
+
+    def test_lever_still_has_no_submitter(self):
+        """Extraction and submission are separate capabilities."""
         from app.services.submitters import auto_submittable_platforms
 
         assert "lever" not in auto_submittable_platforms()
