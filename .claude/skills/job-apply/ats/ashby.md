@@ -9,3 +9,38 @@
 - Custom questions are labeled; selects are custom dropdowns (click,
   then click option).
 - Submit: button "Submit Application".
+
+## Filling — typed input only (verified live, Supabase)
+**`form_input` does not work on Ashby.** It sets the DOM value and the
+field looks correct on screen and in `read_page`, but Ashby's internal
+state never sees it and the submit is rejected with
+"Missing entry for required field: …" for fields that visibly contain
+data. Greenhouse tolerates `form_input` (it keeps React's `_valueTracker`
+in sync); Ashby does not.
+
+So on Ashby: click the field, then `type`. Use `cmd+a` first when
+replacing an existing value. This was caught on a real submit, not in
+review — the first Supabase attempt failed on Email, Country of
+Residence, Github Profile and Linkedin, all of which were displaying
+their values at the time.
+
+Common Supabase/Ashby field set (ids are stable across their postings):
+`_systemfield_name`, `_systemfield_email`, `_systemfield_resume` (file),
+then per-board custom ids for Passport Country, Country of Residence,
+"Are you over the age of 18?" (a Yes/No button pair, not a select),
+Github Profile, Linkedin, and free-text questions.
+
+Two file inputs exist on the page: an "Autofill from resume" one at the
+top and the real `_systemfield_resume`. Upload to the latter — `find`
+returns both, so pick by label, and never trust the first match.
+
+## Confirming a submit
+Success is a green banner reading exactly "Your application was
+successfully submitted", **and** the form disappearing, **and** zero
+`Missing entry for required field` strings. Do not match on loose words
+like "thank" — Supabase renders an "application limits" notice containing
+"Thanks for your interest" on the *unsubmitted* page, which reads as
+success to a naive check and did exactly that once.
+
+Supabase caps applications at **3 per 60-day period** per candidate, so
+slots there are worth spending deliberately.
