@@ -129,6 +129,14 @@ if SCAN_MODE == "aggressive":
         # anything already in_flight. Every 15 min: the window matters
         # because a stuck row is a user unable to retry their own
         # application.
+        # F360 — server-side auto-apply sweep. Hourly, not continuous:
+        # the daily cap is the real throttle, and an hourly cadence
+        # means a user who turns it off mid-day stops within the hour.
+        # No-op for everyone who hasn't opted in (default off).
+        "sweep_auto_apply": {
+            "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
+            "schedule": crontab(minute=20),
+        },
         "sweep_stuck_in_flight": {
             "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
             "schedule": crontab(minute="*/15"),
@@ -294,6 +302,14 @@ else:
         # anything already in_flight. Every 15 min: the window matters
         # because a stuck row is a user unable to retry their own
         # application.
+        # F360 — server-side auto-apply sweep. Hourly, not continuous:
+        # the daily cap is the real throttle, and an hourly cadence
+        # means a user who turns it off mid-day stops within the hour.
+        # No-op for everyone who hasn't opted in (default off).
+        "sweep_auto_apply": {
+            "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
+            "schedule": crontab(minute=20),
+        },
         "sweep_stuck_in_flight": {
             "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
             "schedule": crontab(minute="*/15"),
