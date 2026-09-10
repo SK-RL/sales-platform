@@ -23,17 +23,45 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("JWT_SECRET", "pytest-routes")
 
 _TESTS = pathlib.Path(__file__).parent
-_DIRECT = re.compile(r"\bapi_router\.routes\b")
+# Both aggregators are lazy on FastAPI >= 0.141, so neither may be
+# enumerated. The app-level form was added after a test reading the
+# mounted app's route list passed locally and went red on main — the
+# guard only covered the api_router form.
+#
+# Matched with the AST rather than a regex: the first attempt used a
+# pattern and immediately flagged its own explanatory docstring, because
+# a regex can't tell code from prose. Walking the tree can.
+_FORBIDDEN_OWNERS = frozenset({"api_router", "app", "fastapi_app"})
+
+
+def _enumerates_routes(source: str) -> bool:
+    """True when the module reads ``<aggregator>.routes`` in real code."""
+    import ast
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "routes"
+            and isinstance(node.value, ast.Name)
+            and node.value.id in _FORBIDDEN_OWNERS
+        ):
+            return True
+    return False
 
 
 def test_no_test_enumerates_api_router_routes_directly():
     offenders = sorted(
         p.name for p in _TESTS.glob("test_*.py")
         if p.name != pathlib.Path(__file__).name
-        and _DIRECT.search(p.read_text(encoding="utf-8"))
+        and _enumerates_routes(p.read_text(encoding="utf-8"))
     )
     assert offenders == [], (
-        f"use tests._routes.registered_routes() instead of api_router.routes in: {offenders}"
+        "use tests._routes.registered_routes() instead of enumerating a "
+        f"router/app .routes list in: {offenders}"
     )
 
 

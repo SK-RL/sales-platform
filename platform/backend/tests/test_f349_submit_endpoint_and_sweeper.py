@@ -16,7 +16,6 @@ from app.api.v1.applications import (
     SubmitApplicationRequest,
     VALID_TRANSITIONS,
 )
-from app.main import app as fastapi_app
 from app.workers.celery_app import celery_app
 from app.workers.tasks import submit_application_task, sweep_stuck_in_flight
 from app.workers.tasks.apply_task import (
@@ -28,16 +27,28 @@ from app.workers.tasks.apply_task import (
 
 
 class TestRouteIsWired:
+    """Enumerated via tests._routes, NOT app.routes.
+
+    FastAPI >= 0.141 makes include_router lazy at both levels — the
+    mounted app lists only its own ~9 routes and resolves /api/v1/* at
+    request time. Reading app.routes passes locally on an older pin and
+    yields an empty set in CI, which is exactly how this test first went
+    red on main.
+    """
+
     def test_submit_route_exists(self):
-        paths = {getattr(r, "path", "") for r in fastapi_app.routes}
-        assert "/api/v1/applications/{app_id}/submit" in paths
+        from tests._routes import registered_paths
+
+        assert "/api/v1/applications/{app_id}/submit" in registered_paths()
 
     def test_route_is_post_only(self):
-        route = next(
-            r for r in fastapi_app.routes
-            if getattr(r, "path", "") == "/api/v1/applications/{app_id}/submit"
-        )
-        assert route.methods == {"POST"}
+        from tests._routes import registered_routes
+
+        methods = {
+            m for m, p in registered_routes()
+            if p == "/api/v1/applications/{app_id}/submit"
+        }
+        assert methods == {"POST"}
 
 
 class TestRequestSchema:
