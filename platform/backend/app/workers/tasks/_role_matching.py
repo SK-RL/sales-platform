@@ -1224,6 +1224,114 @@ DESCRIPTION_HYBRID_SIGNALS = (
 )
 
 
+# ── Body-scoped location refinement ────────────────────────────────
+#
+# The base classifier reads only ``location_raw`` + ``remote_scope``.
+# That is enough for boards that put the truth in the location field,
+# and wrong for the ones that do not. Measured on a live application
+# run, 9 of 11 high-relevance candidates were geographically impossible
+# for an India-based candidate and EVERY one was stored as worldwide or
+# unclassified:
+#
+#   TensorWave  location "Remote"  → body: "authorization to work in
+#                                    the United States"
+#   Cortex      location "Remote"  → body: "remote and welcome
+#                                    candidates from anywhere in the US"
+#   Zscaler     location empty     → body: "This is a Hybrid role",
+#                                    #LI-HYBRID
+#
+# A job that requires in-country work authorisation is not worldwide
+# remote, however its location field is worded. These two refinements
+# read the description for exactly those signals, in the same shape as
+# ``refine_uae_hybrid`` above, and only ever NARROW a classification —
+# they never widen one, so a correctly-restricted job cannot be
+# promoted to worldwide by a stray phrase.
+
+# "must be authorised to work in <country>" — the phrase sits in legal
+# boilerplate near the bottom of a posting, far from the location field.
+WORK_AUTH_PATTERNS: tuple[str, ...] = (
+    "authorization to work in the united states",
+    "authorisation to work in the united states",
+    "authorized to work in the united states",
+    "authorised to work in the united states",
+    "legally authorized to work in the us",
+    "legally authorised to work in the us",
+    "must be authorized to work in the united states",
+    "eligible to work in the united states",
+    "us work authorization",
+    "u.s. work authorization",
+    "authorized to work in the u.s.",
+)
+
+# "remote, but only from here" — the restriction is in prose, and the
+# location field just says "Remote".
+BODY_US_ONLY_PATTERNS: tuple[str, ...] = (
+    "anywhere in the us",
+    "anywhere in the united states",
+    "within the united states",
+    "us-based candidates only",
+    "must reside in the united states",
+    "must be located in the united states",
+    "open to candidates in the united states",
+)
+
+# Explicit office expectation stated only in the body.
+BODY_HYBRID_PATTERNS: tuple[str, ...] = (
+    "this is a hybrid role",
+    "#li-hybrid",
+    "hybrid role, reporting",
+    "days per week in the office",
+    "days a week in the office",
+)
+
+
+def refine_from_description(
+    policy: str, countries: list[str], description: str
+) -> tuple[str, list[str]]:
+    """Narrow a remote-policy classification using the job body.
+
+    Runs after ``classify_remote_policy`` and only ever tightens:
+
+      * a US work-authorisation requirement, or body text scoping the
+        role to the United States, makes it ``country_restricted`` /
+        ``["US"]`` however the location field was worded;
+      * an explicit in-body hybrid statement makes it ``hybrid``.
+
+    Deliberately one-directional. ``onsite`` is left alone (it is
+    already the most restrictive), and nothing here can turn a
+    restricted job into a worldwide one — the failure mode we are
+    fixing is over-permissive classification, and a refinement that
+    could widen would reintroduce it from the other side.
+
+    A no-op when there is no description or no signal, so jobs from
+    boards that never expose a body are unaffected.
+    """
+    if not description or policy == "onsite":
+        return policy, list(countries)
+
+    body = _normalize(description)
+
+    # US work authorisation, or US-scoped prose. Either means the role
+    # is not open worldwide, whatever the location field claimed.
+    if any(sig in body for sig in WORK_AUTH_PATTERNS) or any(
+        sig in body for sig in BODY_US_ONLY_PATTERNS
+    ):
+        # Keep an existing narrower answer rather than overwriting a
+        # correct non-US restriction with US (a posting can mention US
+        # authorisation while being scoped elsewhere).
+        if policy == "country_restricted" and countries and "US" not in countries:
+            return policy, list(countries)
+        return "country_restricted", ["US"]
+
+    # Office expectation stated only in the body.
+    if policy in ("worldwide", "unknown") and any(
+        sig in body for sig in BODY_HYBRID_PATTERNS
+    ):
+        return "hybrid", _detect_country_codes(body)
+
+    return policy, list(countries)
+
+
 def refine_uae_hybrid(
     policy: str, countries: list[str], description: str
 ) -> tuple[str, list[str]]:

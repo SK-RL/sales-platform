@@ -359,6 +359,7 @@ def reclassify_and_rescore():
                 from app.workers.tasks._role_matching import (
                     classify_remote_policy,
                     refine_uae_hybrid,
+                    refine_from_description,
                 )
                 from app.utils.remote_policy import legacy_bucket_for, normalise_countries
 
@@ -366,6 +367,13 @@ def reclassify_and_rescore():
                     job.location_raw or "", job.remote_scope or ""
                 )
                 new_policy, new_policy_countries = refine_uae_hybrid(
+                    new_policy, new_policy_countries, desc_map.get(job.id, "")
+                )
+                # Body-scoped narrowing. This is the path that re-heals
+                # the existing corpus: jobs stored as worldwide whose
+                # description requires in-country work authorisation get
+                # corrected on the next maintenance pass.
+                new_policy, new_policy_countries = refine_from_description(
                     new_policy, new_policy_countries, desc_map.get(job.id, "")
                 )
                 new_policy_countries = normalise_countries(new_policy_countries)

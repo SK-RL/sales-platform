@@ -426,6 +426,7 @@ def _upsert_job(
     from app.workers.tasks._role_matching import (
         classify_remote_policy,
         refine_uae_hybrid,
+        refine_from_description,
     )
     from app.utils.remote_policy import legacy_bucket_for, normalise_countries
     # Extract the description up-front: the UAE hybrid signal lives in
@@ -442,6 +443,13 @@ def _upsert_job(
         location_raw, remote_scope
     )
     remote_policy, remote_policy_countries = refine_uae_hybrid(
+        remote_policy, remote_policy_countries, desc_text
+    )
+    # Narrow using the body: a US work-authorisation requirement or
+    # US-scoped prose means the role is not worldwide, however the
+    # location field was worded. Only ever tightens — see
+    # refine_from_description.
+    remote_policy, remote_policy_countries = refine_from_description(
         remote_policy, remote_policy_countries, desc_text
     )
     remote_policy_countries = normalise_countries(remote_policy_countries)
