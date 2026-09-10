@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 73ccab5 · sha-73ccab5
+fix(jobs): reopening a rejected job 500'd on the F316 dedupe index
+
+
 ## 2026-09-10 · 3c4fe78 · sha-3c4fe78
 Merge: narrow remote_policy using the job body
 
