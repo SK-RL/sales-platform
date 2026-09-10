@@ -79,3 +79,21 @@ Acknowledgment" (interview recording + Metaview/BrightHire AI
 summarization) sits above Submit. This is *their* use of AI on the
 interview, not a restriction on the applicant — not an AI-authorship
 prohibition. Standing answer: agree.
+
+**Conditional fields silently clear their parent (Camunda, 2026-09-10).**
+Camunda's form asks "Are you legally eligible to work in the country
+where you're planning to work from?" and then, *conditional on it*, "select
+the status that allows you to work and live in that Country". Answering
+the child re-rendered the parent and dropped its value — the Yes button
+still looked selected, but submit reported it missing. Three attempts.
+
+Two rules follow:
+- Set a conditional parent **last**, after every dependent field.
+- When a Yes/No looks selected but submit says it is missing, click the
+  *other* option and then back. Re-clicking the already-highlighted one
+  is a no-op and changes nothing.
+
+Never batch a click on a conditional field with the next click: the
+layout shifts underneath and the following coordinate lands somewhere
+else. One click, one screenshot. On this form a batched pair set the
+answer to **No** — the opposite of the truth — before it was caught.
