@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-10 · 7752e95 · sha-7752e95
+fix(pipeline): label legacy prepared_answers rows in the card panel
+
+
 ## 2026-09-10 · 0a0e673 · sha-0a0e673
 Merge: render submitted answers in pipeline card panel
 
