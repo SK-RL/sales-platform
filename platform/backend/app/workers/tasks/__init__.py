@@ -11,7 +11,7 @@ from app.workers.tasks.enrichment_task import enrich_company, enrich_target_comp
 from app.workers.tasks.resume_score_task import score_resume_task
 from app.workers.tasks.feedback_task import process_review_feedback_task, decay_scoring_signals
 from app.workers.tasks.question_collection_task import collect_questions
-from app.workers.tasks.apply_task import submit_application_task
+from app.workers.tasks.apply_task import submit_application_task, sweep_stuck_in_flight
 # F356 — these three were beat-scheduled in celery_app.py but never
 # imported here, so their @celery_app.task decorators never ran and
 # the worker rejected every firing with "Received unregistered task"
@@ -38,6 +38,7 @@ __all__ = [
     "decay_scoring_signals",
     "collect_questions",
     "submit_application_task",
+    "sweep_stuck_in_flight",
     "enrich_target_companies_batch",
     "verify_stale_emails",
     "reclassify_and_rescore",

@@ -1856,6 +1856,77 @@ async def get_application_submission(
     )
 
 
+class SubmitApplicationRequest(BaseModel):
+    """Trigger server-side submission of a prepared application.
+
+    ``dry_run`` fills every field in the real form and stops immediately
+    before the submit click. It is the only safe way to exercise an
+    adapter against a live posting, and it does NOT move the application
+    to ``submitted`` — a dry run proves the form can be filled, it did
+    not apply to anything.
+    """
+
+    dry_run: bool = False
+    model_config = ConfigDict(extra="forbid")
+
+
+class SubmitApplicationResponse(BaseModel):
+    task_id: str
+    status: str
+    application_id: str
+    dry_run: bool
+
+
+@router.post("/{app_id}/submit", response_model=SubmitApplicationResponse)
+async def submit_application(
+    app_id: UUID,
+    body: SubmitApplicationRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue an application for unattended submission (F347).
+
+    This endpoint only *enqueues*. Every gate — extracted-not-guessed
+    schema, adapter exists, all required fields confidently resolved,
+    no CAPTCHA/login wall — runs inside the task, because the answers
+    and the form must be re-read at submit time rather than trusted from
+    whenever the user last previewed them. An application that fails a
+    gate comes back as ``needs_user`` with a per-field reason, not as an
+    error here.
+    """
+    app_row = (await db.execute(
+        select(Application).where(
+            Application.id == app_id,
+            Application.user_id == user.id,
+        )
+    )).scalar_one_or_none()
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    # Re-submitting something already sent would create a duplicate
+    # application at the employer, which we cannot undo.
+    if app_row.status in ("submitted", "applied", "interview", "offer"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Application is already {app_row.status} — refusing to submit it again",
+        )
+    if app_row.status == "in_flight":
+        raise HTTPException(
+            status_code=409,
+            detail="Submission already in progress for this application",
+        )
+
+    from app.workers.tasks.apply_task import submit_application_task
+
+    task = submit_application_task.delay(str(app_id), dry_run=body.dry_run)
+    return SubmitApplicationResponse(
+        task_id=task.id,
+        status="queued",
+        application_id=str(app_id),
+        dry_run=body.dry_run,
+    )
+
+
 @router.post("/{app_id}/promote-answer", response_model=PromoteAnswerResponse)
 async def promote_answer(
     app_id: UUID,

@@ -301,3 +301,60 @@ def _materialise_resume(resume) -> str | None:
             pass
         return None
     return path
+
+
+# Anything older than this that is still `in_flight` had its worker die
+# mid-submit. Generous, because a Workday form with a slow upload can
+# legitimately take minutes; the point is to catch dead rows, not slow
+# ones.
+STUCK_IN_FLIGHT_MINUTES = 30
+
+
+@celery_app.task
+def sweep_stuck_in_flight() -> dict:
+    """Rescue applications abandoned mid-submit.
+
+    ``in_flight`` is meant to be transient — the task always moves it on.
+    But a worker OOM, a container restart or a lost DB connection between
+    the status flip and the submitter's return leaves the row there
+    forever, and the F347 endpoint refuses to re-submit anything already
+    ``in_flight``. Without this sweeper that application is stuck with no
+    way for the user to retry it.
+
+    We move them to ``failed`` rather than retrying automatically: we do
+    not know how far the previous attempt got. If it died *after* the
+    submit click, the employer may already have the application, and
+    silently re-sending would duplicate it. ``failed`` puts the decision
+    in front of the user, who can re-submit or mark it applied by hand.
+    """
+    from datetime import timedelta
+
+    from app.models.application import Application
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=STUCK_IN_FLIGHT_MINUTES)
+    session = SyncSession()
+    try:
+        stuck = session.execute(
+            select(Application).where(
+                Application.status == STATUS_IN_FLIGHT,
+                Application.updated_at < cutoff,
+            )
+        ).scalars().all()
+
+        for row in stuck:
+            row.status = STATUS_FAILED
+            row.platform_response = {
+                "error": (
+                    "submission was interrupted — the worker stopped before "
+                    "the ATS confirmed. We don't know whether it went "
+                    "through, so check the employer's site before retrying."
+                ),
+                "swept_at": datetime.now(timezone.utc).isoformat(),
+                "stuck_for_minutes": STUCK_IN_FLIGHT_MINUTES,
+            }
+        if stuck:
+            session.commit()
+            logger.warning("apply_task: swept %d stuck in_flight application(s)", len(stuck))
+        return {"swept": len(stuck)}
+    finally:
+        session.close()
