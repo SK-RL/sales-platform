@@ -266,3 +266,13 @@ class TestRepostLinks:
         src = inspect.getsource(applications.application_from_url)
         assert "asyncio.wait_for" in src and "REPOST_RESOLVE_BUDGET_S" in src and "504" in src
         assert applications.REPOST_RESOLVE_BUDGET_S < 60
+
+
+    def test_unknown_himalayas_link_is_refused_plainly(self, wired):
+        """Seen on production: a made-up Himalayas slug was told the posting
+        'isn't on the board any more' — its API returns the global feed for
+        an unknown company, so that wording was false."""
+        wired["fetch"] = lambda p, s: [{"external_id": "himalayas-other", "title": "Other", "url": "https://himalayas.app/companies/x/jobs/other"}]
+        with pytest.raises(OwnLinkError) as e:
+            resolve_job_from_url("https://himalayas.app/companies/no-such-company/jobs/nothing-here")
+        assert e.value.status == 404 and "Himalayas" in e.value.detail and "any more" not in e.value.detail

@@ -199,6 +199,11 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
             raise OwnLinkError(502, f"Couldn't read the {parsed.platform} board '{parsed.slug}' right now ({type(exc).__name__}).")
 
         raw = next((r for r in raw_jobs if _matches(r, parsed)), None)
+        if raw is None and parsed.platform == "himalayas":
+            # Its API ignores an unknown company slug and returns the
+            # global feed, so "the board has postings but not this one"
+            # would be a lie here.
+            raise OwnLinkError(404, "Couldn't find that job on Himalayas — check the link, or the posting may have been removed.")
         if raw is None:
             raise OwnLinkError(
                 404,
