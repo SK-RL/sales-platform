@@ -1165,6 +1165,8 @@ export interface JobQuestionsPreview {
 // F347 — what the apply gate recorded on an application it refused.
 // Lives on Application.platform_response.
 export interface ApplyGateResult {
+  // "blocked" | "passed" (a dry run that placed everything it needed)
+  // | "submitted" | "failed"
   gate?: string;
   reason?: string;
   blocking?: BlockingGap[];
@@ -1172,6 +1174,13 @@ export interface ApplyGateResult {
   error?: string;
   detected_issues?: string[];
   unplaceable_fields?: string[];
+  // F373 — a passed dry run reports what it placed.
+  dry_run?: boolean;
+  placed?: number;
+  field_count?: number;
+  unplaceable?: string[];
+  issues?: string[];
+  confirmation?: string | null;
 }
 
 // Feedback

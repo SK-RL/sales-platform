@@ -251,6 +251,29 @@ describe("human wall (F368)", () => {
   });
 });
 
+describe("dry run result (F373)", () => {
+  it("shows what a passed dry run placed, and that nothing was sent", async () => {
+    appDetail = {
+      id: "a1", status: "prepared",
+      platform_response: { gate: "passed", dry_run: true, placed: 7, field_count: 8, unplaceable: ["cover_letter_file"] },
+    };
+    questions = {
+      questions: [], coverage: { total: 0, answered: 0, high_confidence: 0, new_entries: 0 },
+      schema: { extraction_mode: "extracted", platform: "ashby", supported: true, wall: null },
+      blocking: [], safe_to_auto_submit: true,
+    };
+    renderPage();
+    expect(await screen.findByText(/Dry run passed — 7 of 8 fields/i)).toBeTruthy();
+    expect(screen.getByText(/Nothing was sent/i)).toBeTruthy();
+    expect(screen.getByText(/Skipped \(optional\): cover_letter_file/i)).toBeTruthy();
+    // and it is not mistaken for a blocker
+    expect(screen.queryByText(/needs your input/i)).toBeNull();
+    await waitFor(() => {
+      expect((screen.getByText("Submit application") as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+});
+
 describe("clean application", () => {
   beforeEach(() => {
     questions = {

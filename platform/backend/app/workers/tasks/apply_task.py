@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Statuses this task owns. `needs_user` and `in_flight` are new in F347
 # and deliberately mirror the review-queue vocabulary the UI already
 # uses elsewhere.
+STATUS_PREPARED = "prepared"
 STATUS_IN_FLIGHT = "in_flight"
 STATUS_NEEDS_USER = "needs_user"
 STATUS_SUBMITTED = "submitted"
@@ -262,12 +263,32 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
             )
         )
         # A dry run proves the form can be filled; it did not apply to
-        # anything, so the application must not claim it did.
+        # anything, so the application must not claim it did. F373 — nor
+        # may it stay `in_flight`: that left every passed dry run for the
+        # stuck-row sweeper to mark failed 30 minutes later. It goes back
+        # to `prepared`, with the result on platform_response so the
+        # review screen can say "dry run passed".
         if not dry_run:
             app_row.status = STATUS_SUBMITTED
             app_row.submitted_at = now
             app_row.apply_method = "api_submit"
             app_row.submission_source = "routine"
+            app_row.platform_response = {
+                "gate": "submitted",
+                "confirmation": outcome.confirmation_text,
+                "checked_at": now.isoformat(),
+            }
+        else:
+            app_row.status = STATUS_PREPARED
+            app_row.platform_response = {
+                "gate": "passed",
+                "dry_run": True,
+                "placed": len(fields) - len(outcome.unplaceable_fields or []),
+                "field_count": len(fields),
+                "unplaceable": list(outcome.unplaceable_fields or []),
+                "issues": [i for i in (outcome.detected_issues or []) if i != "dry_run"],
+                "checked_at": now.isoformat(),
+            }
         session.commit()
 
         logger.info(

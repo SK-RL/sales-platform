@@ -245,6 +245,26 @@ class TestDryRun:
         run(dry_run=True)
         assert FakeSubmitter.calls[0]["dry_run"] is True
 
+    def test_passed_dry_run_goes_back_to_prepared_and_says_so(self, wired):
+        """F373 — it used to stay in_flight, so the stuck-row sweeper
+        marked every passed dry run failed half an hour later."""
+        from app.models.application import Application
+
+        run(dry_run=True)
+        app_row = wired["rows"][Application.__name__][0]
+        assert app_row.status == "prepared"
+        assert app_row.platform_response["gate"] == "passed"
+        assert app_row.platform_response["dry_run"] is True
+        assert app_row.platform_response["field_count"] >= 1
+
+    def test_real_submission_records_the_confirmation(self, wired):
+        from app.models.application import Application
+
+        run(dry_run=False)
+        app_row = wired["rows"][Application.__name__][0]
+        assert app_row.status == "submitted"
+        assert app_row.platform_response["gate"] == "submitted"
+
 
 class TestHousekeeping:
     def test_missing_application_is_not_an_error(self, wired):
