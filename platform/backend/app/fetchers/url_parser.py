@@ -148,6 +148,15 @@ _URL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "jobvite",
     ),
+    # Breezy — {slug}.breezy.hr/p/{id}-{friendly-slug}; the id is the hex
+    # segment before the first dash (F377).
+    (
+        re.compile(
+            r"^https?://(?P<slug>[a-z0-9-]+)\.breezy\.hr/p/(?P<external_id>[0-9a-f]+)(?:-[^/?#]*)?",
+            re.I,
+        ),
+        "breezy",
+    ),
     # Recruitee — {slug}.recruitee.com/o/{id-or-slug}. The id segment
     # can mix digits + title slug — we take the trailing numeric id
     # when present, else the whole slug.

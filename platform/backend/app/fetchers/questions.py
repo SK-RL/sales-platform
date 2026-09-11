@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -134,6 +134,7 @@ def fetch_application_questions(
         "ashby": _fetch_ashby_questions,
         "bamboohr": _fetch_bamboohr_questions,
         "recruitee": _fetch_recruitee_questions,
+        "breezy": _fetch_breezy_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -910,3 +911,142 @@ def _fetch_bamboohr_questions(job_external_id: str, slug: str) -> list[dict[str,
         resp.raise_for_status()
         data = resp.json()
     return normalise_bamboohr_form((data.get("result") or data).get("formFields") or {})
+
+
+# ---------------------------------------------------------------------------
+# Breezy HR — F377, read from the rendered apply page
+# ---------------------------------------------------------------------------
+# Verified on vetsez.breezy.hr/p/{id}/apply. Angular form, no captcha, no
+# shadow DOM. Fixed fields have stable names (cName, cEmail, cPhoneNumber,
+# cSalary + an unnamed salary-period <select>, cResume, smsConsent,
+# ccpaAgreement). Custom questions are ``section_{id}_question_{n}`` whose
+# text is the <h3> inside the enclosing ``li.question``; EEO questions are
+# radio groups (race_ethnicity, gender, eeoc.veteran_status,
+# eeoc.disability_status) whose options are ``li.option label[for]``. A
+# honeypot text input (``hp_*``, inside ``.apply-field-extra``) must never
+# be filled — it is dropped here so no adapter can see it.
+
+_BREEZY_APPLY_URL = "{url}/apply"
+_BREEZY_FORM_READY = "input[name='cName']"
+
+_BREEZY_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const rows = [];
+  let lastH3 = '';
+  for (const e of document.querySelectorAll('form h3, form input, form textarea, form select')) {
+    if (e.tagName === 'H3') { lastH3 = norm((e.querySelector('span') || e).innerText); continue; }
+    if (e.type === 'hidden') continue;
+    const q = e.closest('li.question');
+    const qh = q ? q.querySelector('h3') : null;
+    const question = qh ? norm((qh.querySelector('span') || qh).innerText) : lastH3;
+    const required = !!(e.required || (q && q.querySelector('h3 .required')) || (qh === null && e.closest('.section') && /\*$/.test(lastH3)));
+    const own = e.labels && e.labels[0] ? norm(e.labels[0].innerText) : '';
+    const opts = e.tagName === 'SELECT' ? [...e.options].map(o => norm(o.textContent)).filter(Boolean) : [];
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name || '', id: e.id || '',
+                question: question.replace(/\*$/, '').trim(), option: own, options: opts, required,
+                honeypot: !!(e.closest('.apply-field-extra')) || /^hp_/.test(e.name || ''),
+                value: e.value || '' });
+  }
+  return rows;
+})()
+"""
+
+_BREEZY_FIXED: dict[str, tuple[str, str, str]] = {
+    "cName": ("name", "Full Name", "text"),
+    "cEmail": ("email", "Email Address", "text"),
+    "cPhoneNumber": ("phone", "Phone Number", "text"),
+    "cSalary": ("salary", "Desired Salary", "text"),
+    "cResume": ("resume", "Resume / CV", "file"),
+    "smsConsent": ("sms_consent", "Consent to SMS updates", "boolean"),
+    "ccpaAgreement": ("privacy_consent", "I've read the Privacy Notice and consent to the processing of my data", "boolean"),
+}
+
+
+def breezy_form_rows(job_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(
+                _BREEZY_APPLY_URL.format(url=job_url.rstrip("/")),
+                wait_until="domcontentloaded",
+                wait_for_selector=_BREEZY_FORM_READY,
+            )
+            return await session.eval_js(_BREEZY_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_breezy_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rows → our question schema (pure, testable)."""
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    groups: dict[str, dict[str, Any]] = {}
+    saw_salary = False
+
+    for r in rows:
+        if r.get("honeypot"):
+            continue
+        name, tag, typ = r.get("name") or "", r.get("tag"), (r.get("type") or "").lower()
+        question = r.get("question") or ""
+
+        if typ == "radio":
+            g = groups.get(name)
+            if g is None:
+                g = groups[name] = {"field_key": name, "label": question or name, "field_type": "select",
+                                    "required": bool(r.get("required")), "options": [], "description": ""}
+                results.append(g)
+            opt = r.get("option") or ""
+            if opt and opt not in g["options"]:
+                g["options"].append(opt)
+            continue
+
+        if name in _BREEZY_FIXED:
+            key, label, ftype = _BREEZY_FIXED[name]
+            if key in seen:
+                continue
+            seen.add(key)
+            if name == "ccpaAgreement" and r.get("option"):
+                label = r["option"]
+            results.append({"field_key": key, "label": label, "field_type": ftype,
+                            "required": bool(r.get("required")), "options": [], "description": ""})
+            saw_salary = saw_salary or key == "salary"
+            continue
+
+        if tag == "select" and not name and saw_salary and "salary_period" not in seen:
+            # The unnamed period dropdown right after Desired Salary.
+            seen.add("salary_period")
+            results.append({"field_key": "salary_period", "label": "Desired salary period", "field_type": "select",
+                            "required": bool(r.get("required")), "options": list(r.get("options") or []), "description": ""})
+            continue
+
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        if tag == "select":
+            ftype = "select"
+        elif tag == "textarea":
+            ftype = "textarea"
+        elif typ == "file":
+            ftype = "file"
+        elif typ == "checkbox":
+            ftype = "boolean"
+        else:
+            ftype = "text"
+        results.append({"field_key": name, "label": question or name, "field_type": ftype,
+                        "required": bool(r.get("required")), "options": list(r.get("options") or []) if ftype == "select" else [],
+                        "description": ""})
+    return results
+
+
+def _fetch_breezy_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    """The apply page is keyed by the posting URL; the feed gives it to us."""
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.breezy import BreezyFetcher
+
+    raw = BreezyFetcher().fetch_one(slug, job_external_id)
+    if not raw or not raw.get("url"):
+        return []
+    return normalise_breezy_rows(breezy_form_rows(raw["url"]))

@@ -64,6 +64,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ashby", re.compile(r"^https?://jobs\.ashbyhq\.com/([^/?#]+)/([0-9a-f]{8}-[0-9a-f-]{27})", re.I)),
     ("workable", re.compile(r"^https?://apply\.workable\.com/([^/?#]+)/j/([A-Za-z0-9]+)", re.I)),
     ("recruitee", re.compile(r"^https?://(?!www\.|api\.|jobs\.)([a-z0-9-]+)\.recruitee\.com/o/([^/?#]+)", re.I)),
+    ("breezy", re.compile(r"^https?://(?!www\.|app\.|api\.)([a-z0-9-]+)\.breezy\.hr/p/([0-9a-f]+)", re.I)),
     ("bamboohr", re.compile(r"^https?://(?!www\.|api\.|jobs\.)([a-z0-9-]+)\.bamboohr\.com/careers/(\d+)", re.I)),
     ("smartrecruiters", re.compile(r"^https?://jobs\.smartrecruiters\.com/([^/?#]+)/(\d+)", re.I)),
     # F376 — an aggregator repost. Resolves to the repost row (created
@@ -87,13 +88,13 @@ _KNOWN_UNRESOLVABLE: tuple[tuple[re.Pattern[str], str], ...] = (
 
 _SUPPORTED_HINT = (
     "Paste a posting link from Greenhouse, Lever, Ashby, Workable, Recruitee, "
-    "BambooHR, SmartRecruiters, or a Himalayas job page."
+    "BambooHR, SmartRecruiters, Breezy, or a Himalayas job page."
 )
 
 
 def _external_id(platform: str, slug: str, token: str) -> str | None:
     """The fetcher's external_id for this token, mirroring each fetcher."""
-    if platform in ("greenhouse", "lever", "ashby", "workable"):
+    if platform in ("greenhouse", "lever", "ashby", "workable", "breezy"):
         return token
     if platform == "bamboohr":
         return f"bamboo-{slug}-{token}"

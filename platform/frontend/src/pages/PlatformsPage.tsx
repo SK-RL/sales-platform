@@ -49,6 +49,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   linkedin: "bg-sky-100 text-sky-800",
   wellfound: "bg-pink-100 text-pink-800",
   recruitee: "bg-teal-100 text-teal-800",
+  breezy: "bg-lime-100 text-lime-800",
   smartrecruiters: "bg-yellow-100 text-yellow-800",
   jobvite: "bg-cyan-100 text-cyan-800",
   himalayas: "bg-emerald-100 text-emerald-800",
@@ -58,7 +59,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   remotive: "bg-violet-100 text-violet-800",
 };
 
-const VALID_PLATFORMS = ["greenhouse", "lever", "ashby", "workable", "bamboohr", "linkedin", "wellfound", "recruitee", "smartrecruiters", "jobvite", "himalayas"];
+const VALID_PLATFORMS = ["greenhouse", "lever", "ashby", "workable", "bamboohr", "linkedin", "wellfound", "recruitee", "breezy", "smartrecruiters", "jobvite", "himalayas"];
 
 function formatTime(iso: string | null) {
   if (!iso) return "Never";

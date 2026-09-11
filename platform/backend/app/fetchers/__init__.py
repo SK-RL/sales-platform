@@ -8,6 +8,7 @@ from app.fetchers.wellfound import WellfoundFetcher
 from app.fetchers.jobvite import JobviteFetcher
 from app.fetchers.smartrecruiters import SmartRecruitersFetcher
 from app.fetchers.recruitee import RecruiteeFetcher
+from app.fetchers.breezy import BreezyFetcher
 from app.fetchers.workday import WorkdayFetcher
 from app.fetchers.career_page import CareerPageFetcher
 from app.fetchers.weworkremotely import WeWorkRemotelyFetcher
@@ -33,6 +34,7 @@ FETCHER_MAP = {
     "jobvite": JobviteFetcher,
     "smartrecruiters": SmartRecruitersFetcher,
     "recruitee": RecruiteeFetcher,
+    "breezy": BreezyFetcher,
     # Workday — enterprise coverage (Fortune-500 tenants). Slug is a
     # composite `{tenant}/{cluster}/{site}` — see app.fetchers.workday
     # module docstring for why.

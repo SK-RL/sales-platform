@@ -115,6 +115,7 @@ ATS_URL_PATTERNS = {
     "jobvite": "https://jobs.jobvite.com/{slug}",
     "smartrecruiters": "https://jobs.smartrecruiters.com/{slug}",
     "recruitee": "https://{slug}.recruitee.com",
+    "breezy": "https://{slug}.breezy.hr",
     "linkedin": "https://www.linkedin.com/company/{slug}/jobs",
 }
 
