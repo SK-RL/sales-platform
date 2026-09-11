@@ -122,12 +122,29 @@ def draft_answer(
     return Draft(text=answer, enough_information=True, note="Drafted from your résumé and the job description. Every claim traced back to your material. Edit freely, then save.")
 
 
+_OWN_WORDS_RE = re.compile(
+    r"(refrain from|do not|don'?t|no|without|avoid) (the )?(use of |using |use )?(an? )?(ai|chatgpt|llm|generative)"
+    r"|in your own words|your own words|written by you|not (be )?ai[- ]generated|ai[- ]generated (answers|responses|content) (are|is|will be) not",
+    re.I,
+)
+
+
+def employer_wants_own_words(*texts: str) -> bool:
+    """The employer asked for the candidate's own words (Modular: "Please
+    refrain from using AI to complete answer this questions"). We honour
+    that: no draft, and the note says why."""
+    return any(_OWN_WORDS_RE.search(t or "") for t in texts)
+
+
 def draftable(gap_field: dict) -> bool:
     """A required free-text question we may draft for: text/textarea, not
-    legal/protected/compensation, not an identity field."""
+    legal/protected/compensation, not an identity field, and not one the
+    employer asked the candidate to write themselves."""
     from app.workers.tasks._answer_prep import is_never_infer_field
 
     if gap_field.get("field_type") not in ("text", "textarea"):
+        return False
+    if employer_wants_own_words(gap_field.get("label", ""), gap_field.get("description", "")):
         return False
     if is_never_infer_field(gap_field.get("field_key", ""), gap_field.get("label", "")):
         return False

@@ -68,6 +68,15 @@ def test_em_dashes_are_removed_from_drafts():
     assert "—" not in draft_answer(client=c, **ARGS).text
 
 
+def test_employer_asking_for_own_words_is_honoured():
+    from app.services.answer_drafts import employer_wants_own_words
+
+    q = "Explain your Cloud Inference experience in 3-4 lines. Please refrain from using AI to complete answer this questions."
+    assert employer_wants_own_words(q) and not draftable({"field_key": "x", "label": q, "field_type": "textarea"})
+    assert employer_wants_own_words("Answer in your own words") and employer_wants_own_words("", "Do not use ChatGPT")
+    assert not employer_wants_own_words("Describe your experience with AI tooling")
+
+
 def test_only_role_specific_free_text_is_draftable():
     assert draftable({"field_key": "q1", "label": "Why are you a great fit?", "field_type": "textarea"})
     assert draftable({"field_key": "cXVl", "label": "Explain your Cloud Inference experience", "field_type": "text"})
