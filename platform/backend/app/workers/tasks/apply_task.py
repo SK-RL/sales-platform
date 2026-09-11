@@ -77,9 +77,18 @@ def _halt(session, app_row, reason: str, gaps: list[dict] | None = None) -> dict
         try:
             from app.workers.tasks.draft_answers_task import draft_gap_answers_task
 
-            draft_gap_answers_task.apply_async(args=[str(app_row.id)], retry=False)
-        except Exception:
+            res = draft_gap_answers_task.apply_async(args=[str(app_row.id)], retry=False)
+            # Observable from the API (F401): the review page and an
+            # operator can see whether drafting ran, and why not.
+            app_row.platform_response = {**app_row.platform_response, "drafts_task_id": getattr(res, "id", None)}
+            session.commit()
+        except Exception as exc:
             logger.info("apply_task: could not enqueue drafts for %s", app_row.id, exc_info=True)
+            try:
+                app_row.platform_response = {**app_row.platform_response, "drafts_error": f"could not enqueue: {exc}"[:200]}
+                session.commit()
+            except Exception:
+                pass
     return {"status": STATUS_NEEDS_USER, "reason": reason, "blocking": gaps or []}
 
 
