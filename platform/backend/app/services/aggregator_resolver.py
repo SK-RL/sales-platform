@@ -149,7 +149,14 @@ def _guess_platform(url: str) -> str | None:
     return None
 
 
-def resolve_job(session, job, skip_page: bool = False) -> dict:
+# Aggregators whose pages challenge every server fetch (F374 measured
+# Himalayas at 6/6 from the VM). The page step is skipped for them
+# unless a caller insists, so the company + title lookup — which never
+# touches the aggregator — starts immediately.
+PAGE_WALLED_AGGREGATORS: frozenset[str] = frozenset({"himalayas"})
+
+
+def resolve_job(session, job, skip_page: bool = False, force_page: bool = False) -> dict:
     """Resolve one aggregator job and record the outcome on the row (sync).
 
     Page first (the apply redirect); when that is walled, has no link,
@@ -159,7 +166,10 @@ def resolve_job(session, job, skip_page: bool = False) -> dict:
     from app.services.company_lookup import lookup
     from app.services.own_link import OwnLinkError, resolve_job_from_url
 
-    res = Resolution("blocked", detail="page fetch skipped after repeated challenges") if skip_page else resolve_page(job.url)
+    if not force_page and (skip_page or getattr(job, "platform", "") in PAGE_WALLED_AGGREGATORS):
+        res = Resolution("blocked", detail="page fetch skipped: this aggregator challenges every server fetch")
+    else:
+        res = resolve_page(job.url)
     job.apply_resolve_status = res.status
     job.apply_resolved_at = datetime.now(timezone.utc)
     job.apply_url = res.apply_url

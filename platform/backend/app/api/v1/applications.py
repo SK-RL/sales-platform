@@ -367,7 +367,7 @@ class FromUrlRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
-REPOST_RESOLVE_BUDGET_S = 50
+REPOST_RESOLVE_BUDGET_S = 45
 
 
 def _resolve_repost(resolved):
@@ -434,29 +434,31 @@ async def application_from_url(
     from app.services.own_link import OwnLinkError, resolve_job_from_url
     from app.services.submitters import auto_submittable_platforms
 
-    try:
-        resolved = await asyncio.to_thread(resolve_job_from_url, body.url)
-    except OwnLinkError as exc:
-        raise HTTPException(status_code=exc.status, detail=exc.detail)
-
-    # F376 — a repost (Himalayas). The row we have is the aggregator's;
-    # the form lives on the employer's ATS. Resolve it now (page, then
-    # company + title against the public ATS APIs) and hand back the
-    # employer's posting — or say plainly that we couldn't find it.
     from app.services.aggregator_resolver import AGGREGATOR_PLATFORMS
 
-    if resolved.platform in AGGREGATOR_PLATFORMS:
-        # Bounded: the API sits behind a 60 s proxy hop and a probe of
-        # several boards can be slow. The thread keeps running and
-        # records its result on the row, so the hourly task / a retry
-        # picks it up rather than the user staring at a spinner.
-        try:
-            resolved = await asyncio.wait_for(asyncio.to_thread(_resolve_repost, resolved), timeout=REPOST_RESOLVE_BUDGET_S)
-        except asyncio.TimeoutError:
-            raise HTTPException(
-                status_code=504,
-                detail="Finding the employer's form is taking longer than usual. Try again in a minute — the lookup continues in the background.",
-            )
+    def _whole_flow():
+        resolved = resolve_job_from_url(body.url)
+        # F376 — a repost (Himalayas). The row we have is the aggregator's;
+        # the form lives on the employer's ATS. Resolve it now (company +
+        # title against the public ATS APIs) and hand back the employer's
+        # posting — or say plainly that we couldn't find it.
+        if resolved.platform in AGGREGATOR_PLATFORMS:
+            resolved = _resolve_repost(resolved)
+        return resolved
+
+    # One deadline for the whole flow, under the 60 s proxy hop: seen on
+    # production, the aggregator-feed step alone could push a paste past
+    # the proxy's limit and the user got a bare "504". The thread keeps
+    # running and records its result on the row, so a retry is quick.
+    try:
+        resolved = await asyncio.wait_for(asyncio.to_thread(_whole_flow), timeout=REPOST_RESOLVE_BUDGET_S)
+    except OwnLinkError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Finding the employer's form is taking longer than usual. Try again in a minute — the lookup continues in the background.",
+        )
 
     return {
         "job_id": resolved.job_id,

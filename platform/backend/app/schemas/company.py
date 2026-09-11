@@ -118,6 +118,8 @@ ATS_URL_PATTERNS = {
     "breezy": "https://{slug}.breezy.hr",
     "personio": "https://{slug}.jobs.personio.com",
     "rippling": "https://ats.rippling.com/{slug}/jobs",
+    "jazzhr": "https://{slug}.applytojob.com/apply/",
+    "teamtailor": "https://{slug}.teamtailor.com/jobs",
     "linkedin": "https://www.linkedin.com/company/{slug}/jobs",
 }
 

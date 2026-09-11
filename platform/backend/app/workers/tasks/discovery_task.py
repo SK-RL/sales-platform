@@ -297,6 +297,14 @@ PLATFORM_PROBE_CONFIG = {
         "slugs": RECRUITEE_PROBE_SLUGS,
         "url": "https://api.rippling.com/platform/api/ats/v1/board/{slug}/jobs",
     },
+    "jazzhr": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.applytojob.com/apply/",
+    },
+    "teamtailor": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.teamtailor.com/jobs.rss",
+    },
     "bamboohr": {
         "slugs": BAMBOOHR_PROBE_SLUGS,
         "url": "https://{slug}.bamboohr.com/careers/list",

@@ -148,6 +148,16 @@ _URL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "jobvite",
     ),
+    # Teamtailor — {slug}.teamtailor.com/jobs/{id}-{title} (F381).
+    (
+        re.compile(r"^https?://(?P<slug>[a-z0-9-]+)(?:\.[a-z]{2})?\.teamtailor\.com/jobs/(?P<external_id>\d+)", re.I),
+        "teamtailor",
+    ),
+    # JazzHR — {slug}.applytojob.com/apply/{code}/{Title} (F380).
+    (
+        re.compile(r"^https?://(?P<slug>[a-z0-9-]+)\.applytojob\.com/apply/(?P<external_id>[A-Za-z0-9]{6,})", re.I),
+        "jazzhr",
+    ),
     # Rippling — ats.rippling.com/{slug}/jobs/{uuid}, optional /apply (F379).
     (
         re.compile(r"^https?://ats\.rippling\.com/(?P<slug>[^/?#]+)/jobs/(?P<external_id>[0-9a-f-]{36})", re.I),

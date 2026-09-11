@@ -11,6 +11,8 @@ from app.fetchers.recruitee import RecruiteeFetcher
 from app.fetchers.breezy import BreezyFetcher
 from app.fetchers.personio import PersonioFetcher
 from app.fetchers.rippling import RipplingFetcher
+from app.fetchers.jazzhr import JazzHRFetcher
+from app.fetchers.teamtailor import TeamtailorFetcher
 from app.fetchers.workday import WorkdayFetcher
 from app.fetchers.career_page import CareerPageFetcher
 from app.fetchers.weworkremotely import WeWorkRemotelyFetcher
@@ -39,6 +41,8 @@ FETCHER_MAP = {
     "breezy": BreezyFetcher,
     "personio": PersonioFetcher,
     "rippling": RipplingFetcher,
+    "jazzhr": JazzHRFetcher,
+    "teamtailor": TeamtailorFetcher,
     # Workday — enterprise coverage (Fortune-500 tenants). Slug is a
     # composite `{tenant}/{cluster}/{site}` — see app.fetchers.workday
     # module docstring for why.

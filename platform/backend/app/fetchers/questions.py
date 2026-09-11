@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -65,6 +65,10 @@ KNOWN_HUMAN_WALLS: dict[str, dict[str, str]] = {
     "bamboohr": {
         "vendor": "reCAPTCHA",
         "reason": "BambooHR puts an \"I'm not a robot\" reCAPTCHA on its application form, so a person has to submit it.",
+    },
+    "jazzhr": {
+        "vendor": "reCAPTCHA",
+        "reason": "JazzHR puts an \"I'm not a robot\" reCAPTCHA on its application form, so a person has to submit it.",
     },
     "smartrecruiters": {
         "vendor": "DataDome",
@@ -137,6 +141,8 @@ def fetch_application_questions(
         "breezy": _fetch_breezy_questions,
         "personio": _fetch_personio_questions,
         "rippling": _fetch_rippling_questions,
+        "jazzhr": _fetch_jazzhr_questions,
+        "teamtailor": _fetch_teamtailor_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1271,3 +1277,240 @@ def _fetch_rippling_questions(job_external_id: str, slug: str) -> list[dict[str,
     if not job_external_id or not slug:
         return []
     return normalise_rippling_rows(rippling_form_rows(f"https://ats.rippling.com/{slug}/jobs/{job_external_id}/apply"))
+
+
+# ---------------------------------------------------------------------------
+# JazzHR — F380, server-rendered apply page (extraction only)
+# ---------------------------------------------------------------------------
+# https://{slug}.applytojob.com/apply/{code}/{Title} is plain HTML with
+# ``resumator-*`` controls: resumator-firstname-value … resumator-resume-
+# value (file), questionnaire questions as ``resumator-questionnaire[{id}]``
+# (text / textarea / select) and checkbox questions as
+# ``resumator-checkbox-{id}-{n}``. Labels are <label for>; "*" marks
+# required. Every posting carries a reCAPTCHA v2 checkbox (size=normal,
+# verified live on lumivero), so JazzHR is in KNOWN_HUMAN_WALLS and never
+# auto-submitted — the form is read so the review queue can show it.
+
+_JAZZHR_FIXED: dict[str, tuple[str, str, str]] = {
+    "resumator-firstname-value": ("first_name", "First Name", "text"),
+    "resumator-lastname-value": ("last_name", "Last Name", "text"),
+    "resumator-email-value": ("email", "Email Address", "text"),
+    "resumator-phone-value": ("phone", "Phone", "text"),
+    "resumator-address-value": ("address", "Address", "text"),
+    "resumator-city-value": ("city", "City", "text"),
+    "resumator-state-value": ("state", "State", "text"),
+    "resumator-postal-value": ("postcode", "Postal Code", "text"),
+    "resumator-resume-value": ("resume", "Resume / CV", "file"),
+    "resumator-resumetext-value": ("resume_text", "Resume (paste)", "textarea"),
+    "resumator-coverletter-value": ("cover_letter", "Cover Letter", "textarea"),
+    "resumator-linkedin-value": ("linkedin_url", "LinkedIn", "text"),
+    "resumator-website-value": ("website", "Website", "text"),
+}
+
+
+def parse_jazzhr_form(html: str) -> list[dict[str, Any]]:
+    """Pure: the apply page HTML → question schema."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    checkbox_groups: dict[str, dict[str, Any]] = {}
+
+    def label_for(el) -> str:
+        lab = soup.find("label", attrs={"for": el.get("id")}) if el.get("id") else None
+        text = " ".join(lab.get_text(" ", strip=True).split()) if lab else ""
+        return text
+
+    for el in soup.select("input, textarea, select"):
+        name = el.get("name") or ""
+        typ = (el.get("type") or "").lower()
+        if not name or typ in ("hidden", "submit", "button") or name in ("g-recaptcha-response", "resumator-xml-value"):
+            continue
+        label = label_for(el)
+        required = label.rstrip().endswith("*") or el.has_attr("required")
+        clean = label.rstrip("* ").strip()
+        if name in _JAZZHR_FIXED:
+            key, default, ftype = _JAZZHR_FIXED[name]
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({"field_key": key, "label": clean or default, "field_type": ftype, "required": required,
+                            "options": [], "description": ""})
+            continue
+        m = re.match(r"resumator-checkbox-(\d+)-\d+$", name)
+        if m:
+            gid = f"resumator-checkbox-{m.group(1)}"
+            g = checkbox_groups.get(gid)
+            if g is None:
+                # The question text sits on the group's heading label, found by
+                # the nearest preceding <label> that is not an option label.
+                q = ""
+                prev = el.find_previous("label")
+                while prev is not None and prev.get("for", "").startswith("resumator-checkbox-"):
+                    prev = prev.find_previous("label")
+                if prev is not None:
+                    q = " ".join(prev.get_text(" ", strip=True).split())
+                g = checkbox_groups[gid] = {"field_key": gid, "label": q.rstrip("* ").strip() or gid, "field_type": "multi_select",
+                                            "required": q.rstrip().endswith("*"), "options": [], "description": ""}
+                results.append(g)
+            if clean and clean not in g["options"]:
+                g["options"].append(clean)
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        if el.name == "select":
+            ftype = "select"
+            options = [" ".join(o.get_text(" ", strip=True).split()) for o in el.select("option")]
+            options = [o for o in options if o and not re.match(r"^(please select|select|--)", o, re.I)]
+        else:
+            ftype = "textarea" if el.name == "textarea" else "file" if typ == "file" else "boolean" if typ == "checkbox" else "text"
+            options = []
+        results.append({"field_key": name, "label": clean or name, "field_type": ftype, "required": required,
+                        "options": options, "description": ""})
+    return results
+
+
+def _fetch_jazzhr_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    import httpx
+
+    url = f"https://{slug}.applytojob.com/apply/{job_external_id}/"
+    with httpx.Client(timeout=25, follow_redirects=True, headers=_BROWSER_UA) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        if "applytojob.com" not in str(resp.url):
+            return []
+        return parse_jazzhr_form(resp.text)
+
+
+# ---------------------------------------------------------------------------
+# Teamtailor — F381, read from the rendered application form
+# ---------------------------------------------------------------------------
+# {job url}/applications/new renders a Rails form (#job-application-form,
+# no captcha; verified on virtasant, clearroute, xci) with candidate[…]
+# names: first_name, last_name, email, phone, location[query],
+# work_history, job_applications_attributes[0][cover_letter], the résumé
+# as #candidate_resume_remote_url (file), consent checkboxes, location
+# checkboxes candidate[location_ids][], and custom answers
+# candidate[answers_attributes][N][text|number|range|boolean|choice].
+# Labels are <label for>; "* Required" marks required; choice groups sit
+# in a <fieldset> whose <legend> is the question. The phone widget's
+# search input (iti-*) and cookie-banner checkboxes are not questions.
+
+_TEAMTAILOR_FORM_READY = "#job-application-form input[name='candidate[email]']"
+
+_TEAMTAILOR_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const form = document.getElementById('job-application-form');
+  if (!form) return [];
+  const rows = [];
+  for (const e of form.querySelectorAll('input,textarea,select')) {
+    if (e.type === 'hidden' || e.type === 'submit' || /^iti-/.test(e.id || '') || e.name === 'range-custom_number') continue;
+    const lab = e.id ? form.querySelector(`label[for="${CSS.escape(e.id)}"]`) : null;
+    const label = norm(lab ? lab.innerText : '');
+    const fs = e.closest('fieldset');
+    const legend = fs ? norm(fs.querySelector('legend')?.innerText || '') : '';
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name || '', id: e.id || '', label, legend,
+                required: !!(e.required || /\*\s*required|^required\./i.test(label) || /\*\s*required/i.test(legend)),
+                min: e.min || '', max: e.max || '',
+                options: e.tagName === 'SELECT' ? [...e.options].map(o => norm(o.textContent)).filter(Boolean) : [] });
+  }
+  return rows;
+})()
+"""
+
+_TEAMTAILOR_FIXED: dict[str, tuple[str, str, str]] = {
+    "candidate[first_name]": ("first_name", "First name", "text"),
+    "candidate[last_name]": ("last_name", "Last name", "text"),
+    "candidate[email]": ("email", "Email", "text"),
+    "candidate[phone]": ("phone", "Phone", "text"),
+    "candidate[location][query]": ("address", "Address", "text"),
+    "candidate[work_history]": ("work_history", "Work history", "textarea"),
+    "candidate[job_applications_attributes][0][cover_letter]": ("cover_letter", "Cover letter", "textarea"),
+    "candidate[consent_given]": ("privacy_consent", "I agree that I have read the Privacy Policy", "boolean"),
+    "candidate[consent_given_future_jobs]": ("future_jobs_consent", "May contact me about future job opportunities", "boolean"),
+}
+
+
+def _tt_clean(label: str) -> str:
+    return re.sub(r"\s*\*\s*required\.?\s*$|^required\.\s*", "", label or "", flags=re.I).strip()
+
+
+def teamtailor_form_rows(apply_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(apply_url, wait_until="domcontentloaded", wait_for_selector=_TEAMTAILOR_FORM_READY)
+            # The file inputs are mounted by the uploader script after load.
+            await asyncio_sleep(3.0)
+            return await session.eval_js(_TEAMTAILOR_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_teamtailor_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    groups: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        name, tag, typ = r.get("name") or "", r.get("tag"), (r.get("type") or "").lower()
+        rid, label, legend = r.get("id") or "", _tt_clean(r.get("label") or ""), _tt_clean(r.get("legend") or "")
+        if typ == "file":
+            key = "resume" if rid == "candidate_resume_remote_url" else "additional_files" if rid == "candidate_file_remote_url" else ""
+            if key == "resume" and key not in seen:
+                seen.add(key)
+                results.append({"field_key": key, "label": label or "Upload CV", "field_type": "file",
+                                "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        if not name:
+            continue
+        if typ in ("radio", "checkbox") and (name.endswith("[choice]") or name.endswith("[boolean]") or name == "candidate[location_ids][]"):
+            g = groups.get(name)
+            if g is None:
+                q = legend or ("Locations" if name == "candidate[location_ids][]" else name)
+                g = groups[name] = {"field_key": name, "label": q, "field_type": "multi_select" if typ == "checkbox" else "select",
+                                    "required": bool(r.get("required")), "options": [], "description": ""}
+                results.append(g)
+            if label and label not in g["options"]:
+                g["options"].append(label)
+            continue
+        if name in _TEAMTAILOR_FIXED:
+            key, default, ftype = _TEAMTAILOR_FIXED[name]
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({"field_key": key, "label": label or default, "field_type": ftype,
+                            "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        if tag == "select":
+            ftype = "select"
+        elif tag == "textarea":
+            ftype = "textarea"
+        elif typ == "checkbox":
+            ftype = "boolean"
+        else:
+            ftype = "text"
+        desc = f"Number between {r.get('min')} and {r.get('max')}" if typ == "range" and r.get("min") else ("Number" if typ == "number" else "")
+        results.append({"field_key": name, "label": label or legend or name, "field_type": ftype,
+                        "required": bool(r.get("required")), "options": list(r.get("options") or []) if ftype == "select" else [],
+                        "description": desc})
+    return results
+
+
+def _fetch_teamtailor_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.teamtailor import TeamtailorFetcher
+
+    raw = TeamtailorFetcher().fetch_one(slug, job_external_id)
+    if not raw:
+        return []
+    return normalise_teamtailor_rows(teamtailor_form_rows(raw["url"].rstrip("/") + "/applications/new"))

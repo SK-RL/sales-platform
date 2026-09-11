@@ -327,6 +327,8 @@ const PLATFORM_OPTIONS = [
   { value: "breezy", label: "Breezy HR" },
   { value: "personio", label: "Personio" },
   { value: "rippling", label: "Rippling" },
+  { value: "jazzhr", label: "JazzHR" },
+  { value: "teamtailor", label: "Teamtailor" },
   { value: "wellfound", label: "Wellfound" },
   { value: "himalayas", label: "Himalayas" },
   { value: "linkedin", label: "LinkedIn" },

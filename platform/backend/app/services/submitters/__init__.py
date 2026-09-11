@@ -28,6 +28,7 @@ from app.services.submitters.greenhouse import GreenhouseSubmitter
 from app.services.submitters.personio import PersonioSubmitter
 from app.services.submitters.recruitee import RecruiteeSubmitter
 from app.services.submitters.rippling import RipplingSubmitter
+from app.services.submitters.teamtailor import TeamtailorSubmitter
 from app.services.submitters.workable import WorkableSubmitter
 
 _REGISTRY: dict[str, type[BaseSubmitter]] = {
@@ -37,6 +38,7 @@ _REGISTRY: dict[str, type[BaseSubmitter]] = {
     PersonioSubmitter.platform: PersonioSubmitter,
     RecruiteeSubmitter.platform: RecruiteeSubmitter,
     RipplingSubmitter.platform: RipplingSubmitter,
+    TeamtailorSubmitter.platform: TeamtailorSubmitter,
     WorkableSubmitter.platform: WorkableSubmitter,
 }
 

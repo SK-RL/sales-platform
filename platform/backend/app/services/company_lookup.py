@@ -41,7 +41,7 @@ _TITLE_NOISE = re.compile(
 
 # The drivable set, plus Lever: a Lever match is still the real form
 # (extractable, walled) and better than a repost.
-PROBE_PLATFORMS: tuple[str, ...] = ("greenhouse", "ashby", "lever", "workable", "recruitee", "breezy", "personio", "rippling")
+PROBE_PLATFORMS: tuple[str, ...] = ("greenhouse", "ashby", "lever", "workable", "recruitee", "breezy", "personio", "rippling", "teamtailor")
 
 
 def normalise_company(name: str) -> str:
@@ -117,25 +117,54 @@ def find_in_catalogue(session, company_name: str, title: str):
     return next((j for j in rows if titles_match(j.title, title)), None)
 
 
-def probe_boards(company_name: str, title: str, fetch=None) -> tuple[str, str, dict] | None:
-    """(platform, slug, raw_job) for the first board that lists the title."""
-    from app.fetchers import FETCHER_MAP
+PROBE_TIMEOUT_S = 12.0
 
-    fetch = fetch or (lambda p, s: FETCHER_MAP[p]().fetch(s) or [])
+
+def _default_fetch(platform: str, slug: str) -> list[dict]:
+    """A fetcher with a short-timeout client: probing must stay inside
+    the paste-time budget (F376b), and a missing board answers fast."""
+    import httpx
+
+    from app.fetchers import FETCHER_MAP
+    from app.fetchers.base import BaseFetcher
+
+    client = httpx.Client(timeout=PROBE_TIMEOUT_S, follow_redirects=True, headers={"User-Agent": BaseFetcher._DEFAULT_UA})
+    try:
+        return FETCHER_MAP[platform](client=client).fetch(slug) or []
+    finally:
+        client.close()
+
+
+def probe_boards(company_name: str, title: str, fetch=None) -> tuple[str, str, dict] | None:
+    """(platform, slug, raw_job) for the first board that lists the title.
+
+    The platforms for one slug are probed in parallel (seven boards in
+    the time of the slowest one, not the sum); slugs are tried in order.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    fetch = fetch or _default_fetch
     for slug in slug_candidates(company_name):
-        for platform in PROBE_PLATFORMS:
+        def _one(platform):
             try:
-                jobs = fetch(platform, slug)
+                return platform, fetch(platform, slug)
             except Exception:
                 logger.info("company_lookup: probe %s/%s failed", platform, slug, exc_info=True)
-                continue
+                return platform, []
+        with ThreadPoolExecutor(max_workers=len(PROBE_PLATFORMS)) as ex:
+            results = list(ex.map(_one, PROBE_PLATFORMS))
+        board_exists = False
+        for platform, jobs in results:
             if not jobs:
                 continue
+            board_exists = True
             hit = next((r for r in jobs if titles_match(r.get("title", ""), title)), None)
             if hit:
                 return platform, slug, hit
-            # The board exists but this title isn't on it: other slugs
-            # for the same company are unlikely to be a different board.
+        if board_exists:
+            # A board exists under this slug but doesn't list the title:
+            # other slugs for the same company are unlikely to be a
+            # different board.
             return None
     return None
 
@@ -183,6 +212,8 @@ def canonical_posting_url(platform: str, slug: str, raw: dict) -> str:
         return url or f"https://{slug}.jobs.personio.com/job/{ext}"
     if platform == "rippling" and ext:
         return f"https://ats.rippling.com/{slug}/jobs/{ext}"
+    if platform == "teamtailor" and ext:
+        return url or f"https://{slug}.teamtailor.com/jobs/{ext}"
     return url
 
 

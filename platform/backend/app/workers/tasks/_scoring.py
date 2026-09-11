@@ -21,6 +21,8 @@ SOURCE_TIERS = {
     "breezy": 2,
     "personio": 2,
     "rippling": 2,
+    "jazzhr": 2,
+    "teamtailor": 2,
     "wellfound": 2,
     "linkedin": 2,
     "builtin": 2,

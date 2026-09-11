@@ -30,7 +30,12 @@ export function AddJobLink({ className = "" }: { className?: string }) {
       if (!id) throw new Error("The application could not be prepared.");
       navigate(`/applications/review?app=${id}`);
     } catch (e: any) {
-      setError(e?.message || "Couldn't use that link.");
+      const msg: string = e?.message || "";
+      setError(
+        /status 50[24]|timed? ?out|gateway/i.test(msg)
+          ? "Finding the employer's form is taking longer than usual. Try again in a minute — the lookup continues in the background."
+          : msg || "Couldn't use that link."
+      );
     } finally {
       setBusy(false);
     }
