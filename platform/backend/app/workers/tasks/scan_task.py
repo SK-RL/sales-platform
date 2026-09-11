@@ -754,229 +754,255 @@ def _scan_board(
         return stats
 
     try:
-        raw_jobs = fetcher.fetch(board.slug)
-        stats["jobs_found"] = len(raw_jobs)
+        # F402: the caller (`scan_all_platforms`/`scan_platform`) already
+        # `add()`+`flush()`s this board's ScanLog row on the SAME session
+        # before calling us. A bare `session.rollback()` in the except
+        # block below used to roll back the WHOLE transaction on any
+        # fetch/processing exception -- discarding that pending ScanLog
+        # insert along with it. The caller then set `.errors`/
+        # `.error_message` on the now-expunged object and committed a
+        # no-op: the task returned SUCCESS with accurate in-memory stats,
+        # but nothing ever reached the `scan_logs` table. This is exactly
+        # how two Google Sheet boards failed on every one of ~135
+        # scheduled runs over 45 days with zero rows in
+        # /monitoring/scan-errors -- both sheets had their link-sharing
+        # revoked (fetch now 401s on Google's login page), and the
+        # failure left no trace anywhere.
+        #
+        # Fix: scope the whole board scan in its own SAVEPOINT, same
+        # pattern already used below for per-job and per-company inserts.
+        # An exception now only unwinds THIS board's own work; the
+        # caller's ScanLog row lives in the outer, untouched transaction,
+        # so its later `session.commit()` persists the real error.
+        with session.begin_nested():
+            raw_jobs = fetcher.fetch(board.slug)
+            stats["jobs_found"] = len(raw_jobs)
 
-        # F252 diagnostic plumbing: when a fetcher exposes
-        # ``last_diagnostic`` (HackerNewsFetcher does today; future
-        # aggregator fetchers can opt in by setting the same
-        # attribute), persist its hint to ``ScanLog.error_message``
-        # for any 0-job run. ``error_message`` doubles as a debug
-        # channel for "why was this scan empty?" in the admin
-        # Scan Logs UI without needing SSH access to container logs.
-        # No-op for fetchers that don't set the attribute, and
-        # never overwrites a real error_message set later in the
-        # except block (we only populate when stats["error_message"]
-        # is still empty AND raw_jobs is empty).
-        diagnostic = getattr(fetcher, "last_diagnostic", None)
-        if not raw_jobs and diagnostic and not stats.get("error_message"):
-            import json as _json
-            try:
-                hint = _json.dumps(diagnostic, default=str)[:500]
-            except Exception:
-                hint = str(diagnostic)[:500]
-            stats["error_message"] = f"diagnostic: {hint}"
+            # F252 diagnostic plumbing: when a fetcher exposes
+            # ``last_diagnostic`` (HackerNewsFetcher does today; future
+            # aggregator fetchers can opt in by setting the same
+            # attribute), persist its hint to ``ScanLog.error_message``
+            # for any 0-job run. ``error_message`` doubles as a debug
+            # channel for "why was this scan empty?" in the admin
+            # Scan Logs UI without needing SSH access to container logs.
+            # No-op for fetchers that don't set the attribute, and
+            # never overwrites a real error_message set later in the
+            # except block (we only populate when stats["error_message"]
+            # is still empty AND raw_jobs is empty).
+            diagnostic = getattr(fetcher, "last_diagnostic", None)
+            if not raw_jobs and diagnostic and not stats.get("error_message"):
+                import json as _json
+                try:
+                    hint = _json.dumps(diagnostic, default=str)[:500]
+                except Exception:
+                    hint = str(diagnostic)[:500]
+                stats["error_message"] = f"diagnostic: {hint}"
 
-        # Aggregator platforms fetch jobs from many companies — resolve per-job
-        # "hackernews" and "yc_waas" also register as aggregators:
-        # each uses a single synthetic board (slug=`__all__`) where
-        # individual jobs belong to different hirers. See the
-        # fetcher modules for wire-level details.
-        _AGGREGATOR_PLATFORMS = {
-            "himalayas", "weworkremotely", "remoteok", "remotive",
-            "hackernews", "yc_waas",
-            # F335 — Working Nomads RSS aggregator. Single board
-            # with slug='__all__'; per-item company resolution
-            # happens inside the fetcher (dc:creator first, then
-            # description-body regex, then "unknown").
-            "workingnomads",
-        }
-        # F353: google_sheet boards are aggregators too — every row
-        # names its own employer — but their slug is the sheet ID
-        # (one board per sheet), never "__all__", so they need their
-        # own arm of this condition. Pre-fix, sheet jobs were all
-        # attributed to the board's synthetic "Google Sheet — …"
-        # company instead of the per-row companies.
-        is_aggregator = (
-            board.platform in _AGGREGATOR_PLATFORMS and board.slug == "__all__"
-        ) or board.platform == "google_sheet"
+            # Aggregator platforms fetch jobs from many companies — resolve per-job
+            # "hackernews" and "yc_waas" also register as aggregators:
+            # each uses a single synthetic board (slug=`__all__`) where
+            # individual jobs belong to different hirers. See the
+            # fetcher modules for wire-level details.
+            _AGGREGATOR_PLATFORMS = {
+                "himalayas", "weworkremotely", "remoteok", "remotive",
+                "hackernews", "yc_waas",
+                # F335 — Working Nomads RSS aggregator. Single board
+                # with slug='__all__'; per-item company resolution
+                # happens inside the fetcher (dc:creator first, then
+                # description-body regex, then "unknown").
+                "workingnomads",
+            }
+            # F353: google_sheet boards are aggregators too — every row
+            # names its own employer — but their slug is the sheet ID
+            # (one board per sheet), never "__all__", so they need their
+            # own arm of this condition. Pre-fix, sheet jobs were all
+            # attributed to the board's synthetic "Google Sheet — …"
+            # company instead of the per-row companies.
+            is_aggregator = (
+                board.platform in _AGGREGATOR_PLATFORMS and board.slug == "__all__"
+            ) or board.platform == "google_sheet"
 
-        for raw_job in raw_jobs:
-            try:
-                # For aggregator platforms, resolve the actual company from job data
-                job_company = company
-                if is_aggregator:
-                    raw_json = raw_job.get("raw_json", {})
-                    # Each aggregator uses different field names for the company
-                    agg_company_name = (
-                        raw_job.get("company_name")
-                        or raw_json.get("companyName", "")
-                        or raw_json.get("company_name", "")
-                        or raw_json.get("company", "")
-                        or ""
-                    ).strip()
-                    if agg_company_name:
-                        # Regression finding 37: drop LinkedIn/aggregator-noise
-                        # company names at ingest. `#hashtag` harvests, pure
-                        # numerics, staffing-agency shells, and scratch names
-                        # like "name"/"1name" all used to land in Company and
-                        # then pollute /companies and the Pipeline board.
-                        if looks_like_junk_company_name(agg_company_name):
-                            logger.info(
-                                "scan_task: skipping junk company name %r from %s/%s",
-                                agg_company_name, board.platform, board.slug,
-                            )
-                            stats["skipped_jobs"] += 1
-                            continue
-                        import re
-                        # F340 regression fix: prefer the authoritative
-                        # company slug from the upstream raw payload
-                        # (``companySlug`` on Himalayas, also surfaces
-                        # under ``company_slug`` from fetcher
-                        # normalisation). The public URL on the
-                        # aggregator is built from this slug, so it's
-                        # the source of truth for "which employer
-                        # actually owns this posting". Pre-fix we
-                        # derived the slug from ``agg_company_name``
-                        # via re.sub — but the name can be stale or
-                        # wrong on the upstream side (user feedback
-                        # 2026-04-29: "showing job at 'Ähdus
-                        # Technology' but URL says elevus"). Result:
-                        # the job got bound to the wrong Company row.
-                        #
-                        # Resolution order:
-                        #   1. raw_json.companySlug (Himalayas) /
-                        #      raw_json.company_slug (other agg's)
-                        #      / raw_job.company_slug (fetcher-set) —
-                        #      whichever first non-empty.
-                        #   2. Fallback: derive from agg_company_name.
-                        #
-                        # The DERIVED slug is the F340 last-resort
-                        # path so aggregators that don't surface a
-                        # ``companySlug`` field (legacy / future
-                        # additions) still work — they just lose the
-                        # name-mismatch protection.
-                        authoritative_slug = (
-                            raw_json.get("companySlug")
-                            or raw_json.get("company_slug")
-                            or raw_job.get("company_slug")
+            for raw_job in raw_jobs:
+                try:
+                    # For aggregator platforms, resolve the actual company from job data
+                    job_company = company
+                    if is_aggregator:
+                        raw_json = raw_job.get("raw_json", {})
+                        # Each aggregator uses different field names for the company
+                        agg_company_name = (
+                            raw_job.get("company_name")
+                            or raw_json.get("companyName", "")
+                            or raw_json.get("company_name", "")
+                            or raw_json.get("company", "")
                             or ""
-                        ).strip().lower()
-                        if authoritative_slug:
-                            # Same character-set rules as the derived
-                            # path (alphanumerics + hyphens) so the
-                            # slug column's existing constraints hold.
-                            agg_slug = re.sub(
-                                r"[^a-z0-9-]", "",
-                                authoritative_slug.replace(" ", "-")
-                            )[:100]
-                        else:
-                            agg_slug = re.sub(
-                                r"[^a-z0-9-]", "",
-                                agg_company_name.lower().replace(" ", "-")
-                            )[:100]
-                        # Look up by slug first (unique), then by name
-                        existing_co = session.execute(
-                            select(Company).where(Company.slug == agg_slug)
-                        ).scalar_one_or_none()
-                        if not existing_co:
+                        ).strip()
+                        if agg_company_name:
+                            # Regression finding 37: drop LinkedIn/aggregator-noise
+                            # company names at ingest. `#hashtag` harvests, pure
+                            # numerics, staffing-agency shells, and scratch names
+                            # like "name"/"1name" all used to land in Company and
+                            # then pollute /companies and the Pipeline board.
+                            if looks_like_junk_company_name(agg_company_name):
+                                logger.info(
+                                    "scan_task: skipping junk company name %r from %s/%s",
+                                    agg_company_name, board.platform, board.slug,
+                                )
+                                stats["skipped_jobs"] += 1
+                                continue
+                            import re
+                            # F340 regression fix: prefer the authoritative
+                            # company slug from the upstream raw payload
+                            # (``companySlug`` on Himalayas, also surfaces
+                            # under ``company_slug`` from fetcher
+                            # normalisation). The public URL on the
+                            # aggregator is built from this slug, so it's
+                            # the source of truth for "which employer
+                            # actually owns this posting". Pre-fix we
+                            # derived the slug from ``agg_company_name``
+                            # via re.sub — but the name can be stale or
+                            # wrong on the upstream side (user feedback
+                            # 2026-04-29: "showing job at 'Ähdus
+                            # Technology' but URL says elevus"). Result:
+                            # the job got bound to the wrong Company row.
+                            #
+                            # Resolution order:
+                            #   1. raw_json.companySlug (Himalayas) /
+                            #      raw_json.company_slug (other agg's)
+                            #      / raw_job.company_slug (fetcher-set) —
+                            #      whichever first non-empty.
+                            #   2. Fallback: derive from agg_company_name.
+                            #
+                            # The DERIVED slug is the F340 last-resort
+                            # path so aggregators that don't surface a
+                            # ``companySlug`` field (legacy / future
+                            # additions) still work — they just lose the
+                            # name-mismatch protection.
+                            authoritative_slug = (
+                                raw_json.get("companySlug")
+                                or raw_json.get("company_slug")
+                                or raw_job.get("company_slug")
+                                or ""
+                            ).strip().lower()
+                            if authoritative_slug:
+                                # Same character-set rules as the derived
+                                # path (alphanumerics + hyphens) so the
+                                # slug column's existing constraints hold.
+                                agg_slug = re.sub(
+                                    r"[^a-z0-9-]", "",
+                                    authoritative_slug.replace(" ", "-")
+                                )[:100]
+                            else:
+                                agg_slug = re.sub(
+                                    r"[^a-z0-9-]", "",
+                                    agg_company_name.lower().replace(" ", "-")
+                                )[:100]
+                            # Look up by slug first (unique), then by name
                             existing_co = session.execute(
-                                select(Company).where(Company.name == agg_company_name)
+                                select(Company).where(Company.slug == agg_slug)
                             ).scalar_one_or_none()
-                        if existing_co:
-                            job_company = existing_co
-                        else:
-                            # Wrap the insert in a SAVEPOINT so an IntegrityError
-                            # on a concurrent duplicate (same slug / same name)
-                            # does NOT rollback the outer transaction and wipe
-                            # out every job we've already upserted in this batch.
-                            try:
-                                with session.begin_nested():
-                                    job_company = Company(
-                                        id=uuid.uuid4(),
-                                        name=agg_company_name,
-                                        slug=agg_slug,
-                                        is_target=False,
-                                    )
-                                    session.add(job_company)
-                            except Exception:
-                                # Re-lookup by slug, then by name (uniqueness
-                                # can live on either column depending on history)
+                            if not existing_co:
                                 existing_co = session.execute(
-                                    select(Company).where(Company.slug == agg_slug)
+                                    select(Company).where(Company.name == agg_company_name)
                                 ).scalar_one_or_none()
-                                if not existing_co:
+                            if existing_co:
+                                job_company = existing_co
+                            else:
+                                # Wrap the insert in a SAVEPOINT so an IntegrityError
+                                # on a concurrent duplicate (same slug / same name)
+                                # does NOT rollback the outer transaction and wipe
+                                # out every job we've already upserted in this batch.
+                                try:
+                                    with session.begin_nested():
+                                        job_company = Company(
+                                            id=uuid.uuid4(),
+                                            name=agg_company_name,
+                                            slug=agg_slug,
+                                            is_target=False,
+                                        )
+                                        session.add(job_company)
+                                except Exception:
+                                    # Re-lookup by slug, then by name (uniqueness
+                                    # can live on either column depending on history)
                                     existing_co = session.execute(
-                                        select(Company).where(Company.name == agg_company_name)
+                                        select(Company).where(Company.slug == agg_slug)
                                     ).scalar_one_or_none()
-                                if existing_co:
-                                    job_company = existing_co
-                                else:
-                                    raise
+                                    if not existing_co:
+                                        existing_co = session.execute(
+                                            select(Company).where(Company.name == agg_company_name)
+                                        ).scalar_one_or_none()
+                                    if existing_co:
+                                        job_company = existing_co
+                                    else:
+                                        raise
 
-                # F253 regression fix: per-job SAVEPOINT so one failing
-                # row can't poison the whole batch. Pre-fix, the HN scan
-                # produced 298 jobs but the FIRST one overflowed
-                # ``Job.title_normalized String(500)`` — SQLAlchemy
-                # rolled the session back, every subsequent job's
-                # autoflush hit ``PendingRollbackError``, and ALL 298
-                # jobs were lost on a single overflow. Wrapping the
-                # ``_upsert_job`` call in a nested transaction
-                # (PostgreSQL SAVEPOINT) means a per-job DB error is
-                # local: the savepoint rolls back, the outer
-                # transaction continues, and the remaining 297 jobs
-                # land normally. The except block below still records
-                # the error for observability, but the rest of the
-                # batch survives.
-                with session.begin_nested():
-                    result = _upsert_job(
-                        session, job_company, board, raw_job, cluster_config,
-                        approved_roles_set=approved_roles_set,
-                        signals_cache=signals_cache,
-                    )
-                if result == "new":
-                    stats["new_jobs"] += 1
-                elif result == "updated":
-                    stats["updated_jobs"] += 1
-                elif result == "skipped":
-                    stats["skipped_jobs"] += 1
-            except Exception as e:
-                logger.error("Error upserting job %s: %s", raw_job.get("external_id", "?"), e, exc_info=True)
-                stats["errors"] += 1
-                # F266 — propagate the per-job error message into
-                # ``stats["error_message"]`` so the monitoring page
-                # surfaces a non-empty hint. Pre-fix the bare
-                # ``stats["errors"] += 1`` left the message field
-                # empty, and the HN scanner reported errors=2 every
-                # nightly run with no clue what failed (see /monitoring
-                # /scan-errors — sample showed 3+ days of empty
-                # err_excerpt for hackernews/__all__). Now we keep
-                # the FIRST per-job exception's message + record how
-                # many subsequent errors occurred. ``errs`` counter
-                # is the existing ``stats["errors"]``; we just add a
-                # text channel that's currently silent.
-                if not stats.get("error_message"):
-                    ext = (raw_job.get("external_id") or "?")[:30]
-                    stats["error_message"] = f"job {ext}: {str(e)[:400]}"
-                # else: subsequent errors keep stats["errors"]++ but
-                # don't overwrite the first message — admin sees
-                # "errors=N · first_error_msg" rather than a churn of
-                # last-wins messages that hide the leading cause.
+                    # F253 regression fix: per-job SAVEPOINT so one failing
+                    # row can't poison the whole batch. Pre-fix, the HN scan
+                    # produced 298 jobs but the FIRST one overflowed
+                    # ``Job.title_normalized String(500)`` — SQLAlchemy
+                    # rolled the session back, every subsequent job's
+                    # autoflush hit ``PendingRollbackError``, and ALL 298
+                    # jobs were lost on a single overflow. Wrapping the
+                    # ``_upsert_job`` call in a nested transaction
+                    # (PostgreSQL SAVEPOINT) means a per-job DB error is
+                    # local: the savepoint rolls back, the outer
+                    # transaction continues, and the remaining 297 jobs
+                    # land normally. The except block below still records
+                    # the error for observability, but the rest of the
+                    # batch survives.
+                    with session.begin_nested():
+                        result = _upsert_job(
+                            session, job_company, board, raw_job, cluster_config,
+                            approved_roles_set=approved_roles_set,
+                            signals_cache=signals_cache,
+                        )
+                    if result == "new":
+                        stats["new_jobs"] += 1
+                    elif result == "updated":
+                        stats["updated_jobs"] += 1
+                    elif result == "skipped":
+                        stats["skipped_jobs"] += 1
+                except Exception as e:
+                    logger.error("Error upserting job %s: %s", raw_job.get("external_id", "?"), e, exc_info=True)
+                    stats["errors"] += 1
+                    # F266 — propagate the per-job error message into
+                    # ``stats["error_message"]`` so the monitoring page
+                    # surfaces a non-empty hint. Pre-fix the bare
+                    # ``stats["errors"] += 1`` left the message field
+                    # empty, and the HN scanner reported errors=2 every
+                    # nightly run with no clue what failed (see /monitoring
+                    # /scan-errors — sample showed 3+ days of empty
+                    # err_excerpt for hackernews/__all__). Now we keep
+                    # the FIRST per-job exception's message + record how
+                    # many subsequent errors occurred. ``errs`` counter
+                    # is the existing ``stats["errors"]``; we just add a
+                    # text channel that's currently silent.
+                    if not stats.get("error_message"):
+                        ext = (raw_job.get("external_id") or "?")[:30]
+                        stats["error_message"] = f"job {ext}: {str(e)[:400]}"
+                    # else: subsequent errors keep stats["errors"]++ but
+                    # don't overwrite the first message — admin sees
+                    # "errors=N · first_error_msg" rather than a churn of
+                    # last-wins messages that hide the leading cause.
 
-        # Update last_scanned_at + staleness health on the board.
-        # `_update_board_health` mutates the board row in place (counter,
-        # possibly is_active + deactivated_reason) — both writes share
-        # this single commit so a crash between them can't leave the
-        # counter updated without the deactivation flag (or vice versa).
-        board.last_scanned_at = datetime.now(timezone.utc)
-        _update_board_health(board, stats)
+            # Update last_scanned_at + staleness health on the board.
+            # `_update_board_health` mutates the board row in place (counter,
+            # possibly is_active + deactivated_reason) — both writes share
+            # this single commit so a crash between them can't leave the
+            # counter updated without the deactivation flag (or vice versa).
+            board.last_scanned_at = datetime.now(timezone.utc)
+            _update_board_health(board, stats)
         session.commit()
 
     except Exception as e:
         logger.error("Error scanning board %s/%s: %s", board.platform, board.slug, e)
         stats["errors"] += 1
         stats["error_message"] = str(e)[:500]
-        session.rollback()
+        # F402: no `session.rollback()` here on purpose. The `with
+        # session.begin_nested()` above already rolled back to its own
+        # SAVEPOINT before this exception reached us, undoing only this
+        # board's work. Rolling back the whole session again would
+        # discard the caller's already-flushed ScanLog row a second
+        # time -- reintroducing the exact bug this fix closes.
 
     return stats
 

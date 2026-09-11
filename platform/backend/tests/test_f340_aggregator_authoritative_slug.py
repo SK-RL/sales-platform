@@ -102,7 +102,11 @@ def test_scan_task_prefers_authoritative_companyslug():
     # Anchor on the aggregator branch.
     agg_idx = src.find("agg_company_name")
     assert agg_idx > 0, "aggregator branch structure changed"
-    window = src[agg_idx:agg_idx + 4000]
+    # 6000, not 4000: the aggregator branch is ~4.2k chars once the
+    # F402 SAVEPOINT wrapper indents it one level deeper. A fixed window
+    # that only just fit before is exactly the kind of thing an unrelated
+    # re-indent breaks.
+    window = src[agg_idx:agg_idx + 6000]
     # The new fix references companySlug / company_slug from
     # raw_json or raw_job, ahead of the derive-from-name fallback.
     assert "raw_json.get(\"companySlug\")" in window, (
@@ -122,7 +126,11 @@ def test_scan_task_falls_back_to_derived_slug_when_authoritative_absent():
     """
     src = _read("app/workers/tasks/scan_task.py")
     agg_idx = src.find("agg_company_name")
-    window = src[agg_idx:agg_idx + 4000]
+    # 6000, not 4000: the aggregator branch is ~4.2k chars once the
+    # F402 SAVEPOINT wrapper indents it one level deeper. A fixed window
+    # that only just fit before is exactly the kind of thing an unrelated
+    # re-indent breaks.
+    window = src[agg_idx:agg_idx + 6000]
     # The derived-from-name path must still exist (the ``else``
     # branch after the authoritative_slug check).
     assert "agg_company_name.lower().replace" in window, (
