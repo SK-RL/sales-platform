@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 06493d9 · sha-06493d9
+Merge: worker diagnostics + tester round 2 (F399, F400)
+
+
 ## 2026-09-11 · 4487b53 · sha-4487b53
 Merge: tester findings 2026-09-11 (F398)
 
