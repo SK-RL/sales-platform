@@ -19,6 +19,27 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True, max_retries=0, acks_late=False, soft_time_limit=300, time_limit=360)
 def draft_gap_answers_task(self, application_id: str) -> dict:
+    from app.models.application import Application
+
+    session = SyncSession()
+    try:
+        return _run(session, application_id)
+    except Exception as exc:
+        logger.exception("draft_gap_answers_task: failed for %s", application_id)
+        try:
+            session.rollback()
+            row = session.get(Application, application_id)
+            if row is not None:
+                row.platform_response = {**(row.platform_response or {}), "drafts_error": f"{type(exc).__name__}: {exc}"[:300]}
+                session.commit()
+        except Exception:
+            logger.info("draft_gap_answers_task: could not record the error", exc_info=True)
+        return {"drafted": 0, "error": str(exc)[:200]}
+    finally:
+        session.close()
+
+
+def _run(session, application_id: str) -> dict:
     from sqlalchemy import select
 
     from app.models.answer_book import AnswerBookEntry
@@ -26,12 +47,11 @@ def draft_gap_answers_task(self, application_id: str) -> dict:
     from app.models.company import CompanyATSBoard
     from app.models.job import Job
     from app.models.resume import Resume
-    from app.services.answer_drafts import draft_answer, draftable
+    from app.services.answer_drafts import draft_answer, draftable, employer_wants_own_words
     from app.services.question_service import get_or_fetch_questions_sync
     from app.workers.tasks._answer_prep import blocking_gaps, match_questions_to_answers
 
-    session = SyncSession()
-    try:
+    if True:
         app_row = session.get(Application, application_id)
         if app_row is None:
             return {"drafted": 0, "reason": "no application"}
@@ -52,8 +72,6 @@ def draft_gap_answers_task(self, application_id: str) -> dict:
         resume = session.get(Resume, app_row.resume_id)
         satisfied = {"resume"} if getattr(resume, "file_data", None) else set()
         gaps = {g["field_key"] for g in blocking_gaps(matched, satisfied_field_keys=satisfied)}
-        from app.services.answer_drafts import employer_wants_own_words
-
         pr = dict(app_row.platform_response or {})
         drafts = dict(pr.get("drafts") or {})
         own_words = [m for m in matched if m["field_key"] in gaps and m.get("field_type") in ("text", "textarea")
@@ -68,6 +86,10 @@ def draft_gap_answers_task(self, application_id: str) -> dict:
                 pr["drafts"] = drafts
                 app_row.platform_response = pr
                 session.commit()
+            pr["drafts_run"] = {"at": datetime.now(timezone.utc).isoformat(), "drafted": 0, "reason": "no draftable gaps",
+                                "gaps": sorted(gaps)}
+            app_row.platform_response = pr
+            session.commit()
             return {"drafted": 0, "reason": "no draftable gaps"}
         company = getattr(getattr(job, "company", None), "name", "") or ""
         jd = getattr(getattr(job, "description", None), "text_content", "") or ""
@@ -83,6 +105,9 @@ def draft_gap_answers_task(self, application_id: str) -> dict:
         app_row.platform_response = pr
         session.commit()
         logger.info("draft_gap_answers_task: %s drafts for application %s", n, application_id)
+        # F401 — always leave a trace on the row, even when nothing was
+        # drafted, so "why is there no draft?" is answerable from the API.
+        pr["drafts_run"] = {"at": datetime.now(timezone.utc).isoformat(), "drafted": n, "targets": [m["field_key"] for m in targets]}
+        app_row.platform_response = pr
+        session.commit()
         return {"drafted": n}
-    finally:
-        session.close()
