@@ -75,3 +75,12 @@ class TestGuessesAreNeverSent:
         import inspect
         from app.workers.tasks import apply_task
         assert 'm.get("confidence") != "low"' in inspect.getsource(apply_task)
+
+
+class TestNewAdapterKeysResolveAtHighConfidence:
+    def test_linkedin_and_address_parts(self):
+        book = [_e("linkedin_url", "https://li"), _e("zip_code", "18701"), _e("street_address", "1 Main St"), _e("town", "Dubai")]
+        for key, label, want in (("linkedin", "LinkedIn Profile URL", "https://li"), ("postcode", "Zip/Postal code", "18701"),
+                                 ("address", "Address", "1 Main St"), ("city", "City", "Dubai")):
+            r = match_questions_to_answers([_q(label, key)], book)[0]
+            assert (r["answer"], r["confidence"]) == (want, "high"), key

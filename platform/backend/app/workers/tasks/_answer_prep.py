@@ -25,6 +25,16 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     "race": ["race", "ethnicity", "race_ethnicity"],
     "veteran_status": ["veteran", "veteran_status", "are_you_a_veteran"],
     "disability_status": ["disability", "disability_status"],
+    # F394 — the fixed keys the newer adapters emit (Dover/Gem "linkedin",
+    # Pinpoint/Hireology address parts) resolve at high confidence to
+    # the Answer Book's usual spellings instead of via token matching.
+    "linkedin": ["linkedin_url", "linkedin", "linkedin_profile", "linkedin_profile_url"],
+    "city": ["city", "town", "current_city"],
+    "address": ["address", "street_address", "address1", "address_line_1"],
+    "postcode": ["postcode", "zip_code", "zip", "postal_code", "zip_postal_code"],
+    "country": ["country", "country_of_residence"],
+    "state": ["state", "state_province", "province"],
+    "preferred_name": ["preferred_name", "nickname"],
 }
 
 # F346 — fields we must never answer by inference.
