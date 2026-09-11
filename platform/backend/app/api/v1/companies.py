@@ -1023,7 +1023,7 @@ async def relevant_contacts_for_job(
 
 # ── Outreach workflow ───────────────────────────────────────────────────
 
-_VALID_OUTREACH = {"not_contacted", "emailed", "replied", "meeting_scheduled", "not_interested"}
+_VALID_OUTREACH = {"not_contacted", "emailed", "messaged", "replied", "meeting_scheduled", "not_interested"}
 
 
 @router.patch("/{company_id}/contacts/{contact_id}/outreach", response_model=CompanyContactOut)
@@ -1205,3 +1205,33 @@ async def trigger_dedup(
     from app.workers.tasks.enrichment_task import deduplicate_contacts
     task = deduplicate_contacts.delay()
     return {"task_id": task.id, "status": "queued"}
+
+
+# ---------------------------------------------------------------------------
+# F404 — verify the emails of a company's contacts on demand
+# ---------------------------------------------------------------------------
+@router.post("/{company_id}/contacts/verify")
+async def verify_company_contacts(
+    company_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue verification for every contact at the company whose email is
+    not settled (unverified / unknown / likely). Returns how many were
+    queued and which method the platform can use right now, so the UI
+    can say "checked with Hunter" or "pattern check only"."""
+    from app.services.enrichment.email_verification import available_method
+    from app.workers.tasks.outreach_task import verify_company_contacts_task
+
+    company = (await db.execute(select(Company).where(Company.id == company_id))).scalar_one_or_none()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    pending = (await db.execute(
+        select(func.count()).select_from(CompanyContact).where(
+            CompanyContact.company_id == company_id,
+            CompanyContact.email != "",
+            CompanyContact.email_status.in_(["unverified", "unknown", "likely", ""]),
+        )
+    )).scalar() or 0
+    task = verify_company_contacts_task.apply_async(args=[str(company_id)], retry=False)
+    return {"queued": int(pending), "task_id": task.id, "method": available_method()}

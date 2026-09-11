@@ -90,6 +90,7 @@ import type { ResolvedJobFromUrl,
   ManualPipelineCardPayload,
   InterviewQuestionSet,
   InterviewQuestionSetPayload,
+  OutreachResponse,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api/v1";
@@ -1529,6 +1530,42 @@ export async function answerGap(
   payload: { field_key: string; question: string; answer: string },
 ): Promise<{ entry_id: string; question_key: string; remaining: { field_key: string }[]; status: string; cleared_elsewhere?: number }> {
   return request(`/applications/${appId}/answer-gap`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+// F404 — outreach: the people behind the application. Drafts only; the
+// user sends from Gmail/Outlook/LinkedIn and tells us afterwards.
+export async function getOutreach(appId: string): Promise<OutreachResponse> {
+  return request(`/applications/${appId}/outreach`);
+}
+
+export async function draftOutreach(
+  appId: string,
+  contactIds?: string[],
+): Promise<{ queued: boolean; running: boolean; task_id?: string }> {
+  return request(`/applications/${appId}/outreach/draft`, {
+    method: "POST",
+    body: JSON.stringify({ contact_ids: contactIds ?? null }),
+  });
+}
+
+export async function markOutreachSent(
+  appId: string,
+  payload: { contact_id: string; channel: "email" | "linkedin"; note?: string },
+): Promise<{ ok: boolean; outreach_status: string; last_outreach_at: string }> {
+  return request(`/applications/${appId}/outreach/sent`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function editOutreach(
+  appId: string,
+  payload: { contact_id: string; email_subject?: string; email_body?: string; linkedin_note?: string },
+): Promise<{ ok: boolean }> {
+  return request(`/applications/${appId}/outreach/edit`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function verifyCompanyContacts(
+  companyId: string,
+): Promise<{ queued: number; task_id: string; method: string }> {
+  return request(`/companies/${companyId}/contacts/verify`, { method: "POST" });
 }
 
 export async function promoteAnswer(

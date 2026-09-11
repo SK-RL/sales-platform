@@ -1189,6 +1189,54 @@ export interface AnswerDraft {
   used?: boolean;
 }
 
+// F404 — outreach bundle (Application.platform_response.outreach)
+export interface OutreachDraft {
+  email_subject: string;
+  email_body: string;
+  linkedin_note: string;
+  enough_information: boolean;
+  unsupported_claims: string[];
+  note: string;
+  error?: string;
+  edited?: boolean;
+}
+
+export interface OutreachContact {
+  contact_id: string;
+  name: string;
+  title: string;
+  role_category: string;
+  email: string;
+  email_status: string; // valid | likely | catch_all | unverified | unknown | invalid | ""
+  linkedin_url: string;
+  verification?: { status: string; method: string; detail: string } | null;
+  relevance?: number;
+  outreach_status: string;
+  last_outreach_at: string | null;
+  draft?: OutreachDraft;
+  links?: { mailto?: string; gmail?: string; outlook?: string };
+  sent?: { channel: string; at: string }[];
+}
+
+export interface OutreachBundle {
+  running?: boolean;
+  task_id?: string;
+  queued_at?: string;
+  at?: string;
+  error?: string;
+  reason?: string;
+  drafted?: number;
+  contacts?: OutreachContact[];
+}
+
+export interface OutreachResponse {
+  application_id: string;
+  bundle: OutreachBundle;
+  candidates: OutreachContact[];
+  company_contacts: number;
+  running: boolean;
+}
+
 export interface ApplyGateResult {
   // F396 — drafts keyed by field_key, written by the worker.
   drafts?: Record<string, AnswerDraft>;

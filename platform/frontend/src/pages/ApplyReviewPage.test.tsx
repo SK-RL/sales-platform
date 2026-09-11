@@ -41,6 +41,11 @@ vi.mock("@/lib/api", () => ({
   submitApplication: (...a: any[]) => submitApplication(...(a as [])),
   updateApplication: (...a: any[]) => updateApplication(...(a as [])),
   answerGap: (...a: any[]) => answerGap(...(a as [string, any])),
+  // F404 — the Reach out panel lives on this page; keep it quiet here.
+  getOutreach: vi.fn(async () => ({ application_id: "a1", bundle: {}, candidates: [], company_contacts: 0, running: false })),
+  draftOutreach: vi.fn(async () => ({ queued: true, running: true })),
+  markOutreachSent: vi.fn(async () => ({ ok: true })),
+  editOutreach: vi.fn(async () => ({ ok: true })),
 }));
 
 import { ApplyReviewPage } from "./ApplyReviewPage";

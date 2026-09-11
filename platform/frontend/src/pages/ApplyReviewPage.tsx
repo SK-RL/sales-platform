@@ -11,6 +11,7 @@ import {
   updateApplication,
 } from "@/lib/api";
 import { BackendErrorBanner } from "@/components/BackendErrorBanner";
+import { OutreachPanel } from "@/components/OutreachPanel";
 import type { AnswerDraft, ApplyGateResult, BlockingGap, JobQuestionsPreview, PreparedQuestion } from "@/lib/types";
 
 /**
@@ -405,6 +406,8 @@ export function ApplyReviewPage() {
           {(submitM.error as Error)?.message}
         </p>
       )}
+      {/* F404 — reach the people behind the application. */}
+      {current?.id && <OutreachPanel appId={current.id} />}
     </div>
   );
 }
