@@ -1656,6 +1656,8 @@ export interface RoutinePreferences {
   // regardless of cluster/geography/score. Capped at 200 entries
   // server-side.
   excluded_company_ids: string[];
+  // F372 — standing instruction: never auto-apply when the title contains one of these.
+  excluded_title_keywords: string[];
   // F360 — server-side auto-apply. These MUST be present on the type:
   // putRoutinePreferences PUTs the whole object with replace semantics,
   // so a field missing here is a field silently reset to its default on
@@ -1774,4 +1776,18 @@ export interface HumanizeResult {
   burstiness_sigma: number;
   banned_phrase_hits: string[];
   style_match_examples_used: number;
+}
+
+// F371 — POST /applications/from-url
+export interface ResolvedJobFromUrl {
+  job_id: string;
+  platform: string;
+  slug: string;
+  external_id: string;
+  title: string;
+  company_name: string;
+  url: string;
+  created: boolean;
+  auto_submittable: boolean;
+  wall: { vendor: string; reason: string } | null;
 }

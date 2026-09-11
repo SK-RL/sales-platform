@@ -37,6 +37,7 @@ import {
   User as UserIcon,
 } from "lucide-react";
 import { BackendErrorBanner } from "@/components/BackendErrorBanner";
+import { AddJobLink } from "@/components/AddJobLink";
 import { useAuth } from "@/lib/auth";
 import type { ApplicationDetail, SubmissionDetail } from "@/lib/types";
 
@@ -241,6 +242,8 @@ export function ApplicationsPage() {
         >
           Review queue
         </Link>
+        {/* F371 — bring your own link. */}
+        <AddJobLink className="min-w-[280px] flex-1" />
         <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1">
           {STATUS_TABS.map((tab) => (
             <button

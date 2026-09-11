@@ -90,6 +90,12 @@ def _submitted_last_24h(session, user_id) -> int:
     ).scalar() or 0)
 
 
+def title_excluded(title: str, keywords: list[str]) -> bool:
+    """F372 — does a standing instruction rule this title out?"""
+    t = (title or "").lower()
+    return any(k and k.lower() in t for k in (keywords or []))
+
+
 @celery_app.task
 def sweep_auto_apply() -> dict:
     """Find eligible jobs for every opted-in user and queue them."""
@@ -165,6 +171,8 @@ def sweep_auto_apply() -> dict:
                 if picked >= remaining:
                     break
                 if job.id in seen:
+                    continue
+                if title_excluded(getattr(job, "title", ""), prefs.excluded_title_keywords):
                     continue
 
                 app_row = Application(

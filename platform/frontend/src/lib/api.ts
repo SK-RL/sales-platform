@@ -1,4 +1,4 @@
-import type {
+import type { ResolvedJobFromUrl,
   UserNotice,
   User,
   Job,
@@ -985,6 +985,16 @@ export async function getApplicationByJob(jobId: string): Promise<any> {
   const response = await fetch(`${BASE_URL}/applications/by-job/${jobId}`, { credentials: "include" });
   if (!response.ok) return null;
   return response.json();
+}
+
+// F371 — bring your own link. Resolves a pasted posting URL to a catalogue
+// job (creating it from the ATS board when we never scanned it), or throws
+// with the server's reason — nothing is created for a link we can't read.
+export async function resolveJobFromUrl(url: string): Promise<ResolvedJobFromUrl> {
+  return request<ResolvedJobFromUrl>(`/applications/from-url`, {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
 }
 
 export async function prepareApplication(jobId: string): Promise<any> {
