@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 9544719 · sha-9544719
+Merge: load the whole model registry in the worker — no submission had ever run
+
+
 ## 2026-09-11 · 0e1dac4 · sha-0e1dac4
 Merge: bring your own link, and a standing instruction for the sweep
 
