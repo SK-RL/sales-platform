@@ -135,7 +135,7 @@ def verify_stale_emails():
         contacts = session.execute(
             select(CompanyContact).where(
                 CompanyContact.email != "",
-                CompanyContact.email_status.in_(["unverified", "valid"]),
+                CompanyContact.email_status.in_(["unverified", "valid", "likely", "unknown"]),
                 or_(
                     CompanyContact.email_verified_at.is_(None),
                     CompanyContact.email_verified_at < stale_cutoff,
@@ -143,12 +143,17 @@ def verify_stale_emails():
             ).limit(100)
         ).scalars().all()
 
+        # F404 — verification that works without port 25 (provider API,
+        # SMTP when reachable, else an honest heuristic). ``likely`` is a
+        # heuristic result and is re-checked like ``unverified``.
+        from app.services.enrichment.email_verification import observed_emails_for_domain, verify_email
+
         verified = 0
         for contact in contacts:
             try:
-                from app.services.enrichment.email_verifier import verify_email_smtp
-                result = verify_email_smtp(contact.email)
-                contact.email_status = result.get("status", "unknown")
+                domain = contact.email.rsplit("@", 1)[1].lower() if "@" in contact.email else ""
+                v = verify_email(contact.email, observed_emails_for_domain(session, domain))
+                contact.email_status = v.status
                 contact.email_verified_at = datetime.now(timezone.utc)
                 contact.last_verified_at = datetime.now(timezone.utc)
                 verified += 1

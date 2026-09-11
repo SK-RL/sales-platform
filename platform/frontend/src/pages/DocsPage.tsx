@@ -662,6 +662,47 @@ export function DocsPage() {
         </div>
       </Section>
 
+      {/* ── Reach out: the people behind an application (F404) ─────────── */}
+      <Section title="Reach out: the people behind an application" icon={Bot} id="reach-out">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Every application in <Link to="/applications/review" className="font-semibold text-primary-600 hover:text-primary-700 underline">Needs you</Link> and
+            in the Applications table has a <strong>Reach out</strong> panel: the two or three people at the company most likely to
+            read your application, with an email and a LinkedIn connection note drafted for each. You send them; the platform never does.
+          </p>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Who is picked</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li>Recruiters and talent partners first, then engineering leads for the role&apos;s area, then executives (only at companies under about 200 people).</li>
+              <li>Contacts come from the company&apos;s contact list, which enrichment fills from the company website and job postings. A person with neither an email nor a LinkedIn profile is skipped.</li>
+              <li>Someone you already wrote to shows &ldquo;contacted on &hellip;&rdquo; so you don&apos;t send a second cold message.</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Email status, honestly</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li><strong>Email verified</strong> — a verification service (or the mail server itself) confirmed the mailbox exists.</li>
+              <li><strong>Email likely</strong> — the domain accepts mail and the address follows the pattern of other addresses seen at that company. A good bet, not a guarantee.</li>
+              <li><strong>Domain accepts all mail</strong> — the server says yes to any address, so it can&apos;t be checked further.</li>
+              <li><strong>Email unverified</strong> — nothing could be checked (personal mailbox, or DNS failed). <strong>Email bounced</strong> — the domain has no mail server or the address was rejected.</li>
+              <li>Verification runs when you press <strong>Draft messages</strong>, nightly for stale addresses, and on demand from the company page. Without a verification provider configured (Hunter or ZeroBounce), the platform can only reach &ldquo;likely&rdquo;, because cloud hosts block direct mail-server checks.</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">The drafts</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li>Written from your résumé, your Answer Book, the job description and the company profile, addressed to the person by name and role. The email is 90–140 words; the LinkedIn note fits LinkedIn&apos;s 200-character limit.</li>
+              <li>Every claim is fact-checked against your material, revised once if anything is unsupported, and checked again. A claim that still cannot be traced is listed above the draft in amber; read it before sending.</li>
+              <li>Edit freely and press <strong>Save edits</strong>; <strong>Copy</strong>, <strong>Gmail</strong>, <strong>Outlook</strong> and <strong>Mail app</strong> open your own client with the draft filled in. After sending, press <strong>I sent it</strong> so the contact is marked and the sent log fills.</li>
+              <li>If your material gives nothing concrete to say to that person, no draft is written and the panel says so.</li>
+            </ul>
+            <Warning>
+              Nothing here is sent by the platform. It has no access to your mailbox or LinkedIn and never will; the buttons only open your own apps.
+            </Warning>
+          </div>
+        </div>
+      </Section>
+
       {/* ── Feature Guide: Pipeline ────────────────────────────────────── */}
       <Section title="Sales Pipeline" icon={GitBranch}>
         <div className="space-y-4">

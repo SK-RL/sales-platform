@@ -42,6 +42,10 @@ def _no_broker_for_drafts(monkeypatch):
 
         monkeypatch.setattr(draft_answers_task.draft_gap_answers_task, "apply_async",
                             lambda *a, **k: calls.append((a, k)))
+        from app.workers.tasks import outreach_task
+
+        monkeypatch.setattr(outreach_task.draft_outreach_task, "apply_async",
+                            lambda *a, **k: calls.append((a, k)))
     except Exception:
         pass
     return calls

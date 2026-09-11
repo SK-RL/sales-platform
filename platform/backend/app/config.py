@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # the explicitness is the point: ripgrep finds every place the
     # raw key materializes.
     anthropic_api_key: SecretStr = SecretStr("")
+    # F404 — email verification. Outbound port 25 is blocked on the Oracle
+    # VM (and most laptops), so the SMTP handshake verifier can never
+    # answer there; 2,699 contacts sat "unverified". With a provider key
+    # the platform verifies through its API; without one it scores emails
+    # heuristically and says so ("likely", never "valid").
+    email_verify_provider: str = ""            # "hunter" | "zerobounce" | "" (heuristic only)
+    email_verify_api_key: SecretStr = SecretStr("")
     # F236: per-feature AI rate limits — see docs/AI_USAGE.md for the
     # full policy + cost back-of-envelope. All three counters share the
     # same `ai_customization_logs` table (discriminated by the `feature`

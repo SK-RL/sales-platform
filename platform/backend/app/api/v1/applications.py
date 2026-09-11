@@ -2381,3 +2381,173 @@ async def promote_answer(
         answer_book_entry_id=entry_id,
         already_existed=already,
     )
+
+
+# ---------------------------------------------------------------------------
+# F404 — outreach: the people behind the application
+# ---------------------------------------------------------------------------
+from app.models.company_contact import CompanyContact, JobContactRelevance  # noqa: E402
+
+
+async def _owned_application(db: AsyncSession, app_id: UUID, user: User) -> Application:
+    app = (await db.execute(
+        select(Application).where(Application.id == app_id, Application.user_id == user.id)
+    )).scalar_one_or_none()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
+
+
+@router.get("/{app_id}/outreach")
+async def get_outreach(
+    app_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The stored outreach bundle plus a preview of who would be picked
+    when nothing has been drafted yet, so the panel can show the
+    contacts before the user asks for drafts."""
+    from app.services.outreach import rank_contacts
+
+    app = await _owned_application(db, app_id, user)
+    pr = app.platform_response if isinstance(app.platform_response, dict) else {}
+    bundle = dict(pr.get("outreach") or {})
+    job = await db.get(Job, app.job_id)
+    if job is not None and job.resolved_job_id:
+        job = (await db.get(Job, job.resolved_job_id)) or job
+    candidates: list[dict] = []
+    total = 0
+    if job is not None:
+        company = await db.get(Company, job.company_id)
+        contacts = (await db.execute(select(CompanyContact).where(CompanyContact.company_id == job.company_id))).scalars().all()
+        total = len(contacts)
+        relevance = {str(r.contact_id): float(r.relevance_score or 0.0) for r in (await db.execute(
+            select(JobContactRelevance).where(JobContactRelevance.job_id == job.id))).scalars().all()}
+        for c in rank_contacts(list(contacts), relevance, company, limit=3):
+            candidates.append({"contact_id": str(c.id), "name": f"{c.first_name} {c.last_name}".strip(), "title": c.title or "",
+                               "role_category": c.role_category or "", "email": c.email or "", "email_status": c.email_status or "",
+                               "linkedin_url": c.linkedin_url or "", "outreach_status": c.outreach_status or "not_contacted",
+                               "last_outreach_at": c.last_outreach_at.isoformat() if c.last_outreach_at else None})
+    return {"application_id": str(app_id), "bundle": bundle, "candidates": candidates, "company_contacts": total,
+            "running": bool(bundle.get("running"))}
+
+
+class OutreachDraftRequest(BaseModel):
+    contact_ids: list[str] | None = None   # None → top 3 by rank; a list → re-draft exactly these
+
+
+@router.post("/{app_id}/outreach/draft")
+async def draft_outreach(
+    app_id: UUID,
+    body: OutreachDraftRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue the outreach bundle (verify emails, draft email + LinkedIn
+    note per contact). Never sends anything."""
+    from app.workers.tasks.outreach_task import draft_outreach_task
+
+    app = await _owned_application(db, app_id, user)
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    if (pr.get("outreach") or {}).get("running"):
+        return {"queued": False, "running": True, "task_id": (pr.get("outreach") or {}).get("task_id")}
+    ids = [i for i in (body.contact_ids if body else None) or [] if i] or None
+    task = draft_outreach_task.apply_async(args=[str(app_id), ids], retry=False)
+    pr["outreach"] = {**(pr.get("outreach") or {}), "running": True, "task_id": task.id, "error": "",
+                      "queued_at": datetime.now(timezone.utc).isoformat()}
+    app.platform_response = pr
+    await db.commit()
+    return {"queued": True, "running": True, "task_id": task.id}
+
+
+class OutreachSentRequest(BaseModel):
+    contact_id: str
+    channel: Literal["email", "linkedin"]
+    note: str = ""
+
+
+@router.post("/{app_id}/outreach/sent")
+async def outreach_sent(
+    app_id: UUID,
+    body: OutreachSentRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The user pressed Send in Gmail/Outlook/LinkedIn; record it on the
+    bundle and on the contact so the next application at this company
+    shows "emailed on …" instead of drafting a second cold message."""
+    app = await _owned_application(db, app_id, user)
+    contact = await db.get(CompanyContact, UUID(body.contact_id)) if _is_uuid(body.contact_id) else None
+    if contact is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    now = datetime.now(timezone.utc)
+    contact.outreach_status = "emailed" if body.channel == "email" else "messaged"
+    contact.last_outreach_at = now
+    if body.note.strip():
+        contact.outreach_note = body.note.strip()[:2000]
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    bundle = dict(pr.get("outreach") or {})
+    rows = []
+    for c in bundle.get("contacts") or []:
+        if c.get("contact_id") == body.contact_id:
+            c = {**c, "outreach_status": contact.outreach_status, "last_outreach_at": now.isoformat(),
+                 "sent": [*(c.get("sent") or []), {"channel": body.channel, "at": now.isoformat()}]}
+        rows.append(c)
+    bundle["contacts"] = rows
+    pr["outreach"] = bundle
+    app.platform_response = pr
+    await log_action(db, user, "outreach_sent", f"company_contact:{contact.id}",
+                     metadata={"application_id": str(app_id), "channel": body.channel})
+    await db.commit()
+    return {"ok": True, "contact_id": body.contact_id, "outreach_status": contact.outreach_status, "last_outreach_at": now.isoformat()}
+
+
+class OutreachEditRequest(BaseModel):
+    contact_id: str
+    email_subject: str | None = None
+    email_body: str | None = None
+    linkedin_note: str | None = None
+
+
+@router.post("/{app_id}/outreach/edit")
+async def outreach_edit(
+    app_id: UUID,
+    body: OutreachEditRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Keep the user's edits to a draft so a reload (or a re-draft of the
+    other contacts) does not throw them away."""
+    from app.services.outreach import deep_links
+
+    app = await _owned_application(db, app_id, user)
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    bundle = dict(pr.get("outreach") or {})
+    rows, found = [], False
+    for c in bundle.get("contacts") or []:
+        if c.get("contact_id") == body.contact_id:
+            found = True
+            d = dict(c.get("draft") or {})
+            for k in ("email_subject", "email_body", "linkedin_note"):
+                v = getattr(body, k)
+                if v is not None:
+                    d[k] = v.strip()[:200] if k == "linkedin_note" else v.strip()
+            d["edited"] = True
+            c = {**c, "draft": d,
+                 "links": deep_links(c.get("email") if c.get("email_status") != "invalid" else "", d.get("email_subject") or "", d.get("email_body") or "")}
+        rows.append(c)
+    if not found:
+        raise HTTPException(status_code=404, detail="Contact not in this bundle")
+    bundle["contacts"] = rows
+    pr["outreach"] = bundle
+    app.platform_response = pr
+    await db.commit()
+    return {"ok": True}
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(str(value))
+        return True
+    except (ValueError, TypeError):
+        return False
