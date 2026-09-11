@@ -1,33 +1,27 @@
 """Fetch open positions from Jobvite career sites.
 
-Jobvite exposes a JSON API at: https://jobs.jobvite.com/company-slug/jobs
-with ?availableTo=External&category=&location=&page=N
+HISTORY — 2026-04-17 the JSON API at ``jobs.jobvite.com/{slug}/jobs``
+(``?availableTo=External&page=N``) was found retired: 14 historical
+customers all 302'd to the Jobvite support page. F388 (2026-09-11)
+re-surveyed: the host is alive for current tenants (``progress``:
+31 postings) but serves **server-rendered HTML**, not JSON —
+``table.jv-job-list`` rows with ``td.jv-job-list-name a[href=/{slug}/
+job/{id}]`` and ``td.jv-job-list-location``, grouped under an
+``<h3 class="h2">`` department heading. Unknown slugs still 302 to
+``search.jobvite.com/?invalid=1`` and are treated as dead. There is no
+pagination (``?page=2`` returns the same page).
 
-STATUS 2026-04-17 — platform-level break. A full survey of 14
-known-historical Jobvite customers (unity, pagerduty, sailpoint,
-forescout, tripactions, talend, twilio, zendesk, fortinet, rapid7,
-lyft, pinterest, docusign, paloaltonetworks) showed **every slug** 302s
-to ``https://www.jobvite.com/support/job-seeker-support/?invalid=1``.
-The public ``jobs.jobvite.com/{slug}/jobs`` path has been retired /
-customers migrated off. The ``careers.jobvite.com/{slug}`` alternate
-redirects to ``app.jobvite.com/admin/info/404.html`` for every slug.
-
-Consequence: this fetcher correctly returns ``[]`` for every call —
-there's no bug to fix at the code level, the upstream is gone. The
-``JOBVITE_PROBE_SLUGS`` list in ``discovery_task.py`` is now empty so
-discovery won't waste cycles trying. Legacy ``CompanyATSBoard`` rows
-with ``platform="jobvite"`` remain in the DB; the stale-board
-auto-deactivator (``scan_task._STALE_BOARD_ZERO_SCAN_THRESHOLD``)
-flips them to ``is_active=False`` after 5 clean-empty scans, so the
-cleanup is self-healing — no migration needed.
-
-If Jobvite re-exposes a public endpoint, restore the probe list and
-verify with ``tests/test_fetcher_integration.py``.
+The detail page ``/{slug}/job/{id}`` carries the title in ``<title>``
+("{Company} Careers - {title}") and department + location in
+``p.jv-job-detail-meta``; ``fetch_one`` reads it so a pasted link
+resolves even when the board page is unavailable.
 """
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -37,6 +31,22 @@ from app.fetchers.base import BaseFetcher
 logger = logging.getLogger(__name__)
 
 API_URL = "https://jobs.jobvite.com/{slug}/jobs"
+BOARD_URL = API_URL
+DETAIL_URL = "https://jobs.jobvite.com/{slug}/job/{job_id}"
+
+_DEAD_HOSTS = ("www.jobvite.com", "search.jobvite.com")
+_SECTION_RE = re.compile(r'<h3 class="h2">(.*?)</h3>|<td class="jv-job-list-name">\s*<a href="/([^/"]+)/job/([A-Za-z0-9]+)"[^>]*>(.*?)</a>\s*</td>\s*<td class="jv-job-list-location">(.*?)</td>', re.S | re.I)
+_TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
+_META_RE = re.compile(r'<p class="jv-job-detail-meta">(.*?)</p>', re.S | re.I)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _text(fragment: str) -> str:
+    return re.sub(r"\s+", " ", html_lib.unescape(_TAG_RE.sub(" ", fragment or ""))).strip()
+
+
+def _location(fragment: str) -> str:
+    return re.sub(r"\s*,\s*", ", ", _text(fragment)).strip(", ")
 
 
 class JobviteFetcher(BaseFetcher):
@@ -46,58 +56,72 @@ class JobviteFetcher(BaseFetcher):
 
     def fetch(self, slug: str) -> list[dict]:
         client = self._get_client()
-        all_jobs = []
-        page = 1
+        try:
+            resp = client.get(BOARD_URL.format(slug=slug), params={"availableTo": "External"})
+        except httpx.RequestError as exc:
+            logger.warning("Jobvite %s request failed: %s", slug, exc)
+            return []
+        if self._dead(resp):
+            logger.info("Jobvite %s: slug no longer hosted on jobs.jobvite.com", slug)
+            return []
+        if resp.status_code != 200:
+            logger.warning("Jobvite %s returned %s", slug, resp.status_code)
+            return []
+        jobs = self.parse_board(resp.text, slug)
+        logger.info("Jobvite %s fetched %d postings", slug, len(jobs))
+        return jobs
 
-        while True:
-            try:
-                resp = client.get(
-                    API_URL.format(slug=slug),
-                    params={"availableTo": "External", "page": page},
-                    headers={"Accept": "application/json"},
-                )
-                resp.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                logger.warning("Jobvite %s returned %s", slug, exc.response.status_code)
-                break
-            except httpx.RequestError as exc:
-                logger.warning("Jobvite %s request failed: %s", slug, exc)
-                break
+    @staticmethod
+    def _dead(resp: httpx.Response) -> bool:
+        host = str(resp.url.host or "") if resp.url else ""
+        return any(host.endswith(h) for h in _DEAD_HOSTS)
 
-            # Jobvite now redirects unknown/migrated slugs to their marketing
-            # support page (www.jobvite.com/support/...?invalid=1). Detect and
-            # treat as a permanently-dead slug instead of spamming warnings.
-            final_host = str(resp.url.host) if resp.url else ""
-            if final_host.endswith("www.jobvite.com"):
-                logger.info(
-                    "Jobvite %s: slug no longer hosted on jobs.jobvite.com (redirected to %s)",
-                    slug, final_host,
-                )
-                break
+    def parse_board(self, page: str, slug: str) -> list[dict]:
+        jobs: list[dict] = []
+        seen: set[str] = set()
+        department = ""
+        for m in _SECTION_RE.finditer(page or ""):
+            if m.group(1) is not None:
+                department = _text(m.group(1))
+                continue
+            job_id, title, loc = m.group(3), _text(m.group(4)), _location(m.group(5))
+            if not job_id or not title or job_id in seen:
+                continue
+            seen.add(job_id)
+            jobs.append(self._normalize({"eId": job_id, "title": title, "location": loc, "category": department}, slug))
+        return jobs
 
-            try:
-                data = resp.json()
-            except Exception:
-                # Jobvite may return HTML if the slug is wrong
-                logger.warning("Jobvite %s returned non-JSON response", slug)
-                break
+    def fetch_one(self, slug: str, external_id: str) -> dict | None:
+        ids = self._id_forms(external_id)
+        for job in self.fetch(slug):
+            if job["external_id"] in ids or job["raw_json"].get("eId") in ids:
+                return job
+        job_id = next((i for i in ids if not i.startswith("jobvite-")), "")
+        if not job_id:
+            return None
+        try:
+            resp = self._get_client().get(DETAIL_URL.format(slug=slug, job_id=job_id))
+        except httpx.RequestError:
+            return None
+        if resp.status_code != 200 or self._dead(resp) or "error=404" in str(resp.url):
+            return None
+        return self.parse_detail(resp.text, slug, job_id)
 
-            jobs = data.get("requisitions", [])
-            if not jobs:
-                break
-
-            all_jobs.extend([self._normalize(job, slug) for job in jobs])
-
-            # Jobvite pagination
-            total_pages = data.get("totalPages", 1)
-            if page >= total_pages:
-                break
-            page += 1
-
-            if page > 10:
-                break
-
-        return all_jobs
+    def parse_detail(self, page: str, slug: str, job_id: str) -> dict | None:
+        tm = _TITLE_RE.search(page or "")
+        title = _text(tm.group(1)) if tm else ""
+        title = re.sub(r"^.*?\bcareers\s*-\s*", "", title, flags=re.I).strip() or title
+        if not title:
+            return None
+        department, location = "", ""
+        mm = _META_RE.search(page or "")
+        if mm:
+            parts = [p for p in (_text(p) for p in re.split(r"<span class='jv-inline-separator'></span>|<span class=\"jv-inline-separator\"></span>", mm.group(1))) if p]
+            if len(parts) >= 2:
+                department, location = parts[0], _location(", ".join(parts[1:]))
+            elif parts:
+                location = _location(parts[0])
+        return self._normalize({"eId": job_id, "title": title, "location": location, "category": department, "unlisted": True}, slug)
 
     def _normalize(self, raw: dict[str, Any], slug: str) -> dict:
         job_id = raw.get("eId", "") or raw.get("id", "")
@@ -113,7 +137,7 @@ class JobviteFetcher(BaseFetcher):
 
         job_url = raw.get("detailUrl", "") or raw.get("applyUrl", "")
         if not job_url and job_id:
-            job_url = f"https://jobs.jobvite.com/{slug}/job/{job_id}"
+            job_url = DETAIL_URL.format(slug=slug, job_id=job_id)
 
         posted_at = raw.get("postingDate", "") or raw.get("datePosted", "") or ""
 

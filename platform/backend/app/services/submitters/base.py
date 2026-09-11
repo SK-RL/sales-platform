@@ -148,7 +148,6 @@ _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
     # ``.g-recaptcha`` widget are handled by ``_interactive_recaptcha``
     # below, because both are ALSO what an invisible v3 integration
     # mounts — see F368.
-    "recaptcha/api2/bframe",
     # hCaptcha's interactive checkbox widget. F359 — the old marker was
     # the single script filename "hcaptcha.com/1/api.js", and Lever
     # loads "js.hcaptcha.com/1/secure-api.js" instead, so a live Lever
@@ -199,6 +198,7 @@ def detect_human_wall(page_html: str) -> str | None:
 
 
 _RECAPTCHA_ANCHOR = "recaptcha/api2/anchor"
+_RECAPTCHA_BFRAME = "recaptcha/api2/bframe"
 _RECAPTCHA_WIDGET = ("class=\"g-recaptcha\"", "class='g-recaptcha'")
 
 
@@ -235,6 +235,12 @@ def _interactive_recaptcha(haystack: str) -> str | None:
         if "size=invisible" not in src:
             return _RECAPTCHA_ANCHOR
         start = i + len(_RECAPTCHA_ANCHOR)
+
+    # F388: the challenge frame (bframe) is mounted by invisible/score
+    # integrations too (Jobvite: size=invisible anchor + a hidden bframe),
+    # so on its own it is a wall only when no anchor says invisible.
+    if _RECAPTCHA_BFRAME in haystack and _RECAPTCHA_ANCHOR not in haystack:
+        return _RECAPTCHA_BFRAME
 
     for widget in _RECAPTCHA_WIDGET:
         start = 0

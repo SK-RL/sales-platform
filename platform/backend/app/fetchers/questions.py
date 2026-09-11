@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from json import dumps as json_dumps
 from typing import Any
 
 import httpx
@@ -34,7 +35,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "jobvite"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -144,6 +145,7 @@ def fetch_application_questions(
         "jazzhr": _fetch_jazzhr_questions,
         "teamtailor": _fetch_teamtailor_questions,
         "pinpoint": _fetch_pinpoint_questions,
+        "jobvite": _fetch_jobvite_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1521,6 +1523,137 @@ def _fetch_teamtailor_questions(job_external_id: str, slug: str) -> list[dict[st
     if not raw:
         return []
     return normalise_teamtailor_rows(teamtailor_form_rows(raw["url"].rstrip("/") + "/applications/new"))
+
+
+# ---------------------------------------------------------------------------
+# Jobvite — F388, read from the rendered application form
+# ---------------------------------------------------------------------------
+# ``{job url}/apply`` is an AngularJS app (verified on progress). Some
+# tenants gate it with a data-consent step: ``#jv-country-select``
+# ("Location of Residence and Language") + "I Accept". That choice is
+# surfaced as the ``jv_consent_region`` question so the user picks it
+# once; extraction picks any option just to render the form. Behind it,
+# every question is a ``.jv-form-field`` block whose label / legend is
+# the question (trailing ``*`` = required): text inputs named
+# ``input-{id}``, radios named ``{id}`` with <label for> options,
+# selects named ``input-{id}``. The résumé is the hidden ``#file-input-0``.
+# reCAPTCHA is present but ``size=invisible`` (score-based) — not a wall.
+
+_JOBVITE_CONSENT_SELECT = "#jv-country-select"
+_JOBVITE_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const rows = [];
+  const gate = document.querySelector('#jv-country-select');
+  if (gate) {
+    const lab = gate.id && document.querySelector(`label[for="${CSS.escape(gate.id)}"]`);
+    rows.push({ kind: 'consent', label: norm(lab ? lab.innerText : 'Location of Residence and Language'),
+                options: [...gate.options].filter(o => o.value && !/^select/i.test(norm(o.textContent))).map(o => norm(o.textContent)) });
+  }
+  const resumeHdr = document.querySelector('#jv-resume-header, .jv-step-header');
+  if (document.querySelector('#file-input-0')) rows.push({ kind: 'resume', required: /\*/.test(norm(resumeHdr ? resumeHdr.innerText : '')) });
+  for (const g of document.querySelectorAll('form .jv-form-field')) {
+    const ctls = [...g.querySelectorAll('input,select,textarea')].filter(e => e.type !== 'hidden' && e.type !== 'submit');
+    if (!ctls.length) continue;
+    const q = g.querySelector('legend, label.jv-form-field-label, label');
+    const question = norm(q ? q.innerText : '');
+    const first = ctls[0];
+    const kinds = ctls.map(e => e.type);
+    const choice = kinds.every(k => k === 'radio' || k === 'checkbox');
+    const opts = choice
+      ? ctls.map(e => { const l = e.id && g.querySelector(`label[for="${CSS.escape(e.id)}"]`); return norm(l ? l.innerText : e.value); }).filter(Boolean)
+      : (first.tagName === 'SELECT' ? [...first.options].filter(o => o.value && !/^select an option/i.test(norm(o.textContent))).map(o => norm(o.textContent)) : []);
+    rows.push({ kind: 'field', tag: first.tagName.toLowerCase(), type: choice ? kinds[0] : (first.type || ''), name: first.name || '', id: first.id || '',
+                question, required: /\*\s*$/.test(question) || ctls.some(e => e.required || e.getAttribute('aria-required') === 'true'), options: opts });
+  }
+  return rows;
+})()
+"""
+
+_JOBVITE_FIXED_LABELS: dict[str, str] = {
+    "first name": "first_name", "last name": "last_name", "email": "email", "email address": "email",
+    "phone": "phone", "phone number": "phone", "mobile": "phone",
+}
+
+
+def jobvite_form_rows(apply_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(apply_url, wait_until="domcontentloaded", wait_for_selector="body")
+            await asyncio_sleep(3.5)
+            rows = await session.eval_js(_JOBVITE_STRUCT_JS) or []
+            gate = next((r for r in rows if r.get("kind") == "consent"), None)
+            if gate and gate.get("options"):
+                # Any region renders the form; the user's own choice is
+                # surfaced as a question and made at submit time.
+                pick = next((o for o in gate["options"] if "any other" in o.lower() or "united states" in o.lower()), gate["options"][0])
+                await session.eval_js(
+                    "(() => { const s = document.querySelector(%s); const o = [...s.options].find(o => o.textContent.trim() === %s);"
+                    " if (!o) return false; s.value = o.value; s.dispatchEvent(new Event('change', {bubbles: true})); return true; })()"
+                    % (json_dumps(_JOBVITE_CONSENT_SELECT), json_dumps(pick)))
+                await asyncio_sleep(1.5)
+                try:
+                    await session.click('button:has-text("I Accept"), button:has-text("Accept")')
+                except Exception:
+                    pass
+                await asyncio_sleep(4.0)
+                rows = [gate] + [r for r in (await session.eval_js(_JOBVITE_STRUCT_JS) or []) if r.get("kind") != "consent"]
+            return rows
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_jobvite_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in rows:
+        kind = r.get("kind")
+        if kind == "consent":
+            results.append({"field_key": "jv_consent_region", "label": (r.get("label") or "Location of Residence and Language").rstrip(":").strip(),
+                            "field_type": "select", "required": True, "options": list(r.get("options") or []),
+                            "description": "Jobvite asks this before showing the form; it picks which privacy notice applies."})
+            continue
+        if kind == "resume":
+            if "resume" not in seen:
+                seen.add("resume")
+                results.append({"field_key": "resume", "label": "Resume", "field_type": "file", "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        name = r.get("name") or ""
+        if not name:
+            continue
+        question = re.sub(r"\s*\*\s*$", "", r.get("question") or "").strip()
+        typ, tag = (r.get("type") or "").lower(), r.get("tag")
+        fixed = _JOBVITE_FIXED_LABELS.get(question.lower())
+        key = fixed or name
+        if key in seen:
+            continue
+        seen.add(key)
+        if typ == "radio":
+            ftype = "select"
+        elif typ == "checkbox":
+            ftype = "multi_select" if len(r.get("options") or []) > 1 else "boolean"
+        elif tag == "select":
+            ftype = "select"
+        elif tag == "textarea":
+            ftype = "textarea"
+        else:
+            ftype = "text"
+        results.append({"field_key": key, "label": question or name, "field_type": ftype, "required": bool(r.get("required")),
+                        "options": list(r.get("options") or []) if ftype in ("select", "multi_select") else [], "description": ""})
+    return results
+
+
+def _fetch_jobvite_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.jobvite import JobviteFetcher
+
+    raw = JobviteFetcher().fetch_one(slug, job_external_id)
+    if not raw or not raw.get("url"):
+        return []
+    return normalise_jobvite_rows(jobvite_form_rows(raw["url"].split("?", 1)[0].rstrip("/") + "/apply"))
 
 
 # ---------------------------------------------------------------------------
