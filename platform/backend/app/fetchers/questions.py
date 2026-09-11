@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr"}
 )
 
 
@@ -92,6 +92,7 @@ def fetch_application_questions(
         "lever": _fetch_lever_questions,
         "workable": _fetch_workable_questions,
         "ashby": _fetch_ashby_questions,
+        "bamboohr": _fetch_bamboohr_questions,
         "recruitee": _fetch_recruitee_questions,
     }
 
@@ -768,3 +769,104 @@ def _fetch_workable_questions(shortcode: str, slug: str) -> list[dict[str, Any]]
     if not shortcode or not slug:
         return []
     return normalise_workable_rows(workable_form_rows(shortcode, slug))
+
+
+# ---------------------------------------------------------------------------
+# BambooHR
+# ---------------------------------------------------------------------------
+# F367. GET https://{slug}.bamboohr.com/careers/{id}/detail returns JSON
+# with a complete ``formFields`` map — the cleanest form source since
+# Greenhouse, and plain HTTP. Verified on a live board (icmarkets, job
+# 128). Fixed fields carry {isRequired, label, options?}; custom screening
+# questions sit in ``formFields.customQuestions`` as
+#   {id, isRequired, question, type, options:[{id, option}], hasOther}
+# with ``type`` in {short, long, yes_no, checkbox, multi}. EEO fields
+# (genderId, ethnicityId, veteranStatusId, disabilityId) are option lists
+# that are empty when the board doesn't ask.
+
+_BAMBOO_DETAIL_URL = "https://{slug}.bamboohr.com/careers/{job_id}/detail"
+
+_BAMBOO_FIXED: dict[str, tuple[str, str]] = {
+    # bamboo key -> (our key, field_type)
+    "firstName": ("first_name", "text"),
+    "lastName": ("last_name", "text"),
+    "email": ("email", "text"),
+    "phone": ("phone", "text"),
+    "streetAddress": ("address", "text"),
+    "city": ("city", "text"),
+    "state": ("state", "text"),
+    "zip": ("postcode", "text"),
+    "countryId": ("country", "select"),
+    "linkedinUrl": ("linkedin_url", "text"),
+    "websiteUrl": ("website", "text"),
+    "dateAvailable": ("start_date", "text"),
+    "resumeFileId": ("resume", "file"),
+    "coverLetterFileId": ("cover_letter_file", "file"),
+    "desiredPay": ("salary", "text"),
+    "referredBy": ("referred_by", "text"),
+}
+_BAMBOO_EEO: dict[str, str] = {
+    "genderId": "gender", "ethnicityId": "race", "veteranStatusId": "veteran_status", "disabilityId": "disability_status",
+}
+_BAMBOO_QTYPE = {"short": "text", "long": "textarea", "yes_no": "boolean", "checkbox": "boolean", "multi": "select"}
+
+
+def _bamboo_job_id(job_external_id: str) -> str:
+    """Recover the numeric id from our fetcher's ``bamboo-{slug}-{id}``.
+
+    ``app/fetchers/bamboohr.py`` stores ``f"bamboo-{slug}-{job_id}"`` so
+    the global UNIQUE on jobs.external_id can't collide across tenants.
+    The detail endpoint wants the bare id. Slugs can themselves contain
+    hyphens, so take the trailing segment rather than splitting once.
+    """
+    raw = (job_external_id or "").strip()
+    if raw.startswith(("bamboo-", "bamboohr-")):
+        return raw.rsplit("-", 1)[-1]
+    return raw
+
+
+def normalise_bamboohr_form(form_fields: dict) -> list[dict[str, Any]]:
+    """Turn the detail endpoint's formFields into our schema (pure, testable)."""
+    results: list[dict[str, Any]] = []
+    for key, spec in (form_fields or {}).items():
+        if key == "customQuestions":
+            for q in spec or []:
+                if not isinstance(q, dict) or not q.get("question"):
+                    continue
+                qtype = _BAMBOO_QTYPE.get((q.get("type") or "").lower(), "text")
+                options = [str(o.get("option") or o.get("text") or "").strip()
+                           for o in (q.get("options") or []) if isinstance(o, dict)]
+                options = [o for o in options if o]
+                if qtype == "select" and str(q.get("hasOther", "")).lower() == "yes":
+                    options.append("Other")
+                results.append({"field_key": f"bamboo_q_{q.get('id')}", "label": str(q["question"]).strip(),
+                                "field_type": qtype, "required": bool(q.get("isRequired")),
+                                "options": options, "description": ""})
+            continue
+        if key in _BAMBOO_EEO:
+            opts = [str(o.get("text") or o.get("option") or "").strip() for o in (spec or []) if isinstance(o, dict)]
+            if opts:  # empty list = the board doesn't ask
+                results.append({"field_key": _BAMBOO_EEO[key], "label": _BAMBOO_EEO[key].replace("_", " ").title(),
+                                "field_type": "select", "required": False, "options": opts, "description": ""})
+            continue
+        if not isinstance(spec, dict):
+            continue
+        our_key, ftype = _BAMBOO_FIXED.get(key, (key, "text"))
+        options = [str(o.get("text") or o.get("option") or "").strip() for o in (spec.get("options") or []) if isinstance(o, dict)]
+        if ftype == "select" and not options:
+            ftype = "text"  # e.g. `state` ships options: [] on non-US boards
+        results.append({"field_key": our_key, "label": str(spec.get("label") or our_key).strip(),
+                        "field_type": ftype, "required": bool(spec.get("isRequired")),
+                        "options": [o for o in options if o], "description": ""})
+    return results
+
+
+def _fetch_bamboohr_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    job_id = _bamboo_job_id(job_external_id)
+    if not job_id or not slug:
+        return []
+    with httpx.Client(timeout=20, follow_redirects=True, headers=_BROWSER_UA) as client:
+        resp = client.get(_BAMBOO_DETAIL_URL.format(slug=slug, job_id=job_id))
+        resp.raise_for_status()
+        data = resp.json()
+    return normalise_bamboohr_form((data.get("result") or data).get("formFields") or {})
