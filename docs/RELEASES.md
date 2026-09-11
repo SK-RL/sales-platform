@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · e25bf10 · sha-e25bf10
+fix(own-link): match the company by slug too; surface a failed save
+
+
 ## 2026-09-11 · 8b355ee · sha-8b355ee
 test: probe fixture uses the normalised slug
 
