@@ -148,6 +148,11 @@ _URL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "jobvite",
     ),
+    # Personio — {slug}.jobs.personio.com/job/{id} (or .de), optional /apply (F378).
+    (
+        re.compile(r"^https?://(?P<slug>[a-z0-9-]+)\.jobs\.personio\.(?:com|de)/job/(?P<external_id>\d+)", re.I),
+        "personio",
+    ),
     # Breezy — {slug}.breezy.hr/p/{id}-{friendly-slug}; the id is the hex
     # segment before the first dash (F377).
     (

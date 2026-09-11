@@ -25,6 +25,7 @@ from app.services.submitters.base import (
 from app.services.submitters.ashby import AshbySubmitter
 from app.services.submitters.breezy import BreezySubmitter
 from app.services.submitters.greenhouse import GreenhouseSubmitter
+from app.services.submitters.personio import PersonioSubmitter
 from app.services.submitters.recruitee import RecruiteeSubmitter
 from app.services.submitters.workable import WorkableSubmitter
 
@@ -32,6 +33,7 @@ _REGISTRY: dict[str, type[BaseSubmitter]] = {
     AshbySubmitter.platform: AshbySubmitter,
     BreezySubmitter.platform: BreezySubmitter,
     GreenhouseSubmitter.platform: GreenhouseSubmitter,
+    PersonioSubmitter.platform: PersonioSubmitter,
     RecruiteeSubmitter.platform: RecruiteeSubmitter,
     WorkableSubmitter.platform: WorkableSubmitter,
 }

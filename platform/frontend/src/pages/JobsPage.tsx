@@ -325,6 +325,7 @@ const PLATFORM_OPTIONS = [
   { value: "jobvite", label: "Jobvite" },
   { value: "recruitee", label: "Recruitee" },
   { value: "breezy", label: "Breezy HR" },
+  { value: "personio", label: "Personio" },
   { value: "wellfound", label: "Wellfound" },
   { value: "himalayas", label: "Himalayas" },
   { value: "linkedin", label: "LinkedIn" },

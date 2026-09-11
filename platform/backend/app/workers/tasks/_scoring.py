@@ -19,6 +19,7 @@ SOURCE_TIERS = {
     "jobvite": 2,
     "recruitee": 2,
     "breezy": 2,
+    "personio": 2,
     "wellfound": 2,
     "linkedin": 2,
     "builtin": 2,

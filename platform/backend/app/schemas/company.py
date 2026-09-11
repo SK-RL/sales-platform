@@ -116,6 +116,7 @@ ATS_URL_PATTERNS = {
     "smartrecruiters": "https://jobs.smartrecruiters.com/{slug}",
     "recruitee": "https://{slug}.recruitee.com",
     "breezy": "https://{slug}.breezy.hr",
+    "personio": "https://{slug}.jobs.personio.com",
     "linkedin": "https://www.linkedin.com/company/{slug}/jobs",
 }
 

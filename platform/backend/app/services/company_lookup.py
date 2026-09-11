@@ -41,7 +41,7 @@ _TITLE_NOISE = re.compile(
 
 # The drivable set, plus Lever: a Lever match is still the real form
 # (extractable, walled) and better than a repost.
-PROBE_PLATFORMS: tuple[str, ...] = ("greenhouse", "ashby", "lever", "workable", "recruitee", "breezy")
+PROBE_PLATFORMS: tuple[str, ...] = ("greenhouse", "ashby", "lever", "workable", "recruitee", "breezy", "personio")
 
 
 def normalise_company(name: str) -> str:
@@ -179,6 +179,8 @@ def canonical_posting_url(platform: str, slug: str, raw: dict) -> str:
         return f"https://apply.workable.com/{slug}/j/{ext}/"
     if platform == "breezy" and ext:
         return f"https://{slug}.breezy.hr/p/{ext}"
+    if platform == "personio" and ext:
+        return url or f"https://{slug}.jobs.personio.com/job/{ext}"
     return url
 
 

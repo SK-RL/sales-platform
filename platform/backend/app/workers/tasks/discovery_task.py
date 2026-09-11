@@ -289,6 +289,10 @@ PLATFORM_PROBE_CONFIG = {
         "slugs": RECRUITEE_PROBE_SLUGS,
         "url": "https://{slug}.breezy.hr/json",
     },
+    "personio": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.jobs.personio.com/xml",
+    },
     "bamboohr": {
         "slugs": BAMBOOHR_PROBE_SLUGS,
         "url": "https://{slug}.bamboohr.com/careers/list",

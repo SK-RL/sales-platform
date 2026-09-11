@@ -37,7 +37,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 # the frontend can render one consistent form.
 SUPPORTED_PLATFORM_LITERALS = Literal[
     "greenhouse", "lever", "ashby", "workable", "smartrecruiters",
-    "recruitee", "breezy", "bamboohr", "jobvite", "wellfound", "himalayas",
+    "recruitee", "breezy", "personio", "bamboohr", "jobvite", "wellfound", "himalayas",
     "linkedin",
 ]
 

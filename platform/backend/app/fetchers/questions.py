@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -135,6 +135,7 @@ def fetch_application_questions(
         "bamboohr": _fetch_bamboohr_questions,
         "recruitee": _fetch_recruitee_questions,
         "breezy": _fetch_breezy_questions,
+        "personio": _fetch_personio_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1050,3 +1051,98 @@ def _fetch_breezy_questions(job_external_id: str, slug: str) -> list[dict[str, A
     if not raw or not raw.get("url"):
         return []
     return normalise_breezy_rows(breezy_form_rows(raw["url"]))
+
+
+# ---------------------------------------------------------------------------
+# Personio — F378, read from the rendered apply page
+# ---------------------------------------------------------------------------
+# Verified on greenbone-ag.jobs.personio.com/job/{id}/apply. Next.js form,
+# no captcha; every control has a stable name and an id of
+# ``field-{name}`` with a proper <label for>. Required is NOT the
+# attribute — it is the "* (required)" suffix on the label. Fixed names:
+# first_name, last_name, email, phone, salary_expectations; custom
+# questions are ``custom_attribute_{id}`` (text or a <select> whose first
+# option is "Please select"); documents are file inputs named
+# ``documents.cv`` / ``documents.cover-letter`` / ``documents.other``.
+
+_PERSONIO_FORM_READY = "input[name='email']"
+
+_PERSONIO_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const rows = [];
+  for (const e of document.querySelectorAll('input,textarea,select')) {
+    if (e.type === 'hidden' || !e.name) continue;
+    const lab = e.id ? document.querySelector(`label[for="${CSS.escape(e.id)}"]`) : null;
+    const label = norm(lab ? lab.innerText : (e.getAttribute('aria-label') || ''));
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name, id: e.id || '', label,
+                required: !!e.required || /\(required\)|\*/.test(label),
+                options: e.tagName === 'SELECT' ? [...e.options].map(o => norm(o.textContent)).filter(o => o && !/^(please select|bitte auswählen)$/i.test(o)) : [] });
+  }
+  return rows;
+})()
+"""
+
+
+def personio_form_rows(apply_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(apply_url, wait_until="domcontentloaded", wait_for_selector=_PERSONIO_FORM_READY)
+            return await session.eval_js(_PERSONIO_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+_PERSONIO_FIXED: dict[str, tuple[str, str, str]] = {
+    "first_name": ("first_name", "First Name", "text"),
+    "last_name": ("last_name", "Last Name", "text"),
+    "email": ("email", "Email", "text"),
+    "phone": ("phone", "Phone", "text"),
+    "salary_expectations": ("salary_expectations", "Expected salary", "text"),
+    "documents.cv": ("resume", "Resume / CV", "file"),
+    "documents.cover-letter": ("cover_letter_file", "Cover Letter", "file"),
+}
+
+
+def _clean_personio_label(label: str) -> str:
+    return re.sub(r"\s*\*?\s*\((?:required|erforderlich)\)\s*$|\s*\*\s*$", "", label or "").strip()
+
+
+def normalise_personio_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in rows:
+        name, tag, typ = r.get("name") or "", r.get("tag"), (r.get("type") or "").lower()
+        if name == "documents.other" or not name:
+            continue
+        label = _clean_personio_label(r.get("label") or "")
+        if name in _PERSONIO_FIXED:
+            key, default_label, ftype = _PERSONIO_FIXED[name]
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append({"field_key": key, "label": label if key not in ("first_name", "last_name") else default_label,
+                            "field_type": ftype, "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        ftype = "select" if tag == "select" else "textarea" if tag == "textarea" else "file" if typ == "file" else "boolean" if typ == "checkbox" else "text"
+        results.append({"field_key": name, "label": label or name, "field_type": ftype, "required": bool(r.get("required")),
+                        "options": list(r.get("options") or []) if ftype == "select" else [], "description": ""})
+    return results
+
+
+def _fetch_personio_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.personio import PersonioFetcher
+
+    raw = PersonioFetcher().fetch_one(slug, job_external_id)
+    if not raw:
+        return []
+    # ?language=en: the page otherwise renders in the tenant's default
+    # language, and the answer book matches on English labels.
+    return normalise_personio_rows(personio_form_rows(raw["url"].rstrip("/") + "/apply?language=en"))
