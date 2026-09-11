@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # ── configuration ─────────────────────────────────────────────────────────────
 BACKUP_ROOT = Path(os.getenv("BACKUP_DIR", "/app/backups"))
-KEEP_LAST   = int(os.getenv("BACKUP_KEEP_LAST", "14"))
+KEEP_LAST   = int(os.getenv("BACKUP_KEEP_LAST", "3"))  # Sarthak, 2026-09-11: daily backup, keep the last 3
 PG_HOST     = os.getenv("POSTGRES_HOST", "postgres")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
 PG_DB       = os.getenv("POSTGRES_DB",  "jobplatform")

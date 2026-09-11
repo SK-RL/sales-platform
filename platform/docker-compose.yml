@@ -38,7 +38,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - BACKUP_DIR=/app/backups
-      - BACKUP_KEEP_LAST=14
+      - BACKUP_KEEP_LAST=3
 
   # F262 — default-queue worker. Handles the high-frequency steady-
   # state tasks (30-min scans, hourly career-page checks, enrichment
@@ -63,7 +63,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - BACKUP_DIR=/app/backups
-      - BACKUP_KEEP_LAST=14
+      - BACKUP_KEEP_LAST=3
     deploy:
       resources:
         limits:
@@ -94,7 +94,7 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - BACKUP_DIR=/app/backups
-      - BACKUP_KEEP_LAST=14
+      - BACKUP_KEEP_LAST=3
     deploy:
       resources:
         limits:
