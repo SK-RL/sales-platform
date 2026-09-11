@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · a374425 · sha-a374425
+feat(own-link): a repost's resolution runs in the worker; the paste polls
+
+
 ## 2026-09-11 · e25bf10 · sha-e25bf10
 fix(own-link): match the company by slug too; surface a failed save
 
