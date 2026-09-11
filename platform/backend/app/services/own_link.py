@@ -234,14 +234,19 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
             company = session.execute(
                 select(Company).where((Company.name == name) | (Company.slug == company_slug))
             ).scalars().first()
-            if company is None:
-                company = Company(id=uuid.uuid4(), name=name, slug=company_slug, is_target=False)
-                session.add(company)
+            try:
+                if company is None:
+                    company = Company(id=uuid.uuid4(), name=name, slug=company_slug, is_target=False)
+                    session.add(company)
+                    session.flush()
+                board = CompanyATSBoard(id=uuid.uuid4(), company_id=company.id, platform=parsed.platform,
+                                        slug=parsed.slug, is_active=True)
+                session.add(board)
                 session.flush()
-            board = CompanyATSBoard(id=uuid.uuid4(), company_id=company.id, platform=parsed.platform,
-                                    slug=parsed.slug, is_active=True)
-            session.add(board)
-            session.flush()
+            except Exception as exc:
+                session.rollback()
+                logger.warning("own_link: could not register board %s/%s", parsed.platform, parsed.slug, exc_info=True)
+                raise OwnLinkError(500, f"Could not register the {parsed.platform} board '{parsed.slug}' ({type(exc).__name__}).")
 
         # Same scoring inputs the scanner uses (F307), so a pasted posting
         # scores like a scanned one. Best-effort: a missing config just
