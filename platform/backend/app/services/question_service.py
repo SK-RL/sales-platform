@@ -56,6 +56,27 @@ def _cached_row_to_dict(q: JobQuestion) -> dict:
     }
 
 
+def _is_stale_fallback_cache(cached) -> bool:
+    """Is this cached schema the pre-F357 guessed template wearing a
+    platform we can now read?
+
+    F370. Found on production: an Ashby job cached before F357 (when
+    fallback schemas were still written to ``job_questions``) served
+    the 8 standard fields — first_name, last_name, … website — and
+    ``_cached_row_to_dict`` stamped them ``extracted`` because Ashby is
+    now a supported platform. The preview called it safe; the adapter
+    would have looked for ``first_name`` on a form whose real keys are
+    ``_systemfield_name`` and UUIDs. Nothing in the row says "guessed",
+    so we recognise the template by its exact (key, label) set and
+    treat it as a miss.
+    """
+    from app.fetchers.questions import _STANDARD_FIELDS
+
+    template = {(f["field_key"], f["label"]) for f in _STANDARD_FIELDS}
+    rows = {((q.field_key or ""), (q.label or "")) for q in cached}
+    return bool(rows) and rows == template
+
+
 def _with_alternative_groups(rows: list[dict]) -> list[dict]:
     """Re-derive F350 alternative groups for cached rows.
 
@@ -112,6 +133,13 @@ async def get_or_fetch_questions(db: AsyncSession, job, board_slug: str) -> list
         select(JobQuestion).where(JobQuestion.job_id == job.id)
     )
     cached = result.scalars().all()
+
+    if cached and _is_stale_fallback_cache(cached):
+        # F370 — drop the guessed template so a real extraction replaces it.
+        for q in cached:
+            await db.delete(q)
+        await db.flush()
+        cached = []
 
     if cached:
         return _with_alternative_groups([_cached_row_to_dict(q) for q in cached])
@@ -181,6 +209,13 @@ def get_or_fetch_questions_sync(session: Session, job, board_slug: str) -> list[
     cached = session.execute(
         select(JobQuestion).where(JobQuestion.job_id == job.id)
     ).scalars().all()
+
+    if cached and _is_stale_fallback_cache(cached):
+        # F370 — same as the async path.
+        for q in cached:
+            session.delete(q)
+        session.flush()
+        cached = []
 
     if cached:
         return _with_alternative_groups([_cached_row_to_dict(q) for q in cached])
