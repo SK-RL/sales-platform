@@ -51,7 +51,7 @@ fragment PublicDemographicQuestionFragment on PublicOatsDemographicSurveyQuestio
 }
 query ExternalJobPosting($boardId: String!, $extId: String!) {
   oatsExternalJobPosting(boardId: $boardId, extId: $extId) {
-    id title extId firstPublishedTsSec isApplicationFormHidden isUnlistedExternally
+    id title extId firstPublishedTsSec isApplicationFormHidden isUnlistedExternally descriptionHtml
     locations { id extId name city isoCountry isRemote __typename }
     job { id locationType employmentType requisitionId teamDisplayName department { id extId name __typename } __typename }
     compensationHtml __typename
@@ -110,6 +110,8 @@ class GemFetcher(BaseFetcher):
         job = self._normalize(raw, slug)
         if job:
             job["raw_json"]["form"] = data.get("oatsJobPostFieldsAndQuestions")
+            if raw.get("descriptionHtml"):
+                job["raw_json"]["description"] = raw["descriptionHtml"]  # F405
         return job
 
     def posting(self, slug: str, ext_id: str) -> dict:

@@ -23,6 +23,18 @@ FEED_URL = "https://{slug}.pinpointhq.com/postings.json"
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
+def _description_html(raw: dict) -> str:
+    """F405 — Pinpoint splits the posting into description /
+    responsibilities / skills / benefits, each HTML with its own header."""
+    parts = []
+    for key in ("description", "key_responsibilities", "skills_knowledge_expertise", "benefits"):
+        v = raw.get(key)
+        if isinstance(v, str) and v.strip():
+            header = raw.get(f"{key}_header")
+            parts.append((f"<h3>{header}</h3>" if isinstance(header, str) and header.strip() else "") + v)
+    return "".join(parts)
+
+
 class PinpointFetcher(BaseFetcher):
     PLATFORM = "pinpoint"
 
@@ -71,5 +83,6 @@ class PinpointFetcher(BaseFetcher):
             "department": (dept.get("name") if isinstance(dept, dict) else dept) or "",
             "employment_type": raw.get("employment_type_text") or raw.get("employment_type") or "",
             "salary_range": raw.get("compensation") if raw.get("compensation_visible") in (True, "True", "true") else "",
-            "raw_json": {"id": pid, "feed_id": str(raw.get("id") or ""), "company_name": "", "path": raw.get("path")},
+            "raw_json": {"id": pid, "feed_id": str(raw.get("id") or ""), "company_name": "", "path": raw.get("path"),
+                         "description": _description_html(raw)},
         }

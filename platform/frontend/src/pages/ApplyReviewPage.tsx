@@ -7,6 +7,7 @@ import {
   getApplication,
   getApplications,
   getJobQuestions,
+  redraftAnswers,
   submitApplication,
   updateApplication,
 } from "@/lib/api";
@@ -113,6 +114,12 @@ export function ApplyReviewPage() {
       queryClient.invalidateQueries({ queryKey: ["job-questions", current?.job_id] });
       queryClient.invalidateQueries({ queryKey: ["apply-review-queue"] });
     },
+  });
+
+  // F405 — a fresh draft for one gap (the worker keeps existing drafts).
+  const redraftM = useMutation({
+    mutationFn: (fieldKey: string) => redraftAnswers(current!.id, fieldKey),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["application", current?.id] }),
   });
 
   const markAppliedM = useMutation({
@@ -331,6 +338,7 @@ export function ApplyReviewPage() {
                   question={preview?.questions.find((q) => q.field_key === gap.field_key)}
                   draft={gate.drafts?.[gap.field_key]}
                   onSave={(answer) => answerGapM.mutateAsync({ gap, answer })}
+                  onRedraft={() => redraftM.mutate(gap.field_key)}
                 />
               ))}
             </ul>
@@ -412,6 +420,19 @@ export function ApplyReviewPage() {
   );
 }
 
+/** F405 — the editor for a gap, so the read-only preview can point at it. */
+function gapEditorId(fieldKey: string): string {
+  return `gap-editor-${fieldKey.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function focusGapEditor(fieldKey: string) {
+  const li = document.getElementById(gapEditorId(fieldKey));
+  if (!li) return;
+  li.scrollIntoView({ behavior: "smooth", block: "center" });
+  const control = li.querySelector<HTMLElement>("textarea, select, input");
+  control?.focus();
+}
+
 /** F398 — "we heard you": the run is queued or the browser is filling the form. */
 function RunningBanner({ queuedAt, dryRun, inFlight }: { queuedAt?: string; dryRun: boolean; inFlight: boolean }) {
   const [now, setNow] = useState(Date.now());
@@ -450,11 +471,13 @@ function GapRow({
   question,
   draft,
   onSave,
+  onRedraft,
 }: {
   gap: BlockingGap;
   question?: PreparedQuestion;
   draft?: AnswerDraft;
   onSave: (answer: string) => Promise<unknown>;
+  onRedraft?: () => void;
 }) {
   const options = question?.options ?? [];
   const isChoice = options.length > 0 && (question?.field_type === "select" || question?.field_type === "multi_select");
@@ -479,7 +502,7 @@ function GapRow({
   };
   const optionLabel = (o: unknown) => (typeof o === "string" ? o : ((o as { label?: string; value?: string }).label ?? (o as { value?: string }).value ?? ""));
   return (
-    <li className="rounded-lg border border-amber-200 bg-white p-3 text-sm">
+    <li className="rounded-lg border border-amber-200 bg-white p-3 text-sm" id={gapEditorId(gap.field_key)}>
       <p className="font-medium text-gray-900">{gap.label || gap.field_key}</p>
       <p className="mt-0.5 text-xs text-amber-800">{gap.reason}</p>
       {question?.description && <p className="mt-1 text-xs text-gray-500">{question.description}</p>}
@@ -520,6 +543,11 @@ function GapRow({
         >
           {saving ? "Saving…" : draft?.text && value === draft.text ? "Use this answer" : "Save answer"}
         </button>
+        {draft?.text && onRedraft && (
+          <button type="button" onClick={onRedraft} className="text-xs text-gray-500 underline hover:text-gray-800" title="Throw this draft away and write a new one">
+            Draft again
+          </button>
+        )}
         {error && <span className="text-xs text-red-600">{error}</span>}
       </div>
     </li>
@@ -557,17 +585,27 @@ function FieldRow({ q }: { q: PreparedQuestion }) {
         </span>
         {q.required && <span className="text-xs text-red-500">*</span>}
       </div>
-      <div
-        className={`mt-1.5 rounded-lg border px-3 py-2 text-sm ${
-          missing
-            ? "border-amber-300 bg-amber-50 text-amber-800"
-            : locked
-              ? "border-gray-200 bg-gray-50 text-gray-600"
-              : "border-gray-200 bg-white text-gray-900"
-        }`}
-      >
-        {q.answer || (missing ? "Needs your answer" : "—")}
-      </div>
+      {missing && !q.answer ? (
+        // F405 — this preview is read-only; the editor is the amber box at
+        // the top. The tester tried to type here and could not. Make the
+        // field itself take them to the editor.
+        <button
+          type="button"
+          onClick={() => focusGapEditor(q.field_key)}
+          className="mt-1.5 w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800 hover:bg-amber-100"
+          title="Answer this in the box at the top of the page"
+        >
+          Needs your answer — click to answer it above
+        </button>
+      ) : (
+        <div
+          className={`mt-1.5 rounded-lg border px-3 py-2 text-sm ${
+            locked ? "border-gray-200 bg-gray-50 text-gray-600" : "border-gray-200 bg-white text-gray-900"
+          }`}
+        >
+          {q.answer || "—"}
+        </div>
+      )}
       {caption && <p className="mt-1 text-xs text-gray-400">{caption}</p>}
     </div>
   );

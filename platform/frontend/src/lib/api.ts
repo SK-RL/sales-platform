@@ -1568,6 +1568,10 @@ export async function verifyCompanyContacts(
   return request(`/companies/${companyId}/contacts/verify`, { method: "POST" });
 }
 
+export async function redraftAnswers(appId: string, fieldKey?: string): Promise<{ queued: boolean; cleared: string[] }> {
+  return request(`/applications/${appId}/redraft`, { method: "POST", body: JSON.stringify({ field_key: fieldKey ?? null }) });
+}
+
 export async function promoteAnswer(
   appId: string,
   payload: { question: string; answer: string },

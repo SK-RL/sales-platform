@@ -70,7 +70,11 @@ class DoverFetcher(BaseFetcher):
             return None
         if not raw.get("active", True):
             return None
-        return self._normalize(raw, slug)
+        job = self._normalize(raw, slug)
+        if job and raw.get("user_provided_description"):
+            # F405 — the list endpoint has no description; the detail one does.
+            job["raw_json"]["description"] = raw["user_provided_description"]
+        return job
 
     def _normalize(self, raw: dict[str, Any], slug: str, group: str = "") -> dict | None:
         job_id = raw.get("id")

@@ -38,6 +38,17 @@ _DEAD_HOSTS = ("www.jobvite.com", "search.jobvite.com")
 _SECTION_RE = re.compile(r'<h3 class="h2">(.*?)</h3>|<td class="jv-job-list-name">\s*<a href="/([^/"]+)/job/([A-Za-z0-9]+)"[^>]*>(.*?)</a>\s*</td>\s*<td class="jv-job-list-location">(.*?)</td>', re.S | re.I)
 _TITLE_RE = re.compile(r"<title>(.*?)</title>", re.S | re.I)
 _META_RE = re.compile(r'<p class="jv-job-detail-meta">(.*?)</p>', re.S | re.I)
+
+
+def _description_html(page: str) -> str:
+    """F405 — the posting body on a Jobvite detail page."""
+    try:
+        from bs4 import BeautifulSoup
+
+        node = BeautifulSoup(page or "", "html.parser").find(class_="jv-job-detail-description")
+        return node.decode_contents().strip() if node else ""
+    except Exception:
+        return ""
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -93,18 +104,22 @@ class JobviteFetcher(BaseFetcher):
 
     def fetch_one(self, slug: str, external_id: str) -> dict | None:
         ids = self._id_forms(external_id)
-        for job in self.fetch(slug):
-            if job["external_id"] in ids or job["raw_json"].get("eId") in ids:
-                return job
         job_id = next((i for i in ids if not i.startswith("jobvite-")), "")
+        listed = next((j for j in self.fetch(slug) if j["external_id"] in ids or j["raw_json"].get("eId") in ids), None)
         if not job_id:
-            return None
+            return listed
         try:
             resp = self._get_client().get(DETAIL_URL.format(slug=slug, job_id=job_id))
         except httpx.RequestError:
-            return None
+            return listed
         if resp.status_code != 200 or self._dead(resp) or "error=404" in str(resp.url):
-            return None
+            return listed
+        if listed is not None:
+            # F405 — the board list has no posting body; the detail page does.
+            desc = _description_html(resp.text)
+            if desc:
+                listed["raw_json"]["description"] = desc
+            return listed
         return self.parse_detail(resp.text, slug, job_id)
 
     def parse_detail(self, page: str, slug: str, job_id: str) -> dict | None:
@@ -121,7 +136,12 @@ class JobviteFetcher(BaseFetcher):
                 department, location = parts[0], _location(", ".join(parts[1:]))
             elif parts:
                 location = _location(parts[0])
-        return self._normalize({"eId": job_id, "title": title, "location": location, "category": department, "unlisted": True}, slug)
+        job = self._normalize({"eId": job_id, "title": title, "location": location, "category": department, "unlisted": True}, slug)
+        if job:
+            desc = _description_html(page)
+            if desc:
+                job["raw_json"]["description"] = desc  # F405
+        return job
 
     def _normalize(self, raw: dict[str, Any], slug: str) -> dict:
         job_id = raw.get("eId", "") or raw.get("id", "")
