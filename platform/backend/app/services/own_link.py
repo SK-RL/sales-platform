@@ -226,11 +226,16 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
             company = session.get(Company, board.company_id)
         else:
             name = (raw.get("company_name") or (raw.get("raw_json") or {}).get("company_name") or parsed.slug).strip()
-            company = session.execute(select(Company).where(Company.name == name)).scalars().first()
+            company_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or parsed.slug
+            # By name OR slug: an aggregator scan may already have created
+            # "greenbone-ag" under a different display name, and
+            # companies.slug is unique — production 500'd on exactly this
+            # ("The posting was read but could not be saved").
+            company = session.execute(
+                select(Company).where((Company.name == name) | (Company.slug == company_slug))
+            ).scalars().first()
             if company is None:
-                company = Company(id=uuid.uuid4(), name=name,
-                                  slug=re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or parsed.slug,
-                                  is_target=False)
+                company = Company(id=uuid.uuid4(), name=name, slug=company_slug, is_target=False)
                 session.add(company)
                 session.flush()
             board = CompanyATSBoard(id=uuid.uuid4(), company_id=company.id, platform=parsed.platform,
@@ -252,7 +257,12 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
         action = _upsert_job(session, company, board, raw, cluster_config=cluster_config, approved_roles_set=approved)
         if action == "skipped":
             raise OwnLinkError(422, "That posting was rejected by our job filters (empty or placeholder title).")
-        session.commit()
+        try:
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            logger.warning("own_link: commit failed for %s/%s", parsed.platform, parsed.slug, exc_info=True)
+            raise OwnLinkError(500, f"The posting was read but could not be saved ({type(exc).__name__}).")
 
         job = session.execute(
             select(Job).where(Job.platform == parsed.platform, Job.external_id == str(raw.get("external_id")))

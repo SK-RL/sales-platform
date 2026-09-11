@@ -276,3 +276,15 @@ class TestRepostLinks:
         with pytest.raises(OwnLinkError) as e:
             resolve_job_from_url("https://himalayas.app/companies/no-such-company/jobs/nothing-here")
         assert e.value.status == 404 and "Himalayas" in e.value.detail and "any more" not in e.value.detail
+
+
+    def test_company_is_matched_by_slug_when_the_name_differs(self, wired):
+        """Production: Personio greenbone-ag 500'd because a Himalayas scan
+        had already created the company under another display name and
+        companies.slug is unique."""
+        existing = Row(id="c-existing", name="Greenbone Networks", slug="greenbone-ag")
+        wired["session"] = FakeSession(companies=[existing])
+        wired["fetch"] = lambda p, s: [{"external_id": "2546372", "title": "Account Manager", "url": "https://greenbone-ag.jobs.personio.com/job/2546372", "company_name": "Greenbone AG"}]
+        r = resolve_job_from_url("https://greenbone-ag.jobs.personio.com/job/2546372")
+        kinds = [a.__class__.__name__ for a in wired["session"].added]
+        assert "Company" not in kinds and r.company_name == "Greenbone Networks"
