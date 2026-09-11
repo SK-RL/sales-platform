@@ -181,6 +181,11 @@ export function ApplicationsPage() {
       {/* F222: surfaces stats/list failures. */}
       <BackendErrorBanner queries={[statsQ, applicationsQ]} />
 
+      {/* F371 — bring your own link. Its own row: squeezed into the filter
+          bar the placeholder was cut off, and this is the one thing on the
+          page that starts something rather than filters it. */}
+      <AddJobLink className="max-w-2xl" />
+
       {/* F261 — scope tabs. Admin/super_admin only. Switches the page
           between "my applications" and "team pipeline". The team view
           is rendered as a separate sub-component below so the per-user
@@ -242,8 +247,6 @@ export function ApplicationsPage() {
         >
           Review queue
         </Link>
-        {/* F371 — bring your own link. */}
-        <AddJobLink className="min-w-[280px] flex-1" />
         <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1">
           {STATUS_TABS.map((tab) => (
             <button
