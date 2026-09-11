@@ -31,7 +31,7 @@ beforeEach(() => {
   putRoutinePreferences.mockClear();
   prefs = { auto_apply_enabled: true, auto_apply_daily_cap: 5, auto_apply_min_score: 80 };
   items = [
-    { id: "n1", status: "needs_user", job_title: "SRE", company_name: "Acme", gate_reason: "1 required field(s) need your answer" },
+    { id: "n1", status: "needs_user", job_title: "SRE", company_name: "Acme", gate_reason: "1 required field(s) need your answer", drafts_ready: 1 },
     { id: "s1", status: "submitted", job_title: "Platform Eng", company_name: "Beta", submitted_at: today },
     { id: "f1", status: "failed", job_title: "DevOps", company_name: "Gamma", gate_error: "submitted the form but saw no confirmation" },
     { id: "p1", status: "prepared", job_title: "Cloud Eng", company_name: "Delta", gate: "passed" },
@@ -85,5 +85,12 @@ describe("AutoApplyPage → settings link (F398)", () => {
     renderPage();
     const a = (await screen.findByText(/Auto-apply settings/)).closest("a");
     expect(a?.getAttribute("href")).toBe("/routine#auto-apply");
+  });
+});
+
+describe("AutoApplyPage → drafts (F403)", () => {
+  it("says when a Needs-you row already has a draft waiting", async () => {
+    renderPage();
+    expect(await screen.findByText("Draft ready")).toBeTruthy();
   });
 });

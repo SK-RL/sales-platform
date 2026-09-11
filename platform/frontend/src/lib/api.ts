@@ -1527,7 +1527,7 @@ export async function getApplicationSubmission(appId: string): Promise<Submissio
 export async function answerGap(
   appId: string,
   payload: { field_key: string; question: string; answer: string },
-): Promise<{ entry_id: string; question_key: string; remaining: { field_key: string }[]; status: string }> {
+): Promise<{ entry_id: string; question_key: string; remaining: { field_key: string }[]; status: string; cleared_elsewhere?: number }> {
   return request(`/applications/${appId}/answer-gap`, { method: "POST", body: JSON.stringify(payload) });
 }
 
