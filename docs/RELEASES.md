@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 390f818 · sha-390f818
+feat(ui): the auto-apply home — paste, "Needs you" with reasons, today's cap, recent
+
+
 ## 2026-09-11 · 5c02a25 · sha-5c02a25
 fix(own-link): re-point a same-platform twin whose id predates namespacing
 
