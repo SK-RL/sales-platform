@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · f635a17 · sha-f635a17
+fix(gate): an answer that isn't one of the form's options is a gap; don't retry unplaceable fields
+
+
 ## 2026-09-11 · a9e24a4 · sha-a9e24a4
 fix(ui): pasting a job you already have opens it instead of erroring
 
