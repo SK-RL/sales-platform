@@ -289,38 +289,50 @@ def _find_best_match(
     # category-fallback guess.
     empty = {"answer": "", "source": "unmatched", "question_key": "", "confidence": "none"}
 
-    # 1. Exact key match
-    if field_key in by_key:
-        entry = by_key[field_key]
+    # F382 — an entry with no answer must not shadow one that has one.
+    # Production: ``auto_populate_answer_book`` writes an empty
+    # "ats_discovered" placeholder keyed by the ATS field_key (e.g.
+    # section_…_question_0); strategy 1 then returned it, and the answer
+    # the user saved under the question's own text ("Why are you a great
+    # fit?") was never consulted. The first exact strategy with a
+    # non-empty answer wins; an empty exact match is kept only as the
+    # fallback so provenance still shows where the field came from.
+    placeholder: dict | None = None
+
+    def _exact(entry: dict, key: str) -> dict:
         return {
             "answer": entry.get("answer", ""),
             "source": entry.get("source", "base"),
-            "question_key": entry.get("question_key", field_key),
+            "question_key": entry.get("question_key", key),
             "confidence": "high",
         }
+
+    # 1. Exact key match
+    if field_key in by_key:
+        hit = _exact(by_key[field_key], field_key)
+        if (hit["answer"] or "").strip():
+            return hit
+        placeholder = placeholder or hit
 
     # 2. Alias match: check if field_key maps to known aliases
     aliases = _FIELD_ALIASES.get(field_key, [])
     for alias in aliases:
         if alias in by_key:
-            entry = by_key[alias]
-            return {
-                "answer": entry.get("answer", ""),
-                "source": entry.get("source", "base"),
-                "question_key": entry.get("question_key", alias),
-                "confidence": "high",
-            }
+            hit = _exact(by_key[alias], alias)
+            if (hit["answer"] or "").strip():
+                return hit
+            placeholder = placeholder or hit
 
     # 3. Label-based match: normalise the label and try matching
     label_key = _normalise_key(label)
     if label_key and label_key in by_key:
-        entry = by_key[label_key]
-        return {
-            "answer": entry.get("answer", ""),
-            "source": entry.get("source", "base"),
-            "question_key": entry.get("question_key", label_key),
-            "confidence": "high",
-        }
+        hit = _exact(by_key[label_key], label_key)
+        if (hit["answer"] or "").strip():
+            return hit
+        placeholder = placeholder or hit
+
+    if placeholder is not None:
+        return placeholder
 
     # F346 — strategies 4 and 5 below are fuzzy. For never-infer fields
     # we stop here and report unresolved rather than produce a

@@ -968,6 +968,10 @@ _BREEZY_FIXED: dict[str, tuple[str, str, str]] = {
     "cResume": ("resume", "Resume / CV", "file"),
     "smsConsent": ("sms_consent", "Consent to SMS updates", "boolean"),
     "ccpaAgreement": ("privacy_consent", "I've read the Privacy Notice and consent to the processing of my data", "boolean"),
+    # Seen on other live boards (nationsbenefits, clarity-rcm).
+    "cLocation": ("location", "Location", "text"),
+    "cSummary": ("summary", "Summary", "textarea"),
+    "cCoverLetter": ("cover_letter", "Cover Letter", "textarea"),
 }
 
 

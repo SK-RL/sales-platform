@@ -82,6 +82,13 @@ class TestExtraction:
         assert k["resume"]["field_type"] == "file"
         assert not any(key.startswith("hp_") for key in k), "the honeypot must never become a field"
 
+    def test_other_fixed_fields_seen_on_live_boards(self):
+        rows = [_r("input", "text", "cLocation", "Location"), _r("textarea", "textarea", "cSummary", "Summary"), _r("textarea", "textarea", "cCoverLetter", "Cover Letter")]
+        k = {f["field_key"]: f for f in normalise_breezy_rows(rows)}
+        assert k["location"]["field_type"] == "text" and k["summary"]["field_type"] == "textarea" and k["cover_letter"]["field_type"] == "textarea"
+        from app.services.submitters.breezy import _FIXED_NAMES
+        assert _FIXED_NAMES["summary"] == "cSummary" and _FIXED_NAMES["location"] == "cLocation"
+
     def test_salary_and_its_period(self):
         k = {f["field_key"]: f for f in normalise_breezy_rows(LIVE_ROWS)}
         assert k["salary"]["label"] == "Desired Salary"

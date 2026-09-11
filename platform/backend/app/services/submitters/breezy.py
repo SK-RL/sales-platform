@@ -47,6 +47,9 @@ _FIXED_NAMES: dict[str, str] = {
     "resume": "cResume",
     "sms_consent": "smsConsent",
     "privacy_consent": "ccpaAgreement",
+    "location": "cLocation",
+    "summary": "cSummary",
+    "cover_letter": "cCoverLetter",
 }
 _FORM_READY_SELECTOR = "input[name='cName']"
 _RESUME_SELECTOR = "input[type=file][name='cResume']"
