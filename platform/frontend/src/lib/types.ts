@@ -1101,7 +1101,8 @@ export interface PreparedAnswer {
 
 export interface ApplyReadiness {
   resume: { ready: boolean; id?: string; label?: string };
-  credentials: { ready: boolean; platform: string; email?: string };
+  // F369 — `required` is false where the server drives a public form.
+  credentials: { ready: boolean; required?: boolean; platform: string; email?: string };
   answer_book: { ready: boolean; count: number };
   resume_score: { available: boolean; score?: number };
   existing_application: { exists: boolean; id?: string | null; status?: string | null };

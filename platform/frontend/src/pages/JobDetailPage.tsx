@@ -770,7 +770,14 @@ export function JobDetailPage() {
                 </div>
                 {/* Credentials */}
                 <div className="flex items-center gap-2 text-xs">
-                  {readiness.credentials.ready ? (
+                  {readiness.credentials.required === false ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-green-500" />
+                      <span className="text-gray-700">
+                        No login needed — we submit the {readiness.credentials.platform} form for you
+                      </span>
+                    </>
+                  ) : readiness.credentials.ready ? (
                     <>
                       <Check className="h-3.5 w-3.5 text-green-500" />
                       <span className="text-gray-700">{readiness.credentials.platform} credentials ({readiness.credentials.email})</span>
