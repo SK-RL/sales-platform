@@ -67,6 +67,10 @@ _NEVER_INFER_PATTERNS: tuple[str, ...] = (
     # Protected-class / EEO self-identification
     "veteran", "disability", "disabled", "gender", "race", "ethnicity",
     "hispanic", "latino", "protected", "self_identif",
+    # F394 — the equality-monitoring blocks on Pinpoint / Jobvite ask
+    # these too; only an answer saved under the exact question is used.
+    "religion", "sexual_orientation", "age_bracket", "age_range", "date_of_birth", "pronoun",
+    "caregiver", "parental", "marital", "nationality", "national_origin",
     # Background attestations
     "criminal", "conviction", "felony", "background_check",
     "security_clearance", "clearance", "export_control",
