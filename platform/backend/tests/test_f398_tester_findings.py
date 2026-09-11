@@ -55,3 +55,9 @@ def test_apply_tasks_have_hard_time_limits_and_stamp_the_task_id():
     assert apply_task.submit_application_task.time_limit and apply_task.submit_application_task.time_limit <= 900
     assert draft_answers_task.draft_gap_answers_task.time_limit
     assert '"task_id": task.id' in inspect.getsource(applications.submit_application)
+
+
+def test_celery_health_endpoint_registered():
+    from tests._routes import registered_paths
+
+    assert "/api/v1/monitoring/celery" in registered_paths()

@@ -256,6 +256,58 @@ async def get_vm_health():
     return get_vm_metrics()
 
 
+@router.get("/celery", dependencies=[Depends(require_role("admin"))])
+async def get_celery_health():
+    """F399 — what the workers are doing, from the API (admin only).
+
+    Prod, 2026-09-11: interactive apply tasks sat PENDING for 25 minutes
+    with an idle worker and no way to see why from outside the VM. This
+    answers the three questions an operator has: is each worker alive
+    (``ping``), what is it running (``active`` / ``reserved``), and how
+    long are the queues (Redis ``LLEN`` of ``default`` and ``heavy``).
+    The inspect calls time out after 3 s so a dead worker reports as
+    absent rather than hanging the request.
+    """
+    import asyncio
+
+    from app.workers.celery_app import REDIS_URL, celery_app
+
+    def _inspect() -> dict:
+        out: dict = {"workers": {}, "queues": {}, "error": None}
+        try:
+            insp = celery_app.control.inspect(timeout=3.0)
+            ping = insp.ping() or {}
+            active = insp.active() or {}
+            reserved = insp.reserved() or {}
+            stats = insp.stats() or {}
+            for name in set(ping) | set(active) | set(reserved) | set(stats):
+                pool = (stats.get(name) or {}).get("pool") or {}
+                out["workers"][name] = {
+                    "alive": name in ping,
+                    "concurrency": pool.get("max-concurrency"),
+                    "active": [
+                        {"task": t.get("name"), "id": t.get("id"), "args": str(t.get("args"))[:120],
+                         "started": t.get("time_start")}
+                        for t in (active.get(name) or [])
+                    ],
+                    "reserved": [{"task": t.get("name"), "id": t.get("id")} for t in (reserved.get(name) or [])],
+                }
+        except Exception as exc:  # broker down, etc.
+            out["error"] = f"inspect failed: {exc}"[:300]
+        try:
+            import redis
+
+            r = redis.Redis.from_url(REDIS_URL, socket_timeout=3)
+            for q in ("default", "heavy"):
+                out["queues"][q] = r.llen(q)
+            out["queues"]["unacked"] = r.hlen("unacked")
+        except Exception as exc:
+            out["queues"]["error"] = f"redis failed: {exc}"[:300]
+        return out
+
+    return await asyncio.get_running_loop().run_in_executor(None, _inspect)
+
+
 _BACKUP_LABEL_MAX_LEN = 64
 
 
