@@ -1,5 +1,9 @@
 """Celery task registry -- import all tasks so autodiscovery picks them up."""
 
+# F373 — load the complete model registry before any task runs. A
+# task that imports only the models it touches still flushes against
+# metadata that must resolve every foreign key (see app/models/__init__).
+import app.models  # noqa: F401
 from app.workers.tasks.scan_task import scan_all_platforms, scan_single_company
 from app.workers.tasks.career_page_task import check_career_pages
 from app.workers.tasks.discovery_task import run_discovery

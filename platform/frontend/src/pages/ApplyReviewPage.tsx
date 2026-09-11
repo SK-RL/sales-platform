@@ -242,8 +242,32 @@ export function ApplyReviewPage() {
         </div>
       </div>
 
+      {/* F373 — a dry run that passed: the form was filled and read back,
+          nothing was sent. The one bit of good news this page can carry. */}
+      {gate.gate === "passed" && (
+        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+          <p className="font-medium">
+            Dry run passed — {gate.placed ?? "all"}
+            {typeof gate.field_count === "number" ? ` of ${gate.field_count}` : ""} fields
+            placed and read back from the real form. Nothing was sent.
+          </p>
+          {(gate.unplaceable?.length ?? 0) > 0 && (
+            <p className="mt-1 text-green-800">
+              Skipped (optional): {gate.unplaceable!.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
+      {gate.gate === "submitted" && (
+        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+          <p className="font-medium">
+            Submitted{gate.confirmation ? ` — the ATS said "${gate.confirmation}"` : ""}.
+          </p>
+        </div>
+      )}
+
       {/* Why it stopped. The single most important thing on the page. */}
-      {(blocking.length > 0 || gate.reason || guessedForm || wall) && (
+      {(blocking.length > 0 || (gate.reason && gate.gate !== "passed") || guessedForm || wall) && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-medium text-amber-900">
             {gate.reason ?? wall?.reason ?? "This application needs your input before it can be sent."}
