@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · bf2f8be · sha-bf2f8be
+Merge: aggregator resolver circuit-breaker
+
+
 ## 2026-09-11 · c446e8b · sha-c446e8b
 Merge: resolve aggregator reposts to the employer's real form
 
