@@ -137,6 +137,11 @@ if SCAN_MODE == "aggressive":
             "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
             "schedule": crontab(minute=20),
         },
+        # F374 — turn aggregator reposts into forms we can drive.
+        "resolve_aggregator_links": {
+            "task": "app.workers.tasks.aggregator_task.resolve_aggregator_links",
+            "schedule": crontab(minute=40),
+        },
         "sweep_stuck_in_flight": {
             "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
             "schedule": crontab(minute="*/15"),
@@ -309,6 +314,11 @@ else:
         "sweep_auto_apply": {
             "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
             "schedule": crontab(minute=20),
+        },
+        # F374 — turn aggregator reposts into forms we can drive.
+        "resolve_aggregator_links": {
+            "task": "app.workers.tasks.aggregator_task.resolve_aggregator_links",
+            "schedule": crontab(minute=40),
         },
         "sweep_stuck_in_flight": {
             "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",

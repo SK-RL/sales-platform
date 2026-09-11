@@ -278,6 +278,11 @@ async def get_apply_readiness(
     job = (await db.execute(
         select(Job).where(Job.id == job_id)
     )).scalar_one_or_none()
+    # F374 — readiness is about the form we would actually fill.
+    if job is not None and job.resolved_job_id:
+        real = (await db.execute(select(Job).where(Job.id == job.resolved_job_id))).scalar_one_or_none()
+        if real is not None:
+            job = real
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -436,6 +441,15 @@ async def prepare_application(
     )).unique().scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    # F374 — an aggregator repost whose real form we resolved: prepare
+    # THAT posting, the one with a form we can read and drive.
+    if job.resolved_job_id:
+        real = (await db.execute(
+            select(Job).options(joinedload(Job.company)).where(Job.id == job.resolved_job_id)
+        )).unique().scalar_one_or_none()
+        if real is not None:
+            job = real
+            job_id = real.id
 
     # Enforce credential requirement — F369: not on platforms the
     # server-side submitters drive, whose public forms have no login.

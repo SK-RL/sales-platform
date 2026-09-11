@@ -132,6 +132,11 @@ class JobOut(BaseModel):
     posted_at: datetime | None = None
     first_seen_at: datetime
     last_seen_at: datetime
+    # F374 — where an aggregator repost's real form lives, if resolved.
+    apply_url: str | None = None
+    apply_platform: str | None = None
+    resolved_job_id: UUID | None = None
+    apply_resolve_status: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -17,6 +17,7 @@ from app.workers.tasks.feedback_task import process_review_feedback_task, decay_
 from app.workers.tasks.question_collection_task import collect_questions
 from app.workers.tasks.apply_task import submit_application_task, sweep_stuck_in_flight
 from app.workers.tasks.auto_apply_task import sweep_auto_apply
+from app.workers.tasks.aggregator_task import resolve_aggregator_links, resolve_one_aggregator_job
 # F356 — these three were beat-scheduled in celery_app.py but never
 # imported here, so their @celery_app.task decorators never ran and
 # the worker rejected every firing with "Received unregistered task"
