@@ -156,7 +156,13 @@ services:
   celery-worker:
     image: platform-backend:${RELEASE_TAG:-latest}
     restart: always
-    command: celery -A app.workers.celery_app worker -l info --concurrency=${CELERY_CONCURRENCY:-2} --queues=default
+    # F397 — three children, not two. An interactive apply task (a dry
+    # run or a submit from the review page, an answer draft) sat PENDING
+    # for minutes behind the 8-hourly full scan plus one other periodic
+    # task, both of which hold a child for the duration. A third child
+    # keeps a slot free for the person waiting at the screen. Per-child
+    # recycling threshold lowered to match (celery_app.py).
+    command: celery -A app.workers.celery_app worker -l info --concurrency=${CELERY_CONCURRENCY:-3} --queues=default
     depends_on:
       postgres:
         condition: service_healthy

@@ -52,13 +52,25 @@ def draft_gap_answers_task(self, application_id: str) -> dict:
         resume = session.get(Resume, app_row.resume_id)
         satisfied = {"resume"} if getattr(resume, "file_data", None) else set()
         gaps = {g["field_key"] for g in blocking_gaps(matched, satisfied_field_keys=satisfied)}
+        from app.services.answer_drafts import employer_wants_own_words
+
+        pr = dict(app_row.platform_response or {})
+        drafts = dict(pr.get("drafts") or {})
+        own_words = [m for m in matched if m["field_key"] in gaps and m.get("field_type") in ("text", "textarea")
+                     and employer_wants_own_words(m.get("label", ""), m.get("description", ""))]
+        for m in own_words:
+            drafts.setdefault(m["field_key"], {"text": "", "enough_information": False, "unsupported_claims": [], "error": "",
+                                               "note": "This employer asks for your own words, so nothing was drafted. Write it yourself.",
+                                               "label": m["label"], "drafted_at": datetime.now(timezone.utc).isoformat()})
         targets = [m for m in matched if m["field_key"] in gaps and draftable(m)]
         if not targets:
+            if own_words:
+                pr["drafts"] = drafts
+                app_row.platform_response = pr
+                session.commit()
             return {"drafted": 0, "reason": "no draftable gaps"}
         company = getattr(getattr(job, "company", None), "name", "") or ""
         jd = getattr(getattr(job, "description", None), "text_content", "") or ""
-        pr = dict(app_row.platform_response or {})
-        drafts = dict(pr.get("drafts") or {})
         n = 0
         for m in targets:
             if m["field_key"] in drafts and drafts[m["field_key"]].get("text"):
