@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 596352b · sha-596352b
+Merge: retire pre-deploy dumps, nightly backup keeps 3
+
+
 ## 2026-09-11 · 7dad871 · sha-7dad871
 Merge: sweeper handles interrupted dry runs
 
