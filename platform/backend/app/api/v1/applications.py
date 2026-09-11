@@ -250,6 +250,23 @@ class ApplicationUpdate(BaseModel):
     prepared_answers: list[ApplicationAnswer] | None = Field(default=None, max_length=200)
 
 
+def credentials_required(platform: str) -> bool:
+    """Does applying on this platform need a stored ATS login?
+
+    F369. The ``PlatformCredential`` gate on ``/prepare`` and
+    ``/readiness`` was built for the old server-side *login* flow. The
+    server-side submitters (F347+) drive the public application form —
+    Greenhouse, Recruitee, Workable and Ashby forms have no account —
+    so for those platforms the gate only ever blocked. Found on
+    production: every Ashby job returned "Platform credentials required
+    for ashby" from /prepare, and the job page's Apply button was
+    disabled by the same rule, so the F368 adapter was unreachable.
+    """
+    from app.services.submitters import auto_submittable_platforms
+
+    return (platform or "").strip().lower() not in auto_submittable_platforms()
+
+
 @router.get("/readiness/{job_id}")
 async def get_apply_readiness(
     job_id: UUID,
@@ -275,10 +292,11 @@ async def get_apply_readiness(
             resume_ready = True
             resume_info = {"id": str(resume.id), "label": resume.label or resume.filename}
 
-    # Credential check
-    cred_ready = False
+    # Credential check — only for platforms whose flow needs a login.
+    cred_required = credentials_required(job.platform)
+    cred_ready = not cred_required
     cred_info = None
-    if resume_ready:
+    if resume_ready and cred_required:
         cred = (await db.execute(
             select(PlatformCredential).where(
                 PlatformCredential.resume_id == user.active_resume_id,
@@ -328,7 +346,7 @@ async def get_apply_readiness(
 
     return {
         "resume": {"ready": resume_ready, **(resume_info or {})},
-        "credentials": {"ready": cred_ready, "platform": job.platform, **(cred_info or {})},
+        "credentials": {"ready": cred_ready, "required": cred_required, "platform": job.platform, **(cred_info or {})},
         "answer_book": {"ready": ab_count > 0, "count": ab_count},
         "resume_score": {"available": score_info is not None, **(score_info or {})},
         "existing_application": {"exists": existing is not None, "id": str(existing[0]) if existing else None, "status": existing[1] if existing else None},
@@ -374,18 +392,20 @@ async def prepare_application(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Enforce credential requirement
-    credential = (await db.execute(
-        select(PlatformCredential).where(
-            PlatformCredential.resume_id == resume.id,
-            PlatformCredential.platform == job.platform,
-        )
-    )).scalar_one_or_none()
-    if not credential or not credential.encrypted_password:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Platform credentials required for {job.platform}. Add credentials before applying.",
-        )
+    # Enforce credential requirement — F369: not on platforms the
+    # server-side submitters drive, whose public forms have no login.
+    if credentials_required(job.platform):
+        credential = (await db.execute(
+            select(PlatformCredential).where(
+                PlatformCredential.resume_id == resume.id,
+                PlatformCredential.platform == job.platform,
+            )
+        )).scalar_one_or_none()
+        if not credential or not credential.encrypted_password:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Platform credentials required for {job.platform}. Add credentials before applying.",
+            )
 
     # Check if application already exists
     existing = (await db.execute(
