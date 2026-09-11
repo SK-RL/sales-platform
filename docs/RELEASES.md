@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 5e13e13 · sha-5e13e13
+Merge: a walled form is never safe to auto-submit
+
+
 ## 2026-09-11 · a2cb3e3 · sha-a2cb3e3
 Merge: stop demanding an ATS login where the server drives a public form
 
