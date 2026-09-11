@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronRight, Settings2 } from "lucide-react";
+import { BookOpen, Bot, ChevronRight, Settings2 } from "lucide-react";
 import { getApplications, getRoutinePreferences, putRoutinePreferences } from "@/lib/api";
 import { AddJobLink } from "@/components/AddJobLink";
 import type { Application } from "@/lib/types";
@@ -79,9 +79,14 @@ export function AutoApplyPage() {
             &ldquo;Needs you&rdquo;.
           </p>
         </div>
-        <Link to="/routine" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
-          <Settings2 className="h-4 w-4" /> Settings
-        </Link>
+        <div className="flex shrink-0 items-center gap-4">
+          <Link to="/docs#auto-apply" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
+            <BookOpen className="h-4 w-4" /> Which sites are automatic?
+          </Link>
+          <Link to="/routine" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
+            <Settings2 className="h-4 w-4" /> Settings
+          </Link>
+        </div>
       </div>
 
       {/* 1. Paste a link */}

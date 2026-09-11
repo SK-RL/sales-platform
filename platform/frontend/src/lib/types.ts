@@ -1660,6 +1660,23 @@ export interface TopToApplyResponse {
 // F257 — Apply Routine preferences + manual queue
 export type RoutineTargetIntent = "queued" | "excluded";
 
+// F393 — per-ATS guide rows, derived server-side from the live registries.
+export interface AtsCoverageRow {
+  platform: string;
+  name: string;
+  level: "automatic" | "review" | "link" | "closed";
+  level_label: string;
+  link_example: string;
+  automatic: string[];
+  you: string[];
+  notes: string[];
+}
+
+export interface AtsCoverage {
+  items: AtsCoverageRow[];
+  counts: Record<"automatic" | "review" | "link" | "closed", number>;
+}
+
 export interface RoutinePreferences {
   // Convenience toggle: when true, picker keeps only global_remote
   // regardless of allowed_geographies.
