@@ -312,7 +312,9 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
                     Job.status.notin_(["archived", "expired"]),
                 ).order_by(Job.first_seen_at.desc())
             ).scalars().first()
-            if twin is not None and twin.platform in AGGREGATOR_PLATFORMS:
+            # Same rule for an older row of OUR platform whose id predates
+            # the namespacing (production rows created before F383).
+            if twin is not None and (twin.platform in AGGREGATOR_PLATFORMS or twin.platform == parsed.platform):
                 twin.raw_json = {**(twin.raw_json or {}), "repost_of": {"platform": twin.platform, "external_id": twin.external_id, "url": twin.url}}
                 twin.platform, twin.external_id, twin.url = parsed.platform, str(raw.get("external_id")), raw.get("url") or twin.url
                 twin.apply_url, twin.apply_platform, twin.apply_resolve_status = twin.url, parsed.platform, "resolved"

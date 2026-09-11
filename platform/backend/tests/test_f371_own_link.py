@@ -338,3 +338,21 @@ class TestRepostTwinBecomesThePosting:
         r = resolve_job_from_url("https://greenbone-ag.jobs.personio.com/job/2546372")
         assert r.job_id == "j-twin" and twin.platform == "personio" and twin.external_id == "personio-2546372"
         assert twin.raw_json["repost_of"]["platform"] == "himalayas" and twin.apply_resolve_status == "resolved"
+
+    def test_same_platform_twin_with_an_older_id_is_repointed(self, wired, monkeypatch):
+        co = Row(id="c1", name="Athennian", slug="athennian")
+        twin = Row(id="j-old", platform="rippling", external_id="e2d3287c-eea6-445b-b152-ee765f82d3a8", title="Senior Product Designer",
+                   url="https://ats.rippling.com/athennian/jobs/e2d3287c-eea6-445b-b152-ee765f82d3a8", company_id="c1", status="new", raw_json={},
+                   first_seen_at=None, apply_url=None, apply_platform=None, apply_resolve_status=None)
+        s = FakeSession(companies=[co])
+        def execute(stmt):
+            entity = stmt.column_descriptions[0].get("entity"); name = getattr(entity, "__name__", "")
+            if name == "Job":
+                return _Res([twin] if "lower(" in str(stmt).lower() else [])
+            return _Res({"Company": [co]}.get(name, []))
+        s.execute = execute
+        wired["session"] = s
+        wired["fetch"] = lambda p, sl: [{"external_id": "rippling-e2d3287c-eea6-445b-b152-ee765f82d3a8", "title": "Senior Product Designer", "url": twin.url, "company_name": "Athennian"}]
+        monkeypatch.setattr("app.workers.tasks.scan_task._upsert_job", lambda session, company, board, raw, **kw: "updated")
+        r = resolve_job_from_url("https://ats.rippling.com/athennian/jobs/e2d3287c-eea6-445b-b152-ee765f82d3a8")
+        assert r.job_id == "j-old" and twin.external_id == "rippling-e2d3287c-eea6-445b-b152-ee765f82d3a8"
