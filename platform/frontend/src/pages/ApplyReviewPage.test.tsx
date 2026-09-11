@@ -224,6 +224,31 @@ describe("human wall (F368)", () => {
     const btn = (await screen.findByText("Submit application")) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
   });
+
+  it("disables submit even when the form was read and nothing else blocks (Lever)", async () => {
+    // Seen on production: Lever, 10 extracted fields, zero blockers —
+    // the only thing in the way is the hCaptcha, and the button must
+    // say so by being disabled, not by failing after a click.
+    questions = {
+      questions: [{
+        field_key: "name", label: "Full name", field_type: "text", required: true,
+        options: [], description: "", answer: "Sarthak", match_source: "manual",
+        question_key: "name", confidence: "high", extraction_mode: "extracted",
+      }],
+      coverage: { total: 1, answered: 1, high_confidence: 1, new_entries: 0 },
+      schema: {
+        extraction_mode: "extracted", platform: "lever", supported: true,
+        wall: { vendor: "hCaptcha", reason: "Lever puts an hCaptcha checkbox on every application, so a person has to submit it." },
+      },
+      blocking: [],
+      safe_to_auto_submit: false,
+    };
+    renderPage();
+    expect(await screen.findByText(/hCaptcha checkbox/i)).toBeTruthy();
+    const btn = (await screen.findByText("Submit application")) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(screen.getByText("Sarthak")).toBeTruthy();  // answers still shown to copy
+  });
 });
 
 describe("clean application", () => {

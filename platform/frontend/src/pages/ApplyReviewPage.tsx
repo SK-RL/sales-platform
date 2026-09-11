@@ -123,7 +123,9 @@ export function ApplyReviewPage() {
   // engages — which is exactly how the button ended up live on first
   // paint.
   const checksReady = Boolean(detailQ.data) && Boolean(preview);
-  const canSubmit = checksReady && blocking.length === 0 && !guessedForm;
+  // A wall (F368) is a platform-level blocker: the worker would refuse,
+  // so the button must not offer it.
+  const canSubmit = checksReady && blocking.length === 0 && !guessedForm && !wall;
 
   const go = (delta: number) => {
     setIndex((i) => Math.min(Math.max(i + delta, 0), Math.max(total - 1, 0)));

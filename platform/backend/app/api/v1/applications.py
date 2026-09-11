@@ -1167,6 +1167,7 @@ async def preview_job_questions(
     from app.services.question_service import get_or_fetch_questions, auto_populate_answer_book
     from app.workers.tasks._answer_prep import blocking_gaps, match_questions_to_answers
     from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS, human_wall_for
+    from app.services.submitters import auto_submittable_platforms
 
     logger = logging.getLogger(__name__)
 
@@ -1295,7 +1296,16 @@ async def preview_job_questions(
             "wall": human_wall_for(job.platform),
         },
         "blocking": blocking,
-        "safe_to_auto_submit": not blocking and extraction_mode == "extracted",
+        # F368 — and the platform must be one we can actually drive. A
+        # Lever form can be fully extracted and unblocked and still need
+        # a person for its hCaptcha; saying "safe" there offered a Submit
+        # the worker would refuse.
+        "safe_to_auto_submit": (
+            not blocking
+            and extraction_mode == "extracted"
+            and human_wall_for(job.platform) is None
+            and job.platform in auto_submittable_platforms()
+        ),
     }
 
 
