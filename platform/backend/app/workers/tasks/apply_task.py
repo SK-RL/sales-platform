@@ -468,6 +468,19 @@ def sweep_stuck_in_flight() -> dict:
         ).scalars().all()
 
         for row in stuck:
+            prev = row.platform_response if isinstance(row.platform_response, dict) else {}
+            if (prev.get("queued") or {}).get("dry_run"):
+                # F401 — an interrupted DRY RUN sent nothing; it goes back
+                # to prepared with a plain reason instead of "failed, check
+                # the employer's site".
+                row.status = STATUS_PREPARED
+                row.platform_response = {
+                    **{k: v for k, v in prev.items() if k not in ("queued",)},
+                    "gate": "interrupted",
+                    "reason": "The dry run was interrupted by a worker restart. Nothing was sent — run it again.",
+                    "swept_at": datetime.now(timezone.utc).isoformat(),
+                }
+                continue
             row.status = STATUS_FAILED
             row.platform_response = {
                 "error": (

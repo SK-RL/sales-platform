@@ -148,3 +148,27 @@ def test_every_task_module_is_imported_by_the_registry():
         for n, v in vars(mod).items():
             if isinstance(v, Task):
                 assert v.name in registered, f"{v.name} is not registered — add {m.name} to app/workers/tasks/__init__.py"
+
+
+def test_f401_sweeper_returns_an_interrupted_dry_run_to_prepared(monkeypatch):
+    from types import SimpleNamespace
+    from app.workers.tasks import apply_task
+
+    dry = SimpleNamespace(status="in_flight", platform_response={"queued": {"task_id": "t", "dry_run": True, "at": "x"}, "drafts": {"q": {"text": "keep"}}})
+    real = SimpleNamespace(status="in_flight", platform_response={"queued": {"task_id": "t2", "dry_run": False, "at": "x"}})
+
+    class Q:
+        def scalars(self): return self
+        def all(self): return [dry, real]
+
+    class S:
+        def execute(self, stmt): return Q()
+        def commit(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(apply_task, "SyncSession", lambda: S())
+    out = apply_task.sweep_stuck_in_flight()
+    assert out["swept"] == 2
+    assert dry.status == "prepared" and dry.platform_response["gate"] == "interrupted" and dry.platform_response["drafts"]["q"]["text"] == "keep"
+    assert "queued" not in dry.platform_response
+    assert real.status == "failed" and "check the employer" in real.platform_response["error"]
