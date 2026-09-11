@@ -66,6 +66,11 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("recruitee", re.compile(r"^https?://(?!www\.|api\.|jobs\.)([a-z0-9-]+)\.recruitee\.com/o/([^/?#]+)", re.I)),
     ("bamboohr", re.compile(r"^https?://(?!www\.|api\.|jobs\.)([a-z0-9-]+)\.bamboohr\.com/careers/(\d+)", re.I)),
     ("smartrecruiters", re.compile(r"^https?://jobs\.smartrecruiters\.com/([^/?#]+)/(\d+)", re.I)),
+    # F376 — an aggregator repost. Resolves to the repost row (created
+    # from the Himalayas API by company slug when we never scanned it);
+    # the endpoint then runs the company + title resolver (F375) to reach
+    # the employer's form.
+    ("himalayas", re.compile(r"^https?://(?:www\.)?himalayas\.app/companies/([^/?#]+)/jobs/([^/?#]+)", re.I)),
 )
 
 # Shapes we recognise but cannot resolve — refused with a specific reason.
@@ -82,7 +87,7 @@ _KNOWN_UNRESOLVABLE: tuple[tuple[re.Pattern[str], str], ...] = (
 
 _SUPPORTED_HINT = (
     "Paste a posting link from Greenhouse, Lever, Ashby, Workable, Recruitee, "
-    "BambooHR or SmartRecruiters."
+    "BambooHR, SmartRecruiters, or a Himalayas job page."
 )
 
 
@@ -94,6 +99,8 @@ def _external_id(platform: str, slug: str, token: str) -> str | None:
         return f"bamboo-{slug}-{token}"
     if platform == "smartrecruiters":
         return f"sr-{token}"
+    if platform == "himalayas":
+        return f"himalayas-{token}"  # fetcher: guid's last path segment
     return None  # recruitee: URL slug ≠ API id
 
 

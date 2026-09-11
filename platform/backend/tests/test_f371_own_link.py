@@ -6,6 +6,8 @@ an ATS we read — as a normal catalogue Job — or refuses with the reason
 and creates nothing.
 """
 
+import uuid
+
 import pytest
 
 import app.services.own_link as ol
@@ -24,6 +26,8 @@ class TestParse:
         ("https://channable.recruitee.com/o/senior-devops-engineer", "recruitee", "channable", "senior-devops-engineer", None),
         ("https://icmarkets.bamboohr.com/careers/128/apply", "bamboohr", "icmarkets", "128", "bamboo-icmarkets-128"),
         ("https://jobs.smartrecruiters.com/Colliers/744000148671909-property-graduate", "smartrecruiters", "Colliers", "744000148671909", "sr-744000148671909"),
+        # F376 — a Himalayas repost resolves to the repost row; the endpoint then finds the employer's form.
+        ("https://himalayas.app/companies/bishop-fox/jobs/penetration-tester", "himalayas", "bishop-fox", "penetration-tester", "himalayas-penetration-tester"),
     ])
     def test_recognised_shapes(self, url, platform, slug, token, ext):
         p = parse_job_url(url)
@@ -204,3 +208,53 @@ class TestEndpoint:
         from app.api.v1 import applications
         src = inspect.getsource(applications.application_from_url)
         assert "auto_submittable_platforms()" in src and "human_wall_for(" in src
+
+
+class TestRepostLinks:
+    """F376 — pasting a Himalayas link goes through the resolver to the
+    employer's form, or is refused with the reason."""
+
+    def test_endpoint_routes_reposts_through_the_resolver(self):
+        import inspect
+        from app.api.v1 import applications
+        src = inspect.getsource(applications.application_from_url)
+        assert "AGGREGATOR_PLATFORMS" in src and "_resolve_repost" in src
+
+    def test_unresolved_repost_is_refused_not_prepared(self, monkeypatch):
+        from fastapi import HTTPException
+        from app.api.v1 import applications
+        from app.services.own_link import ResolvedJob
+
+        class S:
+            def get(self, model, pk):
+                return Row(id=pk, title="DevSecOps Engineer", company_id=None)
+            def close(self):
+                pass
+        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: S())
+        monkeypatch.setattr("app.services.aggregator_resolver.resolve_job",
+                            lambda session, row: {"resolved_job_id": None, "apply_platform": "workday"})
+        r = ResolvedJob(str(uuid.uuid4()), "himalayas", "caci", "himalayas-x", "DevSecOps Engineer", "CACI", "https://himalayas.app/x", False)
+        with pytest.raises(HTTPException) as e:
+            applications._resolve_repost(r)
+        assert e.value.status_code == 422
+        assert "workday" in e.value.detail and "paste the employer" in e.value.detail
+
+    def test_resolved_repost_returns_the_employers_job(self, monkeypatch):
+        from app.api.v1 import applications
+        from app.services.own_link import ResolvedJob
+
+        real_id, repost_id, co_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        rows = {repost_id: Row(id=repost_id, title="Penetration Tester", company_id=co_id),
+                real_id: Row(id=real_id, platform="greenhouse", external_id="1", title="Penetration Tester",
+                             url="https://boards.greenhouse.io/bishopfox/jobs/1", company_id=co_id),
+                co_id: Row(id=co_id, name="Bishop Fox")}
+        class S:
+            def get(self, model, pk):
+                return rows.get(pk)
+            def close(self):
+                pass
+        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: S())
+        monkeypatch.setattr("app.services.aggregator_resolver.resolve_job",
+                            lambda session, row: {"resolved_job_id": str(real_id), "apply_platform": "greenhouse"})
+        out = applications._resolve_repost(ResolvedJob(str(repost_id), "himalayas", "bishop-fox", "himalayas-x", "Penetration Tester", "Bishop Fox", "https://himalayas.app/x", False))
+        assert out.job_id == str(real_id) and out.platform == "greenhouse" and out.company_name == "Bishop Fox"
