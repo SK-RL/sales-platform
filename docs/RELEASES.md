@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 912fa70 · sha-912fa70
+feat(ats): Breezy HR — scan, extract, submit
+
+
 ## 2026-09-11 · dda5fce · sha-dda5fce
 Merge: bound paste-time resolution; canonical URLs for probe hits
 
