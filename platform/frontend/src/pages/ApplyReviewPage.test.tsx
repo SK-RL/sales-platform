@@ -40,7 +40,7 @@ vi.mock("@/lib/api", () => ({
   getJobQuestions: vi.fn(async () => questions),
   submitApplication: (...a: any[]) => submitApplication(...(a as [])),
   updateApplication: (...a: any[]) => updateApplication(...(a as [])),
-  answerGap: (...a: any[]) => answerGap(...(a as [])),
+  answerGap: (...a: any[]) => answerGap(...(a as [string, any])),
 }));
 
 import { ApplyReviewPage } from "./ApplyReviewPage";
