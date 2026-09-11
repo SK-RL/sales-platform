@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 317cb8f · sha-317cb8f
+Merge: per-site auto-apply guide + answer-matching correctness (F393, F394)
+
+
 ## 2026-09-11 · 00194f9 · sha-00194f9
 Merge: ATS batch 2 — Pinpoint, Jobvite, Hireology, Dover, Gem auto-apply; Zoho scan; YC/JOIN/Polymer/CareerPlug refusals
 
