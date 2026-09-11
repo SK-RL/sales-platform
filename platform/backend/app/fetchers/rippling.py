@@ -75,7 +75,7 @@ class RipplingFetcher(BaseFetcher):
             remote = "remote" in location_raw.lower()
         dept = raw.get("department")
         return {
-            "external_id": uuid_,
+            "external_id": f"rippling-{uuid_}",  # jobs.external_id is UNIQUE across platforms
             "company_slug": slug,
             "title": title,
             "url": raw.get("url") or f"https://ats.rippling.com/{slug}/jobs/{uuid_}",

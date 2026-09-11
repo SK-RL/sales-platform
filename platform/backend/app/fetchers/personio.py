@@ -57,7 +57,7 @@ class PersonioFetcher(BaseFetcher):
         schedule = _text(block, "schedule")
         remote = bool(re.search(r"remote|home ?office", f"{office} {title}", re.I))
         return {
-            "external_id": pid,
+            "external_id": f"personio-{pid}",  # jobs.external_id is UNIQUE across platforms
             "company_slug": slug,
             "title": title,
             "url": f"{base}/job/{pid}",

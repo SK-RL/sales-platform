@@ -65,7 +65,8 @@ class BreezyFetcher(BaseFetcher):
         department = (dept.get("name") if isinstance(dept, dict) else dept) or ""
         company = raw.get("company") or {}
         return {
-            "external_id": str(raw.get("id", "")),
+            # Namespaced: jobs.external_id is UNIQUE across platforms (F343).
+            "external_id": f"breezy-{raw.get('id', '')}",
             "company_slug": slug,
             "title": (raw.get("name") or "").strip(),
             "url": raw.get("url") or f"https://{slug}.breezy.hr/p/{raw.get('friendly_id') or raw.get('id')}",

@@ -1280,7 +1280,8 @@ def normalise_rippling_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _fetch_rippling_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
     if not job_external_id or not slug:
         return []
-    return normalise_rippling_rows(rippling_form_rows(f"https://ats.rippling.com/{slug}/jobs/{job_external_id}/apply"))
+    uuid_ = job_external_id.split("-", 1)[1] if job_external_id.startswith("rippling-") else job_external_id
+    return normalise_rippling_rows(rippling_form_rows(f"https://ats.rippling.com/{slug}/jobs/{uuid_}/apply"))
 
 
 # ---------------------------------------------------------------------------
@@ -1381,7 +1382,8 @@ def _fetch_jazzhr_questions(job_external_id: str, slug: str) -> list[dict[str, A
         return []
     import httpx
 
-    url = f"https://{slug}.applytojob.com/apply/{job_external_id}/"
+    code = job_external_id.split("-", 1)[1] if job_external_id.startswith("jazzhr-") else job_external_id
+    url = f"https://{slug}.applytojob.com/apply/{code}/"
     with httpx.Client(timeout=25, follow_redirects=True, headers=_BROWSER_UA) as client:
         resp = client.get(url)
         resp.raise_for_status()

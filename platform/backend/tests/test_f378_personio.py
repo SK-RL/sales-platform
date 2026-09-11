@@ -43,7 +43,7 @@ LIVE_ROWS = [
 class TestFetcher:
     def test_normalises_a_position(self):
         j = PersonioFetcher()._normalize(XML_BLOCK, "greenbone-ag", "https://greenbone-ag.jobs.personio.com")
-        assert j["external_id"] == "2546372" and j["url"] == "https://greenbone-ag.jobs.personio.com/job/2546372"
+        assert j["external_id"] == "personio-2546372" and j["url"] == "https://greenbone-ag.jobs.personio.com/job/2546372"
         assert j["remote_scope"] == "remote" and j["department"] == "Sales" and j["raw_json"]["company_name"] == "Greenbone AG"
 
     def test_registered(self):
@@ -92,5 +92,5 @@ class TestSubmitter:
 class TestOwnLink:
     def test_both_hosts_parse(self):
         p = parse_job_url("https://greenbone-ag.jobs.personio.com/job/2546372?language=en")
-        assert (p.platform, p.slug, p.external_id) == ("personio", "greenbone-ag", "2546372")
+        assert (p.platform, p.slug, p.external_id) == ("personio", "greenbone-ag", "personio-2546372")
         assert parse_job_url("https://maibornwolff.jobs.personio.de/job/1195240/apply").slug == "maibornwolff"

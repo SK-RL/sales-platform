@@ -56,7 +56,7 @@ class TestFetcher:
 
     def test_normalise(self):
         j = RipplingFetcher()._normalize(API_ROWS[1], "athennian")
-        assert j["platform"] == "rippling" and j["remote_scope"] == "remote" and j["url"].endswith(API_ROWS[1]["uuid"])
+        assert j["platform"] == "rippling" and j["remote_scope"] == "remote" and j["url"].endswith(API_ROWS[1]["uuid"]) and j["external_id"].startswith("rippling-")
 
 
 class TestExtraction:
@@ -101,4 +101,4 @@ class TestSubmitter:
 class TestOwnLink:
     def test_parses(self):
         p = parse_job_url("https://ats.rippling.com/athennian/jobs/e2d3287c-eea6-445b-b152-ee765f82d3a8/apply")
-        assert (p.platform, p.slug, p.external_id) == ("rippling", "athennian", "e2d3287c-eea6-445b-b152-ee765f82d3a8")
+        assert (p.platform, p.slug, p.external_id) == ("rippling", "athennian", "rippling-e2d3287c-eea6-445b-b152-ee765f82d3a8")

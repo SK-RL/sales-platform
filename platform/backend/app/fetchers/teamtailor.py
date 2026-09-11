@@ -64,7 +64,7 @@ class TeamtailorFetcher(BaseFetcher):
         if status == "fully_remote" and not re.search(r"remote", loc, re.I):
             loc = f"Remote ({loc})" if loc else "Remote"
         return {
-            "external_id": m.group(1),
+            "external_id": f"teamtailor-{m.group(1)}",  # jobs.external_id is UNIQUE across platforms
             "company_slug": slug,
             "title": title,
             "url": link.split("?", 1)[0],

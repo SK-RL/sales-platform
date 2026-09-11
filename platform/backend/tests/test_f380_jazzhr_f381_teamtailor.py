@@ -47,7 +47,7 @@ JAZZ_FORM = """
 class TestJazzHR:
     def test_board_scrape_dedupes_by_code(self):
         jobs = JazzHRFetcher().parse_board(JAZZ_BOARD, "lumivero")
-        assert len(jobs) == 1 and jobs[0]["external_id"] == "MSVT14vftm" and jobs[0]["remote_scope"] == "remote"
+        assert len(jobs) == 1 and jobs[0]["external_id"] == "jazzhr-MSVT14vftm" and jobs[0]["remote_scope"] == "remote"
         assert jobs[0]["department"] == "Engineering"
 
     def test_form_extraction(self):
@@ -69,8 +69,8 @@ class TestJazzHR:
         class C:
             def get(self, url): return R()
         monkeypatch.setattr(f, "_get_client", lambda: C())
-        j = f.fetch_one("lumivero", "MSVT14vftm")
-        assert j["title"] == "Devops Engineer" and j["raw_json"]["unlisted"] is True
+        j = f.fetch_one("lumivero", "jazzhr-MSVT14vftm")
+        assert j["title"] == "Devops Engineer" and j["external_id"] == "jazzhr-MSVT14vftm" and j["raw_json"]["unlisted"] is True
 
     def test_walled_and_extract_only(self):
         assert "jazzhr" in SUPPORTED_QUESTION_PLATFORMS
@@ -79,7 +79,7 @@ class TestJazzHR:
 
     def test_own_link(self):
         p = parse_job_url("https://lumivero.applytojob.com/apply/MSVT14vftm/Devops-Engineer")
-        assert (p.platform, p.slug, p.external_id) == ("jazzhr", "lumivero", "MSVT14vftm")
+        assert (p.platform, p.slug, p.external_id) == ("jazzhr", "lumivero", "jazzhr-MSVT14vftm")
 
 
 TT_ITEM = """<title>Build &amp; Release Support Engineer | CI/CD</title><link>https://virtasant.teamtailor.com/jobs/8362291-build-release</link>
@@ -107,7 +107,7 @@ TT_ROWS = [
 class TestTeamtailor:
     def test_feed_item(self):
         j = TeamtailorFetcher()._normalize(TT_ITEM, "virtasant")
-        assert j["external_id"] == "8362291" and j["remote_scope"] == "remote" and j["department"] == "Engineering"
+        assert j["external_id"] == "teamtailor-8362291" and j["remote_scope"] == "remote" and j["department"] == "Engineering"
         assert j["title"].startswith("Build & Release")
 
     def test_extraction(self):
@@ -134,7 +134,7 @@ class TestTeamtailor:
         assert TeamtailorSubmitter._value_present(f, "USA") and not TeamtailorSubmitter._value_present(f, "")
 
     def test_own_link_including_regional_hosts(self):
-        assert parse_job_url("https://virtasant.teamtailor.com/jobs/8237846-lead").external_id == "8237846"
+        assert parse_job_url("https://virtasant.teamtailor.com/jobs/8237846-lead").external_id == "teamtailor-8237846"
         assert parse_job_url("https://ioet.na.teamtailor.com/jobs/685145-site-reliability-engineer").slug == "ioet"
 
 

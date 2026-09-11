@@ -58,7 +58,7 @@ class JazzHRFetcher(BaseFetcher):
             meta = [" ".join(li.get_text(" ", strip=True).split()) for li in item.select("ul.list-inline li")]
             location = meta[0] if meta else ""
             out.append({
-                "external_id": code,
+                "external_id": f"jazzhr-{code}",  # jobs.external_id is UNIQUE across platforms
                 "company_slug": slug,
                 "title": title,
                 "url": a["href"].split("?", 1)[0],
@@ -75,12 +75,13 @@ class JazzHRFetcher(BaseFetcher):
         """A posting can be live while unlisted on the board (seen on
         lumivero: the DevOps page answers 200 but the board omits it), so
         a pasted link is resolved from the posting page itself."""
-        listed = next((j for j in self.fetch(slug) if j["external_id"] == external_id), None)
+        code = external_id.split("-", 1)[1] if external_id.startswith("jazzhr-") else external_id
+        listed = next((j for j in self.fetch(slug) if j["external_id"] == f"jazzhr-{code}"), None)
         if listed:
             return listed
         client = self._get_client()
         try:
-            resp = client.get(f"https://{slug}.applytojob.com/apply/{external_id}/")
+            resp = client.get(f"https://{slug}.applytojob.com/apply/{code}/")
         except httpx.RequestError:
             return None
         if resp.status_code != 200 or "applytojob.com" not in str(resp.url):
@@ -91,7 +92,7 @@ class JazzHRFetcher(BaseFetcher):
         if not title:
             return None
         return {
-            "external_id": external_id, "company_slug": slug, "title": title,
-            "url": f"https://{slug}.applytojob.com/apply/{external_id}/", "platform": self.PLATFORM,
-            "location_raw": "", "remote_scope": "", "department": "", "raw_json": {"code": external_id, "unlisted": True},
+            "external_id": f"jazzhr-{code}", "company_slug": slug, "title": title,
+            "url": f"https://{slug}.applytojob.com/apply/{code}/", "platform": self.PLATFORM,
+            "location_raw": "", "remote_scope": "", "department": "", "raw_json": {"code": code, "unlisted": True},
         }

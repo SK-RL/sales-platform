@@ -160,4 +160,6 @@ class TestCanonicalUrl:
     def test_other_platforms(self):
         from app.services.company_lookup import canonical_posting_url
         assert canonical_posting_url("ashby", "ramp", {"external_id": "abc"}) == "https://jobs.ashbyhq.com/ramp/abc"
+        assert canonical_posting_url("breezy", "vetsez", {"external_id": "breezy-18df"}) == "https://vetsez.breezy.hr/p/18df"
+        assert canonical_posting_url("rippling", "athennian", {"external_id": "rippling-uuid-1"}) == "https://ats.rippling.com/athennian/jobs/uuid-1"
         assert canonical_posting_url("recruitee", "x", {"external_id": "recruitee-1", "url": "https://x.recruitee.com/o/y"}) == "https://x.recruitee.com/o/y"

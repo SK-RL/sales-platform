@@ -254,7 +254,7 @@ class TestRepostLinks:
         companies.slug is unique."""
         existing = Row(id="c-existing", name="Greenbone Networks", slug="greenbone-ag")
         wired["session"] = FakeSession(companies=[existing])
-        wired["fetch"] = lambda p, s: [{"external_id": "2546372", "title": "Account Manager", "url": "https://greenbone-ag.jobs.personio.com/job/2546372", "company_name": "Greenbone AG"}]
+        wired["fetch"] = lambda p, s: [{"external_id": "personio-2546372", "title": "Account Manager", "url": "https://greenbone-ag.jobs.personio.com/job/2546372", "company_name": "Greenbone AG"}]
         r = resolve_job_from_url("https://greenbone-ag.jobs.personio.com/job/2546372")
         kinds = [a.__class__.__name__ for a in wired["session"].added]
         assert "Company" not in kinds and r.company_name == "Greenbone Networks"
@@ -309,3 +309,32 @@ class TestRepostIsQueued:
         with pytest.raises(HTTPException) as e:
             applications._resolve_repost(ResolvedJob(str(row.id), "himalayas", "x", "himalayas-y", row.title, "", "u", False))
         assert e.value.status_code == 422 and "workday" in e.value.detail
+
+
+class TestRepostTwinBecomesThePosting:
+    """F316 keeps one active row per (company, title). When the employer's
+    posting collides with its aggregator repost, the repost row is
+    re-pointed to the employer's form instead of failing the paste
+    (production: Personio greenbone-ag vs its Himalayas copy)."""
+
+    def test_twin_is_repointed(self, wired, monkeypatch):
+        co = Row(id="c1", name="Greenbone AG", slug="greenbone-ag")
+        twin = Row(id="j-twin", platform="himalayas", external_id="himalayas-account-manager", title="Account Manager (m/w/d)",
+                   url="https://himalayas.app/x", company_id="c1", status="new", raw_json={}, first_seen_at=None,
+                   apply_url=None, apply_platform=None, apply_resolve_status=None)
+        s = FakeSession(companies=[co])
+        # the platform-scoped lookup misses, the (company, title) lookup finds the repost
+        calls = {"n": 0}
+        def execute(stmt):
+            entity = stmt.column_descriptions[0].get("entity"); name = getattr(entity, "__name__", "")
+            if name == "Job":
+                calls["n"] += 1
+                return _Res([twin] if "lower(" in str(stmt).lower() else [])
+            return _Res({"CompanyATSBoard": [], "Company": [co]}.get(name, []))
+        s.execute = execute
+        wired["session"] = s
+        wired["fetch"] = lambda p, sl: [{"external_id": "personio-2546372", "title": "Account Manager (m/w/d)", "url": "https://greenbone-ag.jobs.personio.com/job/2546372", "company_name": "Greenbone AG"}]
+        monkeypatch.setattr("app.workers.tasks.scan_task._upsert_job", lambda session, company, board, raw, **kw: "updated")
+        r = resolve_job_from_url("https://greenbone-ag.jobs.personio.com/job/2546372")
+        assert r.job_id == "j-twin" and twin.platform == "personio" and twin.external_id == "personio-2546372"
+        assert twin.raw_json["repost_of"]["platform"] == "himalayas" and twin.apply_resolve_status == "resolved"

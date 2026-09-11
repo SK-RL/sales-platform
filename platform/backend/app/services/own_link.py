@@ -98,8 +98,10 @@ _SUPPORTED_HINT = (
 
 def _external_id(platform: str, slug: str, token: str) -> str | None:
     """The fetcher's external_id for this token, mirroring each fetcher."""
-    if platform in ("greenhouse", "lever", "ashby", "workable", "breezy", "personio", "rippling", "jazzhr", "teamtailor"):
+    if platform in ("greenhouse", "lever", "ashby", "workable"):
         return token
+    if platform in ("breezy", "personio", "rippling", "jazzhr", "teamtailor"):
+        return f"{platform}-{token}"  # namespaced, mirroring each fetcher (jobs.external_id is UNIQUE)
     if platform == "bamboohr":
         return f"bamboo-{slug}-{token}"
     if platform == "smartrecruiters":
@@ -292,7 +294,33 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
             .order_by(Job.first_seen_at.desc())
         ).scalars().first()
         if job is None:
-            raise OwnLinkError(500, "The posting was read but could not be saved.")
+            # F316 keeps ONE active row per (company, title): when the same
+            # posting already exists as an aggregator repost (Personio
+            # greenbone-ag vs its Himalayas copy, seen on production), the
+            # scanner's upsert updated THAT row instead of inserting ours.
+            # The repost is the same job, so it becomes the employer's
+            # posting: platform, id and URL are re-pointed to the form we
+            # can drive.
+            from sqlalchemy import func
+
+            from app.services.aggregator_resolver import AGGREGATOR_PLATFORMS
+
+            twin = session.execute(
+                select(Job).where(
+                    Job.company_id == company.id,
+                    func.lower(func.trim(Job.title)) == (raw.get("title") or "").strip().lower(),
+                    Job.status.notin_(["archived", "expired"]),
+                ).order_by(Job.first_seen_at.desc())
+            ).scalars().first()
+            if twin is not None and twin.platform in AGGREGATOR_PLATFORMS:
+                twin.raw_json = {**(twin.raw_json or {}), "repost_of": {"platform": twin.platform, "external_id": twin.external_id, "url": twin.url}}
+                twin.platform, twin.external_id, twin.url = parsed.platform, str(raw.get("external_id")), raw.get("url") or twin.url
+                twin.apply_url, twin.apply_platform, twin.apply_resolve_status = twin.url, parsed.platform, "resolved"
+                session.commit()
+                job = twin
+                action = "new"
+            else:
+                raise OwnLinkError(500, "The posting was read but could not be saved.")
         return ResolvedJob(str(job.id), job.platform, parsed.slug, job.external_id, job.title,
                            company.name, job.url, created=(action == "new"))
     except OwnLinkError:

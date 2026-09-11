@@ -197,6 +197,8 @@ def canonical_posting_url(platform: str, slug: str, raw: dict) -> str:
     from the probe, so build the canonical URL ourselves.
     """
     ext = str(raw.get("external_id") or "")
+    if ext.startswith(f"{platform}-"):
+        ext = ext[len(platform) + 1:]  # the new fetchers namespace their ids
     url = raw.get("url") or ""
     if platform == "greenhouse" and ext.isdigit():
         return f"https://boards.greenhouse.io/{slug}/jobs/{ext}"

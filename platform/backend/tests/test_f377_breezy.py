@@ -57,7 +57,7 @@ LIVE_ROWS = [
 class TestFetcher:
     def test_normalises_a_feed_item(self):
         j = BreezyFetcher()._normalize(FEED_ITEM, "vetsez")
-        assert j["external_id"] == "18df3ec23bf901" and j["platform"] == "breezy"
+        assert j["external_id"] == "breezy-18df3ec23bf901" and j["platform"] == "breezy"
         assert j["url"].startswith("https://vetsez.breezy.hr/p/18df3ec23bf901")
         assert j["location_raw"] == "Remote (Tampa, FL)" and j["remote_scope"] == "remote"
         assert j["raw_json"]["company_name"] == "VetsEZ"
@@ -144,7 +144,7 @@ class TestSubmitter:
 class TestOwnLink:
     def test_breezy_posting_link_parses(self):
         p = parse_job_url("https://vetsez.breezy.hr/p/18df3ec23bf901-appian-integration-developer/apply")
-        assert (p.platform, p.slug, p.external_id) == ("breezy", "vetsez", "18df3ec23bf901")
+        assert (p.platform, p.slug, p.external_id) == ("breezy", "vetsez", "breezy-18df3ec23bf901")
 
     def test_marketing_host_is_not_a_board(self):
         assert parse_job_url("https://app.breezy.hr/p/abc") is None
