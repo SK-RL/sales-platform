@@ -117,6 +117,7 @@ ATS_URL_PATTERNS = {
     "recruitee": "https://{slug}.recruitee.com",
     "breezy": "https://{slug}.breezy.hr",
     "personio": "https://{slug}.jobs.personio.com",
+    "rippling": "https://ats.rippling.com/{slug}/jobs",
     "linkedin": "https://www.linkedin.com/company/{slug}/jobs",
 }
 

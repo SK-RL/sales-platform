@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -136,6 +136,7 @@ def fetch_application_questions(
         "recruitee": _fetch_recruitee_questions,
         "breezy": _fetch_breezy_questions,
         "personio": _fetch_personio_questions,
+        "rippling": _fetch_rippling_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1146,3 +1147,127 @@ def _fetch_personio_questions(job_external_id: str, slug: str) -> list[dict[str,
     # ?language=en: the page otherwise renders in the tenant's default
     # language, and the answer book matches on English labels.
     return normalise_personio_rows(personio_form_rows(raw["url"].rstrip("/") + "/apply?language=en"))
+
+
+# ---------------------------------------------------------------------------
+# Rippling — F379, read from the rendered apply page
+# ---------------------------------------------------------------------------
+# Verified on ats.rippling.com/athennian/jobs/{uuid}/apply. React form;
+# input ``name``s are random per render and ids are positional, but every
+# control carries ``data-testid="input-{key}"`` (first_name, last_name,
+# email, phone_number, current_company, linkedin_link; the résumé and
+# cover-letter file inputs sit in ``[data-testid=resume|cover_letter]``)
+# and ``aria-labelledby`` → the visible label; required is
+# ``aria-required`` or a trailing ``*`` span. Custom questions are radio
+# groups named ``customQuestions.{qid}.{optionId}`` whose question is the
+# <p> that precedes the field block; ``sms_opt_in`` is such a group too.
+# Comboboxes (pronouns, location) are ``input[role=combobox]`` and are
+# keyed from their label. Cloudflare Turnstile is loaded INVISIBLY (the
+# token is minted on submit; no widget) — the Ashby-v3 situation.
+
+_RIPPLING_FORM_READY = '[data-testid="input-email"]'
+
+_RIPPLING_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const byIds = ids => norm((ids || '').split(/\s+/).map(i => document.getElementById(i)?.innerText || '').join(' '));
+  const rows = [];
+  for (const e of document.querySelectorAll('input,textarea,select')) {
+    if (e.type === 'hidden') continue;
+    const tid = e.getAttribute('data-testid') || '';
+    let key = tid.startsWith('input-') ? tid.slice(6) : '';
+    let label = byIds(e.getAttribute('aria-labelledby')) || (e.labels && e.labels[0] ? norm(e.labels[0].innerText) : '') || e.getAttribute('aria-label') || e.placeholder || '';
+    label = label.replace(/^Total \d+ file selected\s*/i, '');
+    const field = e.closest('[data-testid="field"]') || e.closest('[role=radiogroup]')?.closest('[data-testid="field"]');
+    const star = !!(field && [...field.querySelectorAll('span')].some(s => norm(s.innerText) === '*'));
+    let question = '';
+    if (e.type === 'radio') {
+      let n = field ? field.parentElement : e.parentElement;
+      for (let i = 0; i < 4 && n && !question; i++) { const p = n.querySelector(':scope > * p, :scope > p'); if (p) question = norm(p.innerText); n = n.parentElement; }
+    }
+    if (e.type === 'file') { const wrap = e.closest('[data-testid]'); key = wrap ? wrap.getAttribute('data-testid') : key; }
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type || '', key, name: e.name || '', label, question,
+                role: e.getAttribute('role') || '', required: !!(e.getAttribute('aria-required') === 'true' || e.required || star),
+                value: e.value || '', option: e.type === 'radio' ? (byIds(e.getAttribute('aria-labelledby')) || e.value) : '' });
+  }
+  return rows;
+})()
+"""
+
+_RIPPLING_FIXED: dict[str, tuple[str, str]] = {
+    "first_name": ("first_name", "First name"),
+    "last_name": ("last_name", "Last name"),
+    "email": ("email", "Email"),
+    "phone_number": ("phone", "Phone number"),
+    "current_company": ("current_company", "Current company"),
+    "linkedin_link": ("linkedin_url", "LinkedIn Link"),
+}
+
+
+def rippling_form_rows(apply_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(apply_url, wait_until="domcontentloaded", wait_for_selector=_RIPPLING_FORM_READY)
+            await asyncio_sleep(3.0)
+            return await session.eval_js(_RIPPLING_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+async def asyncio_sleep(seconds: float) -> None:
+    import asyncio
+
+    await asyncio.sleep(seconds)
+
+
+def normalise_rippling_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    groups: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        typ, key, name, label = (r.get("type") or "").lower(), r.get("key") or "", r.get("name") or "", r.get("label") or ""
+        if typ == "file":
+            fk = "resume" if key == "resume" else "cover_letter_file" if key == "cover_letter" else ""
+            if fk and fk not in seen:
+                seen.add(fk)
+                results.append({"field_key": fk, "label": "Resume / CV" if fk == "resume" else "Cover Letter", "field_type": "file",
+                                "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        if typ == "radio":
+            g = groups.get(name)
+            if g is None:
+                q = r.get("question") or ("Consent to SMS updates" if name == "sms_opt_in" else name)
+                g = groups[name] = {"field_key": name, "label": q, "field_type": "select", "required": bool(r.get("required")),
+                                    "options": [], "description": ""}
+                results.append(g)
+            opt = r.get("option") or ""
+            if opt and opt not in g["options"]:
+                g["options"].append(opt)
+            continue
+        if key in _RIPPLING_FIXED:
+            fk, default_label = _RIPPLING_FIXED[key]
+        elif r.get("role") == "combobox" or key in ("select-search-input", "undefined", ""):
+            # An unlabeled combobox whose only text is its placeholder
+            # ("Search") is a widget helper (the phone country code), not
+            # a question the candidate is asked.
+            if not label or label.lower() == "search":
+                continue
+            fk, default_label = "rippling_" + _normalise_field_key(label), label
+        else:
+            fk, default_label = "rippling_" + _normalise_field_key(key), label or key
+        if fk in seen:
+            continue
+        seen.add(fk)
+        results.append({"field_key": fk, "label": label or default_label,
+                        "field_type": "textarea" if r.get("tag") == "textarea" else "text",
+                        "required": bool(r.get("required")), "options": [], "description": "",
+                        **({"combobox": True} if r.get("role") == "combobox" else {})})
+    return results
+
+
+def _fetch_rippling_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    return normalise_rippling_rows(rippling_form_rows(f"https://ats.rippling.com/{slug}/jobs/{job_external_id}/apply"))

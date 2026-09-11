@@ -142,7 +142,7 @@ function BreakdownTable({
   );
 }
 
-const SCAN_PLATFORMS = ["greenhouse", "lever", "ashby", "workable", "bamboohr", "himalayas", "wellfound", "jobvite", "smartrecruiters", "recruitee", "breezy", "personio", "weworkremotely", "remoteok", "remotive"];
+const SCAN_PLATFORMS = ["greenhouse", "lever", "ashby", "workable", "bamboohr", "himalayas", "wellfound", "jobvite", "smartrecruiters", "recruitee", "breezy", "personio", "rippling", "weworkremotely", "remoteok", "remotive"];
 
 export function MonitoringPage() {
   // F222: MonitoringPage is the ADMIN HEALTH page. If the backend itself

@@ -20,6 +20,7 @@ SOURCE_TIERS = {
     "recruitee": 2,
     "breezy": 2,
     "personio": 2,
+    "rippling": 2,
     "wellfound": 2,
     "linkedin": 2,
     "builtin": 2,

@@ -72,7 +72,7 @@ RemotePolicyFilter = Literal[
 # subclass in `app/fetchers/` — keep this tuple aligned with that.
 PlatformFilter = Literal[
     "greenhouse", "lever", "ashby", "workable", "bamboohr",
-    "smartrecruiters", "jobvite", "recruitee", "breezy", "personio", "wellfound", "himalayas",
+    "smartrecruiters", "jobvite", "recruitee", "breezy", "personio", "rippling", "wellfound", "himalayas",
     "linkedin", "remoteok", "remotive", "weworkremotely",
     # HN monthly "Who is hiring?" thread — aggregator (see
     # app/fetchers/hackernews.py). Filterable from the UI dropdown

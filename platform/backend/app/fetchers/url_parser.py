@@ -148,6 +148,11 @@ _URL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "jobvite",
     ),
+    # Rippling — ats.rippling.com/{slug}/jobs/{uuid}, optional /apply (F379).
+    (
+        re.compile(r"^https?://ats\.rippling\.com/(?P<slug>[^/?#]+)/jobs/(?P<external_id>[0-9a-f-]{36})", re.I),
+        "rippling",
+    ),
     # Personio — {slug}.jobs.personio.com/job/{id} (or .de), optional /apply (F378).
     (
         re.compile(r"^https?://(?P<slug>[a-z0-9-]+)\.jobs\.personio\.(?:com|de)/job/(?P<external_id>\d+)", re.I),
