@@ -116,5 +116,5 @@ class HireologyFetcher(BaseFetcher):
             "posted_at": raw.get("created_at") or "",
             "salary_range": salary,
             "raw_json": {"id": job_id, "company_name": ((raw.get("organization") or {}).get("name") or ""),
-                         "unlisted": bool(raw.get("unlisted"))},
+                         "unlisted": bool(raw.get("unlisted")), "description": raw.get("job_description") or ""},
         }

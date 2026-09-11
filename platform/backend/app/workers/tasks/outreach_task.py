@@ -113,7 +113,9 @@ def _run(session, application_id: str, contact_ids: list[str] | None) -> dict:
     book = [{"question_key": e.question_key, "question": e.question, "answer": e.answer or ""} for e in entries]
     resume = session.get(Resume, app_row.resume_id)
     resume_text = getattr(resume, "text_content", "") or ""
-    jd = getattr(getattr(job, "description", None), "text_content", "") or ""
+    from app.services.job_description_service import ensure_description_sync
+
+    jd, _jd_source = ensure_description_sync(session, job)
     company_name = getattr(company, "name", "") or ""
     facts = _company_facts(company) if company else ""
 

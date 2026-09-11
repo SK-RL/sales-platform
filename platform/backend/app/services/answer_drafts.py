@@ -34,6 +34,8 @@ Rules that override everything else:
 - Keep each fact attached to the employer or project where the material lists it. Do not merge roles, and do not describe a listed skill as daily work unless the material says so.
 - If the job's stated location or work arrangement conflicts with the candidate's saved preferences, you may say so briefly and honestly; never claim a willingness the material does not state.
 - If the material does not cover what the question asks, set "enough_information" to false and leave "answer" empty. Do not write a vague filler answer.
+- Answer the question that was asked, not a neighbouring one. The first sentence must answer it directly. "Why are you a good fit / why this role / why us" means: name the role, pick the two or three requirements from the job description that the candidate's material meets best, and give the evidence for each. It is not a summary of the whole career; leave out experience the role does not ask for.
+- If the JOB DESCRIPTION section says it is not available, you know only the title: answer from the title alone in 2-3 sentences and do not claim to know the role's requirements.
 - Match the length the question asks for; otherwise 2-5 sentences. No headings, no bullet lists unless the question asks for a list, no sign-off.
 - Do not mention that you are an AI, do not mention "the résumé", and do not address the recruiter by name.
 - Do not use em dashes.
@@ -77,8 +79,9 @@ def _json_block(text: str) -> dict:
 def _material(resume_text: str, book: list[dict], job_title: str, company: str, job_description: str) -> str:
     entries = "\n".join(f"- {e.get('question') or e.get('question_key')}: {e.get('answer')}"
                         for e in book if (e.get("answer") or "").strip())
+    jd = (job_description or "").strip()
     return (
-        f"JOB: {job_title} at {company}\n\nJOB DESCRIPTION (trimmed):\n{(job_description or '')[:6000]}\n\n"
+        f"JOB: {job_title} at {company}\n\nJOB DESCRIPTION (trimmed):\n{jd[:6000] if jd else '(not available: only the title is known)'}\n\n"
         f"CANDIDATE RÉSUMÉ:\n{(resume_text or '')[:9000]}\n\n"
         f"CANDIDATE'S SAVED ANSWERS:\n{entries[:3000] or '(none)'}"
     )
@@ -112,6 +115,7 @@ def draft_answer(
     if not data.get("enough_information") or not (data.get("answer") or "").strip():
         return Draft(enough_information=False, note="Your résumé and saved answers don't cover this, so nothing was drafted. Write it in your own words.")
     answer = re.sub(r"\s*—\s*", ", ", str(data["answer"]).strip())
+    basis = "your résumé and the job description" if (job_description or "").strip() else "your résumé and the job title only (no description was available for this posting)"
 
     # Second pass: every claim must trace back to the material.
     try:
@@ -120,10 +124,9 @@ def draft_answer(
     except Exception as exc:
         logger.info("answer_drafts: verify failed for %r: %s", question[:60], exc)
         claims = []
-        note = "Drafted from your résumé and the job description. The fact-check pass failed, so read it carefully."
-        return Draft(text=answer, enough_information=True, note=note)
+        return Draft(text=answer, enough_information=True, note=f"Drafted from {basis}. The fact-check pass failed, so read it carefully.")
     if not claims:
-        return Draft(text=answer, enough_information=True, note="Drafted from your résumé and the job description. Every claim traced back to your material. Edit freely, then save.")
+        return Draft(text=answer, enough_information=True, note=f"Drafted from {basis}. Every claim traced back to your material. Edit freely, then save.")
 
     # F403 — one revision pass: ask for the unsupported claims to be removed
     # or restated within the material, then check again. On the first prod
@@ -138,12 +141,12 @@ def draft_answer(
             still = [str(c).strip() for c in (_json_block(vtext).get("unsupported_claims") or []) if str(c).strip()]
             if not still:
                 return Draft(text=revised, enough_information=True,
-                             note=f"Drafted from your résumé and the job description, then revised to drop {len(claims)} claim{'s' if len(claims) != 1 else ''} your material didn't support. Every remaining claim traced back. Edit freely, then save.")
+                             note=f"Drafted from {basis}, then revised to drop {len(claims)} claim{'s' if len(claims) != 1 else ''} your material didn't support. Every remaining claim traced back. Edit freely, then save.")
             answer, claims = revised, still
     except Exception as exc:
         logger.info("answer_drafts: revise failed for %r: %s", question[:60], exc)
     return Draft(text=answer, enough_information=True, unsupported_claims=claims,
-                 note="Drafted from your résumé and the job description, but these claims could not be traced to your material. Edit them out or correct them before using it: " + "; ".join(claims[:4]))
+                 note=f"Drafted from {basis}, but these claims could not be traced to your material. Edit them out or correct them before using it: " + "; ".join(claims[:4]))
 
 
 _OWN_WORDS_RE = re.compile(

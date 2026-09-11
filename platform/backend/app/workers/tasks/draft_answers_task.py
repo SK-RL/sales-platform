@@ -92,14 +92,18 @@ def _run(session, application_id: str) -> dict:
             session.commit()
             return {"drafted": 0, "reason": "no draftable gaps"}
         company = getattr(getattr(job, "company", None), "name", "") or ""
-        jd = getattr(getattr(job, "description", None), "text_content", "") or ""
+        # F405 — a draft without the job description is a résumé dump.
+        from app.services.job_description_service import ensure_description_sync
+
+        jd, jd_source = ensure_description_sync(session, job, board.slug if board else "")
         n = 0
         for m in targets:
             if m["field_key"] in drafts and drafts[m["field_key"]].get("text"):
                 continue  # keep an existing draft (the user may be editing it)
             d = draft_answer(question=m["label"], description=m.get("description") or "", job_title=job.title, company=company,
                              job_description=jd, resume_text=getattr(resume, "text_content", "") or "", book=book)
-            drafts[m["field_key"]] = {**d.as_dict(), "label": m["label"], "drafted_at": datetime.now(timezone.utc).isoformat()}
+            drafts[m["field_key"]] = {**d.as_dict(), "label": m["label"], "drafted_at": datetime.now(timezone.utc).isoformat(),
+                                      "jd_source": jd_source}
             n += 1
         pr["drafts"] = drafts
         app_row.platform_response = pr
@@ -107,7 +111,8 @@ def _run(session, application_id: str) -> dict:
         logger.info("draft_gap_answers_task: %s drafts for application %s", n, application_id)
         # F401 — always leave a trace on the row, even when nothing was
         # drafted, so "why is there no draft?" is answerable from the API.
-        pr["drafts_run"] = {"at": datetime.now(timezone.utc).isoformat(), "drafted": n, "targets": [m["field_key"] for m in targets]}
+        pr["drafts_run"] = {"at": datetime.now(timezone.utc).isoformat(), "drafted": n, "targets": [m["field_key"] for m in targets],
+                            "jd_source": jd_source, "jd_words": len(jd.split())}
         app_row.platform_response = pr
         session.commit()
         return {"drafted": n}

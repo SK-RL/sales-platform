@@ -2432,6 +2432,37 @@ async def get_outreach(
             "running": bool(bundle.get("running"))}
 
 
+class RedraftRequest(BaseModel):
+    field_key: str | None = None   # None → every gap without a used draft
+
+
+@router.post("/{app_id}/redraft")
+async def redraft_answers(
+    app_id: UUID,
+    body: RedraftRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """F405 — throw away the draft(s) and write them again. The draft task
+    keeps an existing draft on purpose (the user may be editing it), so
+    this is the only way to get a fresh one, for example after the job
+    description was fetched or the Answer Book changed."""
+    from app.workers.tasks.draft_answers_task import draft_gap_answers_task
+
+    app = await _owned_application(db, app_id, user)
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    drafts = dict(pr.get("drafts") or {})
+    keys = [body.field_key] if body and body.field_key else [k for k, v in drafts.items() if not (v or {}).get("used")]
+    for k in keys:
+        drafts.pop(k, None)
+    pr["drafts"] = drafts
+    pr["drafts_run"] = {**(pr.get("drafts_run") or {}), "redraft_requested_at": datetime.now(timezone.utc).isoformat()}
+    app.platform_response = pr
+    await db.commit()
+    task = draft_gap_answers_task.apply_async(args=[str(app_id)], retry=False)
+    return {"queued": True, "task_id": task.id, "cleared": keys}
+
+
 class OutreachDraftRequest(BaseModel):
     contact_ids: list[str] | None = None   # None → top 3 by rank; a list → re-draft exactly these
 

@@ -41,6 +41,7 @@ vi.mock("@/lib/api", () => ({
   submitApplication: (...a: any[]) => submitApplication(...(a as [])),
   updateApplication: (...a: any[]) => updateApplication(...(a as [])),
   answerGap: (...a: any[]) => answerGap(...(a as [string, any])),
+  redraftAnswers: vi.fn(async () => ({ queued: true, cleared: [] })),
   // F404 — the Reach out panel lives on this page; keep it quiet here.
   getOutreach: vi.fn(async () => ({ application_id: "a1", bundle: {}, candidates: [], company_contacts: 0, running: false })),
   draftOutreach: vi.fn(async () => ({ queued: true, running: true })),
@@ -372,7 +373,11 @@ describe("field provenance", () => {
     renderPage();
     // Never invents a placeholder like "N/A" — the failure mode we saw
     // in Tsenta, which put a literal N/A into a required GitHub field.
-    expect(await screen.findByText("Needs your answer")).toBeTruthy();
+    const cell = await screen.findByText(/Needs your answer/);
+    // F405 — the preview cell is a button that takes you to the editor,
+    // because the tester tried to type into it.
+    expect(cell.tagName).toBe("BUTTON");
+    expect(cell.textContent).toContain("click to answer it above");
   });
 });
 
