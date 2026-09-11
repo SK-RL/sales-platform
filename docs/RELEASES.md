@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 4be90fc · sha-4be90fc
+Merge: outreach contact plausibility filter (F404b)
+
+
 ## 2026-09-11 · c0314e1 · sha-c0314e1
 Merge branch 'main' of github.com-SarthakBetaque:betaque-team/sales-platform
 
