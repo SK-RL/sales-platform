@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 7304118 · sha-7304118
+Merge: a guessed template cached before F357 no longer reads as extracted
+
+
 ## 2026-09-11 · 5e13e13 · sha-5e13e13
 Merge: a walled form is never safe to auto-submit
 
