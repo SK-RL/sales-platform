@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · dda5fce · sha-dda5fce
+Merge: bound paste-time resolution; canonical URLs for probe hits
+
+
 ## 2026-09-11 · 12c26c8 · sha-12c26c8
 Merge: company + title resolver, and Himalayas links in Add-your-own-link
 
