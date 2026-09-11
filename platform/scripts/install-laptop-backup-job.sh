@@ -7,7 +7,12 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 LABEL="com.reventlabs.sales-platform.backup-pull"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-mkdir -p "$HOME/Library/LaunchAgents" "$REPO/db-backups"
+# The job runs a COPY of the script outside the checkout: this working
+# tree is shared by several sessions that switch branches, and the file
+# would vanish whenever a branch without it is checked out.
+BIN="$HOME/.local/bin/sales-platform-pull-backup.sh"
+mkdir -p "$HOME/Library/LaunchAgents" "$REPO/db-backups" "$HOME/.local/bin"
+install -m 755 "$REPO/platform/scripts/pull-backup-to-laptop.sh" "$BIN"
 cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -15,7 +20,7 @@ cat > "$PLIST" <<PL
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array>
     <string>/bin/bash</string>
-    <string>$REPO/platform/scripts/pull-backup-to-laptop.sh</string>
+    <string>$BIN</string>
   </array>
   <key>StartCalendarInterval</key><dict>
     <key>Weekday</key><integer>0</integer>
@@ -26,6 +31,7 @@ cat > "$PLIST" <<PL
   <key>StandardErrorPath</key><string>$REPO/db-backups/pull.log</string>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin</string>
+    <key>DEST</key><string>$REPO/db-backups</string>
   </dict>
 </dict></plist>
 PL
