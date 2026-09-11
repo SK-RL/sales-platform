@@ -124,3 +124,27 @@ def test_f401_periodic_tasks_have_time_limits_and_revoke_endpoint_exists():
               career_page_task.check_career_pages, scan_task.scan_all_platforms):
         assert t.time_limit and t.acks_late is False, t.name
     assert "/api/v1/monitoring/celery/revoke/{task_id}" in registered_paths()
+
+
+def test_every_task_module_is_imported_by_the_registry():
+    """Prod, 14:35 UTC: the worker rejected draft_gap_answers_task as
+    unregistered — autodiscover looks for ``app.workers.tasks.tasks``, so
+    registration is the explicit import list in the package __init__.
+    Every *_task.py module must be there."""
+    import importlib
+    import pkgutil
+
+    import app.workers.tasks as pkg
+    from app.workers.celery_app import celery_app
+
+    importlib.import_module("app.workers.tasks")
+    registered = set(celery_app.tasks.keys())
+    for m in pkgutil.iter_modules(pkg.__path__):
+        if not m.name.endswith("_task") or m.name.startswith("_"):
+            continue
+        from celery import Task
+
+        mod = importlib.import_module(f"app.workers.tasks.{m.name}")
+        for n, v in vars(mod).items():
+            if isinstance(v, Task):
+                assert v.name in registered, f"{v.name} is not registered — add {m.name} to app/workers/tasks/__init__.py"
