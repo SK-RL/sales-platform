@@ -39,7 +39,8 @@ def resolve_aggregator_links(limit: int = BATCH) -> dict:
             select(Job)
             .where(
                 Job.platform.in_(list(AGGREGATOR_PLATFORMS)),
-                Job.apply_resolved_at.is_(None),
+                # unresolved, or walled before the company lookup existed
+                (Job.apply_resolved_at.is_(None)) | (Job.apply_resolve_status == "blocked"),
                 Job.relevance_score >= MIN_SCORE,
                 Job.status.in_(_STATUSES),
             )
@@ -48,18 +49,17 @@ def resolve_aggregator_links(limit: int = BATCH) -> dict:
         ).scalars().all()
         blocked_streak = 0
         for i, job in enumerate(jobs):
-            if blocked_streak >= BLOCKED_STREAK_STOP:
-                # Measured on production 2026-09-11: Himalayas answers the
-                # VM with Cloudflare's challenge on every page (6/6), and a
-                # real browser doesn't clear it either. Knocking 40 times an
-                # hour changes nothing; stop the run and leave the rest
-                # unresolved so a future change can pick them up.
-                counts["skipped_after_block"] = len(jobs) - i
-                break
+            # Measured on production 2026-09-11: Himalayas answers the VM
+            # with Cloudflare's challenge on every page (6/6), and a real
+            # browser doesn't clear it either. After three in a row stop
+            # fetching pages for this run; the company + title lookup
+            # (F375) still runs, since it never touches the aggregator.
+            skip_page = blocked_streak >= BLOCKED_STREAK_STOP
             try:
-                out = resolve_job(session, job)
+                out = resolve_job(session, job, skip_page=skip_page)
                 counts[out["status"]] = counts.get(out["status"], 0) + 1
-                blocked_streak = blocked_streak + 1 if out["status"] == "blocked" else 0
+                page_blocked = out.get("detail", "").startswith("aggregator challenged") or skip_page
+                blocked_streak = blocked_streak + 1 if page_blocked else 0
             except Exception:
                 session.rollback()
                 logger.warning("aggregator: unexpected failure on job %s", job.id, exc_info=True)

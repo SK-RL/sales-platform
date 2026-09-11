@@ -110,10 +110,13 @@ class TestResolveJob:
         out = resolve_job(FakeSession(), job)
         assert out["status"] == "external" and job.apply_platform == "workday" and job.resolved_job_id is None
 
-    def test_blocked_is_recorded_not_raised(self, monkeypatch):
+    def test_blocked_page_with_nothing_to_look_up_is_unmatched(self, monkeypatch):
+        """F375: a walled page falls through to the company lookup; with
+        no company it ends `unmatched`, recorded, not raised."""
         monkeypatch.setattr(ar, "resolve_page", lambda url: Resolution("blocked", detail="challenged"))
         job = _job()
-        assert resolve_job(FakeSession(), job)["status"] == "blocked"
+        job.company_id, job.title, job.raw_json = None, "SRE", {}
+        assert resolve_job(FakeSession(), job)["status"] == "unmatched"
         assert job.apply_resolved_at is not None  # not retried forever
 
 
@@ -170,10 +173,12 @@ class TestCircuitBreaker:
         monkeypatch.setattr(agt, "SyncSession", lambda: _S())
         monkeypatch.setattr(agt, "PAUSE_SECONDS", 0)
         calls = []
-        def fake_resolve(session, job):
-            calls.append(job.id)
-            return {"status": "blocked"}
+        def fake_resolve(session, job, skip_page=False):
+            calls.append(skip_page)
+            return {"status": "unmatched", "detail": "aggregator challenged the fetch (HTTP 403)"}
         monkeypatch.setattr(agt, "resolve_job", fake_resolve)
         out = agt.resolve_aggregator_links()
-        assert len(calls) == agt.BLOCKED_STREAK_STOP
-        assert out["blocked"] == 3 and out["skipped_after_block"] == 5
+        # every job still gets the company lookup (F375) …
+        assert len(calls) == 8 and out["unmatched"] == 8
+        # … but page fetches stop after three challenges in a row
+        assert calls == [False] * agt.BLOCKED_STREAK_STOP + [True] * 5
