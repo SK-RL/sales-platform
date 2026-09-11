@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Link2 } from "lucide-react";
-import { getJob, prepareApplication, resolveJobFromUrl } from "@/lib/api";
+import { getApplyReadiness, getJob, prepareApplication, resolveJobFromUrl } from "@/lib/api";
 
 /**
  * F371 — "Add your own link", the Tsenta feature done honestly.
@@ -53,7 +53,11 @@ export function AddJobLink({ className = "" }: { className?: string }) {
       const resolved = await resolveJobFromUrl(u);
       const jobId = resolved.pending ? await awaitResolution(resolved.job_id) : resolved.job_id;
       setPhase("Preparing…");
-      const app = await prepareApplication(jobId);
+      // Pasting a job you already have should open it, not error
+      // ("Application already exists for this job" — seen on production).
+      const ready = await getApplyReadiness(jobId).catch(() => null);
+      const existingId = ready?.existing_application?.exists ? ready.existing_application.id : null;
+      const app = existingId ? { id: existingId } : await prepareApplication(jobId);
       const id = app?.id ?? app?.application_id;
       if (!id) throw new Error("The application could not be prepared.");
       navigate(`/applications/review?app=${id}`);

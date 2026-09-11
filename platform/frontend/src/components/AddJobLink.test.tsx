@@ -15,10 +15,12 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 const resolveJobFromUrl = vi.fn();
 const prepareApplication = vi.fn();
 const getJob = vi.fn();
+const readiness = vi.fn(async (_jobId?: string) => ({ existing_application: { exists: false } } as any));
 vi.mock("@/lib/api", () => ({
   resolveJobFromUrl: (...a: any[]) => resolveJobFromUrl(...a),
   prepareApplication: (...a: any[]) => prepareApplication(...a),
   getJob: (...a: any[]) => getJob(...a),
+  getApplyReadiness: (...a: any[]) => readiness(...(a as [string])),
 }));
 
 import { AddJobLink } from "./AddJobLink";
@@ -94,6 +96,16 @@ describe("AddJobLink", () => {
     await vi.advanceTimersByTimeAsync(3000);
     vi.useRealTimers();
     expect((await screen.findByRole("alert")).textContent).toMatch(/workday, which needs an account/i);
+    expect(prepareApplication).not.toHaveBeenCalled();
+  });
+
+  it("opens the existing application when the job was already prepared", async () => {
+    resolveJobFromUrl.mockResolvedValue({ job_id: "j1", platform: "personio", auto_submittable: true, wall: null });
+    readiness.mockResolvedValueOnce({ existing_application: { exists: true, id: "app-existing", status: "prepared" } } as any);
+    renderIt();
+    fireEvent.change(screen.getByLabelText("Job posting link"), { target: { value: "https://x.jobs.personio.com/job/1" } });
+    fireEvent.click(screen.getByText("Prepare"));
+    expect(await screen.findByText("AT /applications/review?app=app-existing")).toBeTruthy();
     expect(prepareApplication).not.toHaveBeenCalled();
   });
 
