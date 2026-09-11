@@ -121,7 +121,7 @@ def _run(session, application_id: str, contact_ids: list[str] | None) -> dict:
 
     out, n = [], 0
     for c in chosen:
-        name = f"{c.first_name} {c.last_name}".strip() or "there"
+        name = f"{c.first_name} {c.last_name}".strip() or "the hiring team"
         prev = existing.get(str(c.id))
         if prev and prev.get("draft", {}).get("email_body") and not contact_ids:
             d = prev["draft"]  # keep a draft the user may have edited
