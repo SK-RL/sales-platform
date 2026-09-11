@@ -60,9 +60,23 @@ class BaseFetcher(ABC):
         translates ``None`` into HTTP 404 "job no longer listed".
         """
         for job in self.fetch(slug):
-            if str(job.get("external_id", "")) == str(external_id):
+            if str(job.get("external_id", "")) in self._id_forms(external_id):
                 return job
         return None
+
+    def _id_forms(self, external_id: str) -> set[str]:
+        """The raw and the namespaced form of an id.
+
+        F383 namespaced the ids of the newer fetchers
+        (``teamtailor-8237846``); rows created before that carry the raw
+        id, and a lookup with either must still find the posting —
+        production: a Teamtailor job created pre-namespacing extracted
+        as the 8-field fallback because fetch_one matched neither.
+        """
+        raw = str(external_id or "")
+        prefix = f"{self.PLATFORM}-"
+        bare = raw[len(prefix):] if raw.startswith(prefix) else raw
+        return {bare, f"{prefix}{bare}"}
 
     def _normalize(self, raw: dict, slug: str) -> dict:
         """Override in subclass to normalize a raw API response to the standard format."""

@@ -165,3 +165,16 @@ class TestPasteTimeBudget:
         from app.api.v1 import applications
         src = inspect.getsource(applications.application_from_url)
         assert "asyncio.wait_for(asyncio.to_thread(_whole_flow)" in src and applications.REPOST_RESOLVE_BUDGET_S < 60
+
+
+class TestFetchOneToleratesBothIdForms:
+    """Rows created before F383 carry raw ids; the extractor's fetch_one
+    must find the posting with either form (production: a Teamtailor
+    job extracted as the fallback template)."""
+
+    def test_raw_and_namespaced(self, monkeypatch):
+        f = TeamtailorFetcher()
+        monkeypatch.setattr(f, "fetch", lambda slug: [{"external_id": "teamtailor-8237846", "title": "FDE", "url": "u"}])
+        assert f.fetch_one("virtasant", "8237846")["title"] == "FDE"
+        assert f.fetch_one("virtasant", "teamtailor-8237846")["title"] == "FDE"
+        assert f.fetch_one("virtasant", "999") is None

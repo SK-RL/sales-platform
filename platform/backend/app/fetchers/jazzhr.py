@@ -76,7 +76,7 @@ class JazzHRFetcher(BaseFetcher):
         lumivero: the DevOps page answers 200 but the board omits it), so
         a pasted link is resolved from the posting page itself."""
         code = external_id.split("-", 1)[1] if external_id.startswith("jazzhr-") else external_id
-        listed = next((j for j in self.fetch(slug) if j["external_id"] == f"jazzhr-{code}"), None)
+        listed = next((j for j in self.fetch(slug) if j["external_id"] in self._id_forms(code)), None)
         if listed:
             return listed
         client = self._get_client()
