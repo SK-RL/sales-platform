@@ -35,7 +35,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "jobvite"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "jobvite", "hireology", "dover", "gem"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -70,6 +70,10 @@ KNOWN_HUMAN_WALLS: dict[str, dict[str, str]] = {
     "jazzhr": {
         "vendor": "reCAPTCHA",
         "reason": "JazzHR puts an \"I'm not a robot\" reCAPTCHA on its application form, so a person has to submit it.",
+    },
+    "zoho": {
+        "vendor": "image CAPTCHA",
+        "reason": "Zoho Recruit ends its \"I'm interested\" form with an image CAPTCHA to type, so a person has to submit it.",
     },
     "smartrecruiters": {
         "vendor": "DataDome",
@@ -146,6 +150,9 @@ def fetch_application_questions(
         "teamtailor": _fetch_teamtailor_questions,
         "pinpoint": _fetch_pinpoint_questions,
         "jobvite": _fetch_jobvite_questions,
+        "hireology": _fetch_hireology_questions,
+        "dover": _fetch_dover_questions,
+        "gem": _fetch_gem_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1654,6 +1661,224 @@ def _fetch_jobvite_questions(job_external_id: str, slug: str) -> list[dict[str, 
     if not raw or not raw.get("url"):
         return []
     return normalise_jobvite_rows(jobvite_form_rows(raw["url"].split("?", 1)[0].rstrip("/") + "/apply"))
+
+
+# ---------------------------------------------------------------------------
+# Hireology — F390, read from the public application-form schema
+# ---------------------------------------------------------------------------
+# ``api.hireology.com/v2/public/application_forms/{job id}`` returns the
+# form as ``template.sections[].fieldsets[].fields[{id, attributes{type,
+# required, options[{name, value}]}}]`` — no browser needed. The rendered
+# page addresses each field as ``#{id}-0`` (radios ``#{id}-{value}-0``).
+# Labels aren't in the JSON; the basic section's ids are well known and
+# custom ones get a humanised id plus the fieldset's own label when set.
+
+_HIREOLOGY_FIXED: dict[str, tuple[str, str, str]] = {
+    "first_name": ("first_name", "First name", "text"),
+    "last_name": ("last_name", "Last name", "text"),
+    "email_address": ("email", "Email address", "text"),
+    "home_phone": ("phone", "Phone number", "text"),
+    "street_address": ("address", "Address", "text"),
+    "city": ("city", "City", "text"),
+    "state_id": ("state", "State/Province", "select"),
+    "zip_code": ("postcode", "Zip/Postal code", "text"),
+    "resume": ("resume", "Resume", "file"),
+    "candidate_referred": ("candidate_referred", "Were you referred by a current employee?", "select"),
+    "referred_by": ("referred_by", "Who referred you?", "text"),
+    "cover_letter": ("cover_letter", "Cover letter", "textarea"),
+}
+_HIREOLOGY_TYPE = {"text": "text", "email": "text", "tel": "text", "number": "text", "url": "text", "date": "text",
+                   "textarea": "textarea", "select": "select", "radio": "select", "checkbox": "boolean", "file": "file"}
+
+
+def normalise_hireology_form(form: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for section in ((form or {}).get("template") or {}).get("sections") or []:
+        for fs in section.get("fieldsets") or []:
+            fs_label = (fs.get("label") or fs.get("title") or "").strip()
+            for f in fs.get("fields") or []:
+                fid = f.get("id") or ""
+                attrs = f.get("attributes") or {}
+                if not fid or attrs.get("hidden"):
+                    continue
+                raw_type = (attrs.get("type") or "text").lower()
+                options = [str(o.get("name") if isinstance(o, dict) else o) for o in (attrs.get("options") or [])]
+                options = [o for o in options if o and o != "--"]
+                if fid in _HIREOLOGY_FIXED:
+                    key, label, ftype = _HIREOLOGY_FIXED[fid]
+                    if fid == "candidate_referred" and not options:
+                        options = ["Yes", "No"]
+                elif fid == "sms_opt_in":
+                    # Default-checked consent to text messages; never a blocker.
+                    key, label, ftype = "sms_opt_in", "I would like to communicate with the hiring team via text message", "boolean"
+                else:
+                    key = fid
+                    label = (attrs.get("label") or f.get("label") or fs_label or fid.replace("_", " ").capitalize()).strip()
+                    ftype = _HIREOLOGY_TYPE.get(raw_type, "text")
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append({"field_key": key, "label": label, "field_type": ftype,
+                                "required": bool(attrs.get("required")) and key != "sms_opt_in",
+                                "options": options if ftype in ("select", "multi_select") else [], "description": ""})
+    return results
+
+
+def _fetch_hireology_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id:
+        return []
+    from app.fetchers.hireology import FORM_URL
+
+    job_id = job_external_id.split("-")[-1]
+    if not job_id.isdigit():
+        return []
+    try:
+        with httpx.Client(timeout=20.0, headers=_BROWSER_UA) as client:
+            resp = client.get(FORM_URL.format(job_id=job_id))
+            if resp.status_code != 200:
+                return []
+            return normalise_hireology_form(resp.json())
+    except (httpx.RequestError, ValueError):
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Dover — F389, read from the posting's public JSON
+# ---------------------------------------------------------------------------
+# ``app.dover.com/api/v1/inbound/application-portal-job/{uuid}`` carries
+# ``application_questions``: {id, question, input_type (SHORT_ANSWER |
+# LONG_ANSWER | MULTIPLE_CHOICE | FILE_UPLOAD), question_type (CUSTOM |
+# RESUME | LINKEDIN_URL | PHONE_NUMBER), required, multiple_choice_options,
+# max_selections}. First / last name and email are always on the form.
+
+_DOVER_FIXED_TYPES: dict[str, tuple[str, str]] = {
+    "RESUME": ("resume", "file"),
+    "LINKEDIN_URL": ("linkedin", "text"),
+    "PHONE_NUMBER": ("phone", "text"),
+}
+
+
+def normalise_dover_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = [
+        {"field_key": "first_name", "label": "First name", "field_type": "text", "required": True, "options": [], "description": ""},
+        {"field_key": "last_name", "label": "Last name", "field_type": "text", "required": True, "options": [], "description": ""},
+        {"field_key": "email", "label": "Email", "field_type": "text", "required": True, "options": [], "description": ""},
+    ]
+    seen = {r["field_key"] for r in results}
+    for q in questions or []:
+        if not isinstance(q, dict) or q.get("hidden"):
+            continue
+        qid, text = str(q.get("id") or ""), (q.get("question") or "").strip()
+        itype, qtype = (q.get("input_type") or "").upper(), (q.get("question_type") or "").upper()
+        if qtype in _DOVER_FIXED_TYPES:
+            key, ftype = _DOVER_FIXED_TYPES[qtype]
+        elif itype == "FILE_UPLOAD":
+            key, ftype = qid, "file"
+        elif itype == "MULTIPLE_CHOICE":
+            key = qid
+            ftype = "multi_select" if (q.get("max_selections") or 1) > 1 else "select"
+        elif itype == "LONG_ANSWER":
+            key, ftype = qid, "textarea"
+        else:
+            key, ftype = qid, "text"
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        options = [str(o) for o in (q.get("multiple_choice_options") or [])] if ftype in ("select", "multi_select") else []
+        results.append({"field_key": key, "label": text or key, "field_type": ftype, "required": bool(q.get("required")),
+                        "options": options, "description": ""})
+    return results
+
+
+def _fetch_dover_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.dover import DoverFetcher
+
+    raw = DoverFetcher().fetch_one(slug, job_external_id)
+    if not raw:
+        return []
+    return normalise_dover_questions((raw.get("raw_json") or {}).get("application_questions") or [])
+
+
+# ---------------------------------------------------------------------------
+# Gem — F391, read from the posting's public GraphQL schema
+# ---------------------------------------------------------------------------
+# ``oatsJobPostFieldsAndQuestions`` lists the form's fixed ``fields``
+# (FIRST_NAME, LAST_NAME, EMAIL, LINKEDIN_URL, PHONE, LOCATION, RESUME;
+# each with isRequired) and custom ``questions`` {extId, answerType,
+# text, isRequired, options[{extId, value}]}, plus an optional
+# ``demographicSurvey`` (EEO). Questions are keyed by their extId; the
+# submitter re-reads this schema to map an option's text to the radio it
+# renders as (the radio's DOM id is the option extId).
+
+_GEM_FIXED_FIELDS: dict[str, tuple[str, str, str]] = {
+    "FIRST_NAME": ("first_name", "First name", "text"),
+    "LAST_NAME": ("last_name", "Last name", "text"),
+    "EMAIL": ("email", "Email", "text"),
+    "LINKEDIN_URL": ("linkedin", "LinkedIn URL", "text"),
+    "PHONE": ("phone", "Phone number", "text"),
+    "LOCATION": ("location", "Location", "text"),
+    "RESUME": ("resume", "Resume", "file"),
+    "COVER_LETTER": ("cover_letter", "Cover letter", "file"),
+}
+
+
+def _gem_question_type(q: dict[str, Any]) -> str:
+    at = (q.get("answerType") or "").upper()
+    if q.get("options"):
+        return "multi_select" if "MULTI" in at or "CHECKBOX" in (q.get("displayType") or "").upper() else "select"
+    if at in ("LONG_TEXT", "PARAGRAPH"):
+        return "textarea"
+    if at in ("FILE", "ATTACHMENT"):
+        return "file"
+    if at in ("BOOLEAN", "YES_NO"):
+        return "boolean"
+    return "text"
+
+
+def normalise_gem_form(form: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for f in (form or {}).get("fields") or []:
+        spec = _GEM_FIXED_FIELDS.get((f.get("fieldType") or "").upper())
+        if not spec or spec[0] in seen:
+            continue
+        seen.add(spec[0])
+        results.append({"field_key": spec[0], "label": spec[1], "field_type": spec[2], "required": bool(f.get("isRequired")),
+                        "options": [], "description": ""})
+    for q in (form or {}).get("questions") or []:
+        ext = str(q.get("extId") or "")
+        if not ext or ext in seen:
+            continue
+        seen.add(ext)
+        ftype = _gem_question_type(q)
+        options = [str(o.get("value") or "") for o in (q.get("options") or []) if isinstance(o, dict)]
+        results.append({"field_key": ext, "label": re.sub(r"\s*\*+\s*$", "", (q.get("text") or "").strip()) or ext, "field_type": ftype,
+                        "required": bool(q.get("isRequired")), "options": [o for o in options if o],
+                        "description": re.sub(r"<[^>]+>", "", q.get("description") or "").strip()})
+    survey = (form or {}).get("demographicSurvey") or {}
+    for q in survey.get("questions") or []:
+        ext = str(q.get("extId") or "")
+        if not ext or ext in seen:
+            continue
+        seen.add(ext)
+        options = [str(o.get("value") or "") for o in (q.get("options") or []) if isinstance(o, dict)]
+        results.append({"field_key": ext, "label": (q.get("text") or "").strip() or ext, "field_type": "select", "required": False,
+                        "options": [o for o in options if o], "description": "Voluntary self-identification."})
+    return results
+
+
+def _fetch_gem_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.gem import GemFetcher
+
+    raw = GemFetcher().fetch_one(slug, job_external_id)
+    if not raw:
+        return []
+    return normalise_gem_form((raw.get("raw_json") or {}).get("form") or {})
 
 
 # ---------------------------------------------------------------------------

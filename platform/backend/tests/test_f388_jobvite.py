@@ -115,3 +115,14 @@ class TestYCombinatorLink:
         assert parse_job_url("https://www.workatastartup.com/jobs/57417") is None
         reason = refusal_for("https://www.workatastartup.com/jobs/57417")
         assert "YC account" in reason
+
+
+class TestTurnstileMarkers:
+    def test_invisible_turnstile_response_input_is_not_a_wall(self):
+        assert detect_human_wall('<form><input type="hidden" name="cf-turnstile-response" id="cf-chl-widget-4keia_response"><button type="submit">Apply</button></form>') is None
+
+    def test_rendered_widget_and_cloudflare_interstitial_are_walls(self):
+        assert detect_human_wall('<div class="cf-turnstile" data-sitekey="x"></div>') is not None
+        assert detect_human_wall('<iframe src="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/x"></iframe>') is not None
+        assert detect_human_wall('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script><input type="hidden" name="cf-turnstile-response">') is None
+        assert detect_human_wall('<html><head><title>Just a moment...</title></head><body>Performing security verification</body></html>') is not None

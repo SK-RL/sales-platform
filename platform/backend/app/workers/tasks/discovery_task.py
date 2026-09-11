@@ -212,6 +212,7 @@ _HTML_BOARD_MARKERS: dict[str, str] = {
     "jobvite": "jv-job-list-name",
     "jazzhr": "list-group-item",
     "teamtailor": "<item>",
+    "zoho": "Posting_Title",
 }
 
 
@@ -319,6 +320,18 @@ PLATFORM_PROBE_CONFIG = {
     "pinpoint": {
         "slugs": RECRUITEE_PROBE_SLUGS,
         "url": "https://{slug}.pinpointhq.com/postings.json",
+    },
+    "hireology": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://api.hireology.com/v2/public/careers/{slug}",
+    },
+    "dover": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://app.dover.com/api/v1/careers-page-slug/{slug}",
+    },
+    "zoho": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.zohorecruit.com/jobs/Careers",
     },
     "bamboohr": {
         "slugs": BAMBOOHR_PROBE_SLUGS,

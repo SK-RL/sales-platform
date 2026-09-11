@@ -161,7 +161,20 @@ _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
     'class="h-captcha"',
     "class='h-captcha'",
     "checkbox for hcaptcha",
-    "cf-turnstile",
+    # Turnstile: the rendered widget, not the hidden response input.
+    # F389 — Dover runs Turnstile invisibly and leaves only
+    # ``<input type=hidden name="cf-turnstile-response">`` in the form
+    # (no iframe, no widget); a bare "cf-turnstile" marker called that
+    # a wall. A managed/visible challenge renders ``class="cf-turnstile"``
+    # or Cloudflare's interstitial, which the next markers catch.
+    'class="cf-turnstile"',
+    "class='cf-turnstile'",
+    # The script itself (challenges.cloudflare.com/turnstile/v0/api.js)
+    # is loaded by invisible integrations too; a rendered challenge is
+    # an iframe under cdn-cgi/challenge-platform.
+    "challenges.cloudflare.com/cdn-cgi/challenge-platform",
+    "performing security verification",
+    "<title>just a moment...</title>",
     # DataDome challenge interstitial. F364 — SmartRecruiters' apply
     # flow serves headless Chromium a 3 KB page with an empty body, no
     # app root and these two fingerprints, where a real browser gets the
