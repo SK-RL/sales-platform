@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 5d1507c · sha-5d1507c
+feat(apply): BambooHR extraction over plain HTTP
+
+
 ## 2026-09-11 · 97148ae · sha-97148ae
 feat(apply): Ashby extraction via the rendered page; fix two gate bugs
 
