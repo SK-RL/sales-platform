@@ -116,9 +116,12 @@ def test_nightly_reverify_uses_the_new_layer_and_rechecks_likely():
 
 # --- ranking -------------------------------------------------------------
 
-def _c(i, cat="hiring", email="x@acme.com", status="unverified", li="", conf=0.5, title=""):
+_LAST = ["Adams", "Baker", "Clark", "Davis", "Evans", "Foster", "Green", "Hill", "Irwin", "Jones", "Kane", "Lane"]
+
+
+def _c(i, cat="hiring", email="x@acme.com", status="unverified", li="", conf=0.5, title="Talent Partner"):
     return SimpleNamespace(id=i, role_category=cat, email=email, email_status=status, linkedin_url=li,
-                           confidence_score=conf, title=title, first_name="A", last_name=str(i), seniority="other")
+                           confidence_score=conf, title=title, first_name="Alex", last_name=_LAST[i % len(_LAST)], seniority="other")
 
 
 class TestRankContacts:
@@ -260,3 +263,44 @@ def test_settings_have_provider_fields():
 
     f = Settings.model_fields
     assert "email_verify_provider" in f and "email_verify_api_key" in f
+
+
+class TestPlausiblePerson:
+    """Prod contacts for Camunda / Cloudflare / Supabase / Northflank were
+    mostly scraped junk: nav items glued into names, investors quoted on
+    the site with guessed emails, "for technical" as a recruiter."""
+
+    def _p(self, first, last, title, email="", company="Supabase"):
+        from app.services.outreach import plausible_person
+
+        return plausible_person(SimpleNamespace(first_name=first, last_name=last, title=title, email=email), SimpleNamespace(name=company))
+
+    def test_junk_from_prod_is_rejected(self):
+        assert not self._p("SolutionsClose", "SolutionsOpen Solutions", "Public Sector", "solutionsclose.solutionsopensolutions@camunda.com", "Camunda")
+        assert not self._p("Adopt", "AI", "IndustriesHealthcareFinancial servicesRetailGamingPublic sector", company="Cloudflare")
+        assert not self._p("AI", "Gateway", "Developers Discord", company="Cloudflare")
+        assert not self._p("Test", "Drive", "Reference architectureTechnical guides", company="Cloudflare")
+        assert not self._p("for", "technical", "Recruiter / Hiring Contact", company="Northflank")
+        assert not self._p("Jason", "WarnerGitHub", "GitHub CTO")
+
+    def test_other_companies_people_quoted_on_the_site_are_rejected(self):
+        assert not self._p("Tom", "Preston-Werner", "GitHub Cofounder", "tom@supabase.com")
+        assert not self._p("Harold", "Giménez", "HashiCorp - VP Eng")
+        assert not self._p("Pedro", "Canahuati", "1Password CTO, Ex-Facebook")
+        assert not self._p("Guillermo", "Rauch", "Vercel Founder")
+
+    def test_real_staff_pass(self):
+        assert self._p("Barbie", "Brewer", "CPO", company="Camunda")
+        assert self._p("Bernd", "Ruecker", "Chief Technologist and Co-Founder", company="Camunda")
+        assert self._p("Ant", "Wilson", "CTO and Co-Founder")
+        assert self._p("Jane", "Doe", "Senior Engineering Manager, Platform")
+        assert self._p("Jane", "Doe", "Supabase Talent Partner")
+
+    def test_role_mailboxes_allowed_unnamed_persons_not(self):
+        assert self._p("", "", "HR Contact", "hr@supabase.com")
+        assert not self._p("", "", "CEO", "ceo@camunda.com", "Camunda")
+
+    def test_rank_applies_the_filter(self):
+        junk = _c(1, "hiring")
+        junk.first_name, junk.last_name, junk.title = "for", "technical", "Recruiter"
+        assert rank_contacts([junk, _c(2, "hiring")], {}, SimpleNamespace(name="X", employee_count=""))[0].id == 2

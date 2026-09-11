@@ -35,6 +35,70 @@ def _employee_count(company) -> int | None:
     return int(m.group(0).replace(",", "")) if m else None
 
 
+_ROLE_WORDS = frozenset({"founder", "cofounder", "co-founder", "ceo", "cto", "cfo", "coo", "cpo", "cmo", "cro", "ciso", "vp",
+                         "svp", "evp", "head", "director", "engineer", "engineering", "lead", "manager", "partner", "president",
+                         "chief", "senior", "staff", "principal", "global", "group", "technical", "talent", "people", "hr",
+                         "recruiter", "recruiting", "hiring", "contact", "team", "of", "and", "&", "the", "sr", "sr.", "jr",
+                         "software", "platform", "infrastructure", "cloud", "security", "devops", "site", "reliability",
+                         "product", "operations", "ops", "general", "managing", "executive", "officer", "developer", "advocate",
+                         "architect", "data", "ai", "ml", "backend", "frontend", "fullstack", "full-stack", "solutions", "sales",
+                         "customer", "success", "growth", "marketing", "finance", "legal", "public", "sector", "acquisition"})
+_NAME_TOKEN = re.compile(r"^[A-Za-zÀ-ÖØ-öø-ÿ][a-zà-öø-ÿ'’.\-]*(?:[A-Z][a-zà-öø-ÿ'’.\-]*)?$")
+_GLUED = re.compile(r"[a-z][A-Z]")
+_JUNK_TITLE = re.compile(r"\b(close|open|menu|toggle|discord|login|sign in|sign up|cookie)\b", re.I)
+
+
+def _foreign_affiliation(title: str, company_name: str) -> bool:
+    """"GitHub CTO" on Supabase's site is an investor quote, not staff.
+    True when the title opens with a capitalised word that is neither a
+    role word nor part of this company's own name."""
+    tokens = [t.strip(",.-–()") for t in (title or "").split()]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return False
+    first = tokens[0]
+    own = {w.lower() for w in re.split(r"[\s\-_.]+", company_name or "") if w}
+    if first.lower() in _ROLE_WORDS or first.lower() in own or not (first[0].isupper() or first[0].isdigit()):
+        return False
+    if any(first.lower().startswith(w) or w.startswith(first.lower()) for w in own if len(w) > 2):
+        return False
+    rest = " ".join(tokens[1:]).lower()
+    if re.search(r"\bex-[A-Z]", title):
+        return True
+    return any(w in rest.split() or w in rest for w in ("founder", "cofounder", "co-founder", "cto", "ceo", "cfo", "coo", "vp", "eng"))
+
+
+def plausible_person(contact, company=None) -> bool:
+    """Reject scraped junk before it reaches a draft: nav items with an
+    email glued together ("SolutionsClose SolutionsOpen Solutions"),
+    CamelCase concatenations ("Jason WarnerGitHub"), other companies'
+    people quoted on the site, titles that are menus. Role mailboxes
+    (no name, "HR Contact", hr@…) are allowed: writing to hr@ is a
+    legitimate last resort."""
+    first = (getattr(contact, "first_name", "") or "").strip()
+    last = (getattr(contact, "last_name", "") or "").strip()
+    title = (getattr(contact, "title", "") or "").strip()
+    email = (getattr(contact, "email", "") or "").strip()
+    company_name = getattr(company, "name", "") or ""
+    if _JUNK_TITLE.search(title) or _GLUED.search(title) or len(title) > 80:
+        return False
+    if _foreign_affiliation(title, company_name):
+        return False
+    if not first and not last:
+        # a role mailbox is fine; an unnamed "person" with a personal-looking address is not
+        return bool(email) and email.split("@")[0].lower() in {"hr", "jobs", "careers", "talent", "recruiting", "people", "hiring", "recruitment"}
+    tokens = f"{first} {last}".split()
+    if not (2 <= len(tokens) <= 4) or any(len(t) > 20 for t in tokens) or len(set(t.lower() for t in tokens)) != len(tokens):
+        return False
+    if any(not _NAME_TOKEN.match(t) or _GLUED.search(t) for t in tokens):
+        return False
+    if any(t.lower() in _ROLE_WORDS for t in tokens):
+        return False  # "for technical", "Test Drive", "Adopt AI"
+    if email and len(email.split("@")[0]) > 32:
+        return False
+    return True
+
+
 def rank_contacts(contacts: list, relevance: dict, company=None, limit: int = 3) -> list:
     """Order contacts for outreach and keep the top ``limit``.
 
@@ -55,7 +119,7 @@ def rank_contacts(contacts: list, relevance: dict, company=None, limit: int = 3)
         return (cat, -float(relevance.get(str(c.id), 0.0)), _EMAIL_RANK.get(c.email_status or "", 3) if c.email else 3,
                 0 if c.linkedin_url else 1, -(c.confidence_score or 0.0))
 
-    return sorted([c for c in contacts if reachable(c)], key=key)[:limit]
+    return sorted([c for c in contacts if reachable(c) and plausible_person(c, company)], key=key)[:limit]
 
 
 @dataclass
