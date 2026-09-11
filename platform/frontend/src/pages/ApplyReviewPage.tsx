@@ -384,7 +384,7 @@ function FieldRow({ q }: { q: PreparedQuestion }) {
       return "Legal or protected-class question — only ever answered from a saved answer, never inferred.";
     }
     if (q.match_source === "unmatched") return "No saved answer matched this field.";
-    if (q.confidence === "low") return "Guessed — check it before sending. Auto-apply won't send guesses on its own.";
+    if (q.confidence === "low") return "Guessed — not sent. Save the real answer in your Answer Book and it will be used from then on.";
     if (q.question_key) return `From your Answer Book · ${q.question_key}`;
     return "";
   }, [q]);

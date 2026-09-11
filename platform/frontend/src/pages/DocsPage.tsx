@@ -635,7 +635,7 @@ export function DocsPage() {
               <li>Every answer comes from your <Link to="/answer-book" className="font-semibold text-primary-600 hover:text-primary-700 underline">Answer Book</Link> (plus your name, email and phone from your résumé). Nothing is invented.</li>
               <li>A question with <strong>no answer</strong> stops the application in <strong>Needs you</strong> — you answer it once, it&apos;s saved, and the application continues.</li>
               <li>Work authorization, sponsorship, salary and diversity questions are <strong>never guessed</strong>: only an answer you saved under that exact question is used.</li>
-              <li>A loose match (same category, different wording) is shown as <strong>&ldquo;Guessed — check it&rdquo;</strong> when you review, and is never sent by the unattended sweep.</li>
+              <li>A loose match (same category, different wording) is shown as <strong>&ldquo;Guessed — not sent&rdquo;</strong> when you review. Guesses are never sent: a required one stops in Needs you, an optional one is left blank.</li>
               <li>If your saved answer isn&apos;t one of the form&apos;s options (e.g. &ldquo;5&rdquo; where the form offers 0 / 1 / 2+), it stops in Needs you instead of being forced.</li>
             </ul>
             <Warning>

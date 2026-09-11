@@ -251,15 +251,19 @@ def blocking_gaps(
         if (m.get("alternative_group") or "") in satisfied_groups and m.get("alternative_group"):
             continue
         # F385 — a guess is fine to SHOW a person (the review screen marks
-        # it), never to SEND with nobody looking. Seen on production: a
-        # Breezy "Summary" textarea auto-filled with an unrelated answer
-        # by the category fallback. The sweep treats such required fields
-        # as gaps; a person reviewing can still accept or change them.
-        if unattended and m.get("required") and m.get("confidence") == "low" and (m.get("answer") or "").strip():
+        # it), never to SEND. Seen on production: a Breezy "Summary"
+        # textarea auto-filled with an unrelated answer by the category
+        # fallback. F394 widened this from the sweep to attended submits
+        # too: the review screen has no inline edit, so "check it before
+        # sending" was a caption over an answer that went out unchanged
+        # (audit: Gem "Website" = the first name). A required field with
+        # only a guess is a gap in both modes; the person saves the real
+        # answer once and it is high-confidence from then on.
+        if m.get("required") and m.get("confidence") == "low" and (m.get("answer") or "").strip():
             gaps.append({
                 "field_key": m.get("field_key", ""),
                 "label": m.get("label") or m.get("field_key", ""),
-                "reason": "We only had a guess for this. Auto-apply doesn't send guesses — confirm the answer or save one in your Answer Book.",
+                "reason": "We only had a guess for this. Auto-apply never sends guesses — save the real answer in your Answer Book.",
             })
             continue
         # F386 — a saved answer that is not one of the form's options can
@@ -370,19 +374,20 @@ def _find_best_match(
     if never_infer:
         return empty
 
-    # 4. Partial / substring match on answer-book keys
+    # 4. Partial match on answer-book keys — by shared TOKENS, not
+    # substrings. F394: substring matching sent an ethnicity answer as
+    # "City" (city ⊂ ethnicity), a relocation answer as "Location"
+    # (location ⊂ relocation) and a language answer as "Age". A match
+    # now needs the shorter key's meaningful tokens to all appear in the
+    # longer key with only qualifier words left over, so "linkedin_url" ↔
+    # "linkedin_profile_url" and "phone" ↔ "phone_number" still match
+    # while "country" ↔ "where_are_you_currently_residing_city_and_country"
+    # and "years_experience" ↔ "years_of_python_experience" do not (those
+    # are asked, then saved under their own label).
     for qk, entry in by_key.items():
-        if not qk:
+        if not qk or not (entry.get("answer") or "").strip():
             continue
-        # Check if the field_key is a substring of the question_key or vice versa
-        if field_key and (field_key in qk or qk in field_key):
-            return {
-                "answer": entry.get("answer", ""),
-                "source": entry.get("source", "base"),
-                "question_key": qk,
-                "confidence": "medium",
-            }
-        if label_key and (label_key in qk or qk in label_key):
+        if _tokens_overlap(field_key, qk) or _tokens_overlap(label_key, qk):
             return {
                 "answer": entry.get("answer", ""),
                 "source": entry.get("source", "base"),
@@ -404,6 +409,36 @@ def _find_best_match(
                 }
 
     return empty
+
+
+_TOKEN_STOPWORDS = frozenset((
+    "a", "an", "and", "any", "are", "as", "at", "be", "been", "by", "can", "currently", "do", "does", "for", "from",
+    "have", "how", "if", "in", "is", "it", "me", "my", "no", "not", "now", "of", "on", "or", "our", "please", "so",
+    "the", "this", "to", "us", "we", "what", "whats", "which", "who", "will", "with", "would", "you", "your", "yes",
+))
+
+
+def _meaningful_tokens(key: str) -> set[str]:
+    return {t for t in re.split(r"[^a-z0-9]+", (key or "").lower()) if len(t) >= 3 and t not in _TOKEN_STOPWORDS}
+
+
+_QUALIFIER_TOKENS = frozenset((
+    # Words that narrow a key without changing what it asks for:
+    # "linkedin_profile_url" is still the LinkedIn URL; "years_of_python_
+    # experience" is NOT the years-of-experience answer.
+    "url", "link", "profile", "number", "address", "page", "full", "current", "contact", "primary",
+    "home", "mobile", "cell", "personal", "work", "preferred", "best", "main", "handle",
+))
+
+
+def _tokens_overlap(a: str, b: str) -> bool:
+    """True when one key's meaningful tokens are the other's plus only
+    qualifier words (see strategy 4)."""
+    ta, tb = _meaningful_tokens(a), _meaningful_tokens(b)
+    if not ta or not tb:
+        return False
+    short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    return short <= long_ and (long_ - short) <= _QUALIFIER_TOKENS
 
 
 def _guess_category(field_key: str, label: str) -> str:

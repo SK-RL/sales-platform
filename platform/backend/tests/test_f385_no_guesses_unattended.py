@@ -13,8 +13,11 @@ def _m(conf, required=True, answer="guessed text"):
              "answer": answer, "confidence": conf, "needs_user": False, "never_infer": False, "alternative_group": ""}]
 
 
-def test_attended_review_keeps_the_guess_visible_not_blocking():
-    assert blocking_gaps(_m("low")) == []
+def test_attended_review_also_blocks_a_required_guess():
+    # F394: the review screen has no inline edit, so a "check it" caption
+    # over a guess that then went out unchanged was no protection.
+    gaps = blocking_gaps(_m("low"))
+    assert len(gaps) == 1 and "never sends guesses" in gaps[0]["reason"]
 
 
 def test_unattended_blocks_a_required_guess_with_a_plain_reason():

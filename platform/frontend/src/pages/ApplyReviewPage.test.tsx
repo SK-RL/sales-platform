@@ -338,7 +338,7 @@ describe("field provenance", () => {
     ).toBeTruthy();
   });
 
-  it("calls a low-confidence answer a guess and says the sweep won't send it", async () => {
+  it("calls a low-confidence answer a guess and says it is not sent", async () => {
     questions = {
       questions: [{
         field_key: "cSummary", label: "Summary", field_type: "textarea", required: true,
@@ -348,7 +348,7 @@ describe("field provenance", () => {
       coverage: { total: 1, answered: 1, high_confidence: 0, new_entries: 0 },
     };
     renderPage();
-    expect(await screen.findByText(/Guessed — check it before sending/i)).toBeTruthy();
+    expect(await screen.findByText(/Guessed — not sent/i)).toBeTruthy();
   });
 
   it("marks a field that needs the user", async () => {
