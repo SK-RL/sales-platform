@@ -156,6 +156,13 @@ AI customization (Claude API) rewrites resume for target score. Restricted to re
 - Discovery scan: probes slugs across platforms, auto-creates Company + Board records
 - All scans are async Celery tasks with status polling
 
+## Backups, disk, and the VM (read `docs/BACKUPS.md` first)
+- One backup stream: nightly Celery `run_backup` at 03:00 UTC, kept to the last 3 (`BACKUP_KEEP_LAST=3`), in the `sales-platform_backups` docker volume. Pre-deploy `pg_dump`s were retired on 2026-09-11 after they filled the disk; do not add a per-deploy dump.
+- Off-VM copy: a launchd job on Sarthak's laptop pulls the newest complete backup every Sunday 10:00 local into the gitignored `db-backups/` (keeps 3). Script `platform/scripts/pull-backup-to-laptop.sh`, installer `platform/scripts/install-laptop-backup-job.sh`.
+- VM access from the laptop: `ssh -i ~/.ssh/Sarthak-Betaque -o IdentitiesOnly=yes ubuntu@161.118.207.119`. The VM's `/opt/sales-platform/scripts/ci-deploy.sh` is NOT shipped by deploys — copy it by hand (with a `.bak`) after changing it.
+- Worker visibility: `GET /api/v1/monitoring/celery` (admin) shows workers, active tasks and queue lengths; `POST /api/v1/monitoring/celery/revoke/{task_id}` stops a runaway task. The VM's `.env` pins `CELERY_CONCURRENCY=2`.
+- This checkout is shared by several Claude sessions that switch branches. Commit or stash before switching, and never rely on an uncommitted file surviving.
+
 ## Running
 ```bash
 cd platform
