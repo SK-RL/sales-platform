@@ -172,7 +172,7 @@ def _fetch_page_hash(url: str) -> str | None:
         return None
 
 
-@celery_app.task(name="app.workers.tasks.career_page_task.check_career_pages", bind=True, max_retries=1)
+@celery_app.task(name="app.workers.tasks.career_page_task.check_career_pages", bind=True, max_retries=1, acks_late=False, soft_time_limit=2400, time_limit=2700)
 def check_career_pages(self):
     """Iterate active CareerPageWatch records, fetch pages, and compare hashes.
 

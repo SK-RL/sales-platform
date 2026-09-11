@@ -28,7 +28,7 @@ BLOCKED_STREAK_STOP = 3
 _STATUSES = ("new", "under_review", "accepted")
 
 
-@celery_app.task(acks_late=False)
+@celery_app.task(acks_late=False, soft_time_limit=1200, time_limit=1500)
 def resolve_aggregator_links(limit: int = BATCH) -> dict:
     """Hourly. F401: non-reentrant and never redelivered — prod had two
     copies running side by side after a day of deploy restarts (acks_late
@@ -81,7 +81,7 @@ def resolve_aggregator_links(limit: int = BATCH) -> dict:
         release_scan_lock("aggregator")
 
 
-@celery_app.task
+@celery_app.task(acks_late=False, soft_time_limit=240, time_limit=300)
 def resolve_one_aggregator_job(job_id: str) -> dict:
     from app.models.job import Job
 
