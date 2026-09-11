@@ -140,3 +140,19 @@ class TestNormalise:
     def test_company(self):
         assert normalise_company("The Acme Corp.") == "acme"
         assert normalise_company("Bishop Fox") == "bishop fox"
+
+
+class TestCanonicalUrl:
+    """Bishop Fox, live: the Greenhouse API returned the company's embedded
+    page (bishopfox.com/jobs?gh_jid=…), which own-link refuses. The probe
+    knows slug + id, so the hosted URL is built directly."""
+
+    def test_greenhouse_embedded_url_is_replaced(self):
+        from app.services.company_lookup import canonical_posting_url
+        assert canonical_posting_url("greenhouse", "bishopfox", {"external_id": "7905132", "url": "http://www.bishopfox.com/jobs?gh_jid=7905132"}) == \
+            "https://boards.greenhouse.io/bishopfox/jobs/7905132"
+
+    def test_other_platforms(self):
+        from app.services.company_lookup import canonical_posting_url
+        assert canonical_posting_url("ashby", "ramp", {"external_id": "abc"}) == "https://jobs.ashbyhq.com/ramp/abc"
+        assert canonical_posting_url("recruitee", "x", {"external_id": "recruitee-1", "url": "https://x.recruitee.com/o/y"}) == "https://x.recruitee.com/o/y"

@@ -389,11 +389,21 @@ def _resolve_repost(resolved):
             raise HTTPException(status_code=404, detail="The repost could not be loaded.")
         out = resolve_job(session, row)
         if not out.get("resolved_job_id"):
-            where = f" The employer's form is on {out['apply_platform']}, which needs an account on their site." if out.get("apply_platform") else ""
+            from app.services.submitters import auto_submittable_platforms
+
+            plat = out.get("apply_platform")
+            if plat in ("workday", "icims", "taleo", "successfactors", "linkedin"):
+                where = f" The employer's form is on {plat}, which needs an account on their site."
+            elif plat in auto_submittable_platforms():
+                where = f" We found it on {plat} but couldn't load the posting ({out.get('detail') or 'it may have closed'})."
+            elif plat:
+                where = f" The employer's form is on {plat}, which we can read but not submit for you."
+            else:
+                where = ""
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Found the repost ({row.title}), but couldn't find that role on an ATS we can drive"
+                    f"Found the repost ({row.title}), but couldn't reach that role on an ATS we can drive."
                     f"{where} Open it on Himalayas and paste the employer's apply link instead."
                 ),
             )

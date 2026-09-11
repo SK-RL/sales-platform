@@ -158,6 +158,28 @@ def fingerprint_company(session, company_id) -> list[tuple[str, str]]:
         return []
 
 
+def canonical_posting_url(platform: str, slug: str, raw: dict) -> str:
+    """The hosted-board URL for a probe hit.
+
+    A board's API can hand back the company's *embedded* page as the
+    posting URL — Bishop Fox's Greenhouse board returns
+    ``bishopfox.com/jobs?gh_jid=7905132`` — which own-link rightly
+    refuses (no board slug in it). We already know the slug and the id
+    from the probe, so build the canonical URL ourselves.
+    """
+    ext = str(raw.get("external_id") or "")
+    url = raw.get("url") or ""
+    if platform == "greenhouse" and ext.isdigit():
+        return f"https://boards.greenhouse.io/{slug}/jobs/{ext}"
+    if platform == "lever" and ext:
+        return f"https://jobs.lever.co/{slug}/{ext}"
+    if platform == "ashby" and ext:
+        return f"https://jobs.ashbyhq.com/{slug}/{ext}"
+    if platform == "workable" and ext:
+        return f"https://apply.workable.com/{slug}/j/{ext}/"
+    return url
+
+
 def lookup(session, job) -> dict | None:
     """Resolve a repost by company + title. Returns the own-link result
     fields (``platform``, ``apply_url``, ``resolved_job_id``, ``via``) or
@@ -190,7 +212,7 @@ def lookup(session, job) -> dict | None:
     if probe is None:
         return None
     platform, slug, raw = probe
-    url = raw.get("url") or ""
+    url = canonical_posting_url(platform, slug, raw)
     try:
         linked = resolve_job_from_url(url)
     except OwnLinkError as exc:
