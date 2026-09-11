@@ -24,8 +24,8 @@ os.environ.setdefault("JWT_SECRET", "pytest-ai-model")
 def test_central_constants_present():
     from app.ai_models import CLAUDE_OPUS, CLAUDE_SONNET
 
-    assert CLAUDE_SONNET == "claude-sonnet-4-6"
-    assert CLAUDE_OPUS == "claude-opus-4-8"
+    # F395 — one model for everything.
+    assert CLAUDE_SONNET == CLAUDE_OPUS == "claude-opus-5"
 
 
 def test_insights_model_version_uses_constant():

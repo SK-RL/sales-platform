@@ -150,6 +150,16 @@ class ConfirmSubmittedResponse(BaseModel):
     detected_issues: list[str]  # final list (may include platform-sync failures)
 
 
+class AnswerGapRequest(BaseModel):
+    """F396 — answer a Needs-you question inline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_key: str = Field(..., min_length=1, max_length=500)
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str = Field(..., min_length=1, max_length=8000)
+
+
 class PromoteAnswerRequest(BaseModel):
     """Promote a generated answer from a submission into the answer book."""
 

@@ -180,13 +180,10 @@ Return ONLY the JSON array, no surrounding prose."""
     )
 
     try:
-        response = client.messages.create(
-            model=MODEL_VERSION,
-            max_tokens=_MAX_TOKENS_USER,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
-        )
-        text = response.content[0].text if response.content else ""
+        from app.ai_client import complete
+
+        text, response = complete(user_message, system=system_prompt, answer_tokens=_MAX_TOKENS_USER,
+                                  model=MODEL_VERSION, client=client)
         usage = getattr(response, "usage", None)
         in_toks = getattr(usage, "input_tokens", 0) or 0
         out_toks = getattr(usage, "output_tokens", 0) or 0
@@ -297,13 +294,10 @@ Return ONLY the JSON array, no surrounding prose."""
     )
 
     try:
-        response = client.messages.create(
-            model=MODEL_VERSION,
-            max_tokens=_MAX_TOKENS_PRODUCT,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
-        )
-        text = response.content[0].text if response.content else ""
+        from app.ai_client import complete
+
+        text, response = complete(user_message, system=system_prompt, answer_tokens=_MAX_TOKENS_PRODUCT,
+                                  model=MODEL_VERSION, client=client)
         usage = getattr(response, "usage", None)
         in_toks = getattr(usage, "input_tokens", 0) or 0
         out_toks = getattr(usage, "output_tokens", 0) or 0

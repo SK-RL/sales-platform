@@ -172,13 +172,9 @@ Return your response in this exact format:
         # and interview prep (_interview_prep.py) still use Sonnet 4 —
         # they're called per-job too but at higher volume and their
         # outputs aren't shipped verbatim to a recruiter's inbox.
-        message = client.messages.create(
-            model=CLAUDE_OPUS,
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        from app.ai_client import complete
 
-        response_text = message.content[0].text
+        response_text, message = complete(prompt, answer_tokens=2000, model=CLAUDE_OPUS, client=client)
 
         # Parse sections
         cover_letter = ""

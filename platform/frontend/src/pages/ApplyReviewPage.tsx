@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Lock } from "lucide-react";
 import {
+  answerGap,
   getApplication,
   getApplications,
   getJobQuestions,
@@ -10,7 +11,7 @@ import {
   updateApplication,
 } from "@/lib/api";
 import { BackendErrorBanner } from "@/components/BackendErrorBanner";
-import type { ApplyGateResult, JobQuestionsPreview, PreparedQuestion } from "@/lib/types";
+import type { AnswerDraft, ApplyGateResult, BlockingGap, JobQuestionsPreview, PreparedQuestion } from "@/lib/types";
 
 /**
  * The "Needs you" review queue.
@@ -89,6 +90,19 @@ export function ApplyReviewPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["apply-review-queue"] });
       queryClient.invalidateQueries({ queryKey: ["application", current?.id] });
+    },
+  });
+
+  // F396 — answer a gap inline. The backend saves it to the Answer Book
+  // and drops the field from the stored gap list; the questions preview
+  // is refetched so the field shows the new answer.
+  const answerGapM = useMutation({
+    mutationFn: (opts: { gap: BlockingGap; answer: string }) =>
+      answerGap(current!.id, { field_key: opts.gap.field_key, question: opts.gap.label || opts.gap.field_key, answer: opts.answer }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["application", current?.id] });
+      queryClient.invalidateQueries({ queryKey: ["job-questions", current?.job_id] });
+      queryClient.invalidateQueries({ queryKey: ["apply-review-queue"] });
     },
   });
 
@@ -288,24 +302,25 @@ export function ApplyReviewPage() {
             </p>
           )}
           {blocking.length > 0 && (
-            <ul className="mt-3 space-y-2">
+            <ul className="mt-3 space-y-3">
               {blocking.map((gap) => (
-                <li key={gap.field_key} className="text-sm">
-                  <span className="font-medium text-amber-900">
-                    {gap.label || gap.field_key}
-                  </span>
-                  <span className="block text-amber-800">{gap.reason}</span>
-                </li>
+                <GapRow
+                  key={gap.field_key}
+                  gap={gap}
+                  question={preview?.questions.find((q) => q.field_key === gap.field_key)}
+                  draft={gate.drafts?.[gap.field_key]}
+                  onSave={(answer) => answerGapM.mutateAsync({ gap, answer })}
+                />
               ))}
             </ul>
           )}
-          {blocking.some((g) => g.reason.includes("legal or protected-class")) && (
-            <p className="mt-3 text-sm text-amber-800">
-              Save an answer in your{" "}
+          {blocking.length > 0 && (
+            <p className="mt-3 text-xs text-amber-700">
+              Answers you save here go into your{" "}
               <Link to="/answer-book" className="underline">
                 Answer Book
               </Link>{" "}
-              and this will clear.
+              and are reused when another form asks the same question.
             </p>
           )}
         </div>
@@ -367,6 +382,94 @@ export function ApplyReviewPage() {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * F396 — one Needs-you question with its answer box. Free-text questions
+ * open pre-filled with the draft the worker wrote from the résumé and the
+ * job description (with its fact-check note); choice questions show the
+ * form's options. Nothing is sent until the user saves, and what they
+ * save is exactly what the form gets.
+ */
+function GapRow({
+  gap,
+  question,
+  draft,
+  onSave,
+}: {
+  gap: BlockingGap;
+  question?: PreparedQuestion;
+  draft?: AnswerDraft;
+  onSave: (answer: string) => Promise<unknown>;
+}) {
+  const options = question?.options ?? [];
+  const isChoice = options.length > 0 && (question?.field_type === "select" || question?.field_type === "multi_select");
+  const [value, setValue] = useState(draft?.text ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (draft?.text && !value) setValue(draft.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.text]);
+  const save = async () => {
+    if (!value.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(value.trim());
+    } catch (e) {
+      setError((e as Error)?.message || "Couldn't save");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const optionLabel = (o: unknown) => (typeof o === "string" ? o : ((o as { label?: string; value?: string }).label ?? (o as { value?: string }).value ?? ""));
+  return (
+    <li className="rounded-lg border border-amber-200 bg-white p-3 text-sm">
+      <p className="font-medium text-gray-900">{gap.label || gap.field_key}</p>
+      <p className="mt-0.5 text-xs text-amber-800">{gap.reason}</p>
+      {question?.description && <p className="mt-1 text-xs text-gray-500">{question.description}</p>}
+      {isChoice ? (
+        <select
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="mt-2 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          aria-label={gap.label || gap.field_key}
+        >
+          <option value="">Pick one…</option>
+          {options.map((o) => (
+            <option key={optionLabel(o)} value={optionLabel(o)}>{optionLabel(o)}</option>
+          ))}
+        </select>
+      ) : (
+        <textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          rows={question?.field_type === "textarea" || (draft?.text?.length ?? 0) > 120 ? 5 : 2}
+          placeholder={draft?.note && !draft.text ? draft.note : "Your answer"}
+          className="mt-2 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          aria-label={gap.label || gap.field_key}
+        />
+      )}
+      {draft?.text && (
+        <p className={`mt-1 text-xs ${draft.unsupported_claims?.length ? "text-red-700" : "text-gray-500"}`}>{draft.note}</p>
+      )}
+      {!draft && !isChoice && (
+        <p className="mt-1 text-xs text-gray-400">A draft from your résumé and the job description appears here when it&apos;s ready.</p>
+      )}
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !value.trim()}
+          className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : draft?.text && value === draft.text ? "Use this answer" : "Save answer"}
+        </button>
+        {error && <span className="text-xs text-red-600">{error}</span>}
+      </div>
+    </li>
   );
 }
 

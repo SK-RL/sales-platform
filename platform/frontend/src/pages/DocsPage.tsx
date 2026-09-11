@@ -633,7 +633,8 @@ export function DocsPage() {
             <h3 className="text-sm font-semibold text-gray-900 mb-1">Where the answers come from</h3>
             <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
               <li>Every answer comes from your <Link to="/answer-book" className="font-semibold text-primary-600 hover:text-primary-700 underline">Answer Book</Link> (plus your name, email and phone from your résumé). Nothing is invented.</li>
-              <li>A question with <strong>no answer</strong> stops the application in <strong>Needs you</strong> — you answer it once, it&apos;s saved, and the application continues.</li>
+              <li>A question with <strong>no answer</strong> stops the application in <strong>Needs you</strong> — you answer it there, it&apos;s saved, and the application continues.</li>
+              <li>For a role-specific free-text question (&ldquo;why are you a good fit&rdquo;, &ldquo;describe your experience with X&rdquo;) we <strong>draft an answer</strong> from your résumé, your Answer Book and the job description, and fact-check it against them. The draft waits in Needs you for you to edit and approve. Nothing drafted is ever sent on its own.</li>
               <li>Work authorization, sponsorship, salary and diversity questions are <strong>never guessed</strong>: only an answer you saved under that exact question is used.</li>
               <li>A loose match (same category, different wording) is shown as <strong>&ldquo;Guessed — not sent&rdquo;</strong> when you review. Guesses are never sent: a required one stops in Needs you, an optional one is left blank.</li>
               <li>If your saved answer isn&apos;t one of the form&apos;s options (e.g. &ldquo;5&rdquo; where the form offers 0 / 1 / 2+), it stops in Needs you instead of being forced.</li>

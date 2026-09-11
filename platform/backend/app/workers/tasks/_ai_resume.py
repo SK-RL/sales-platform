@@ -139,14 +139,9 @@ def customize_resume(
             "avoid tables, images, or graphics descriptions."
         )
 
-        message = client.messages.create(
-            model=CLAUDE_SONNET,
-            max_tokens=4000,
-            system=system,
-            messages=[{"role": "user", "content": user_content}],
-        )
+        from app.ai_client import complete
 
-        response_text = message.content[0].text
+        response_text, message = complete(user_content, system=system, answer_tokens=4000, model=CLAUDE_SONNET, client=client)
 
         # Extract the JSON-bearing tag. The nonce makes the opening/
         # closing tags unguessable from outside this invocation.

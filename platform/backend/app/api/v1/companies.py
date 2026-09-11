@@ -1137,12 +1137,9 @@ async def draft_contact_email(
             "SUBJECT: <subject line>\n"
             "BODY:\n<email body>"
         )
-        msg = ai.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=350,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = msg.content[0].text
+        from app.ai_client import complete
+
+        text, _ = complete(prompt, answer_tokens=350, client=ai)
         subject = template_subject
         body = text
         if "SUBJECT:" in text:

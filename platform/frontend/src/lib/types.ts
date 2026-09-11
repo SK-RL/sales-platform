@@ -1173,7 +1173,20 @@ export interface JobQuestionsPreview {
 
 // F347 — what the apply gate recorded on an application it refused.
 // Lives on Application.platform_response.
+// F396 — a drafted answer for a Needs-you free-text question.
+export interface AnswerDraft {
+  text: string;
+  enough_information: boolean;
+  unsupported_claims: string[];
+  note: string;
+  error?: string;
+  label?: string;
+  used?: boolean;
+}
+
 export interface ApplyGateResult {
+  // F396 — drafts keyed by field_key, written by the worker.
+  drafts?: Record<string, AnswerDraft>;
   // "blocked" | "passed" (a dry run that placed everything it needed)
   // | "submitted" | "failed"
   gate?: string;
