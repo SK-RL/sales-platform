@@ -148,3 +148,32 @@ class TestWiring:
             if d: downs.add(d.group(1))
         heads = [k for k in revs if k not in downs]
         assert heads == ["t7u8v9w0x1y2"], heads
+
+
+class TestCircuitBreaker:
+    def test_a_run_stops_after_consecutive_blocks(self, monkeypatch):
+        """Production: Himalayas challenges the VM on every page. Don't
+        keep knocking; leave the rest unresolved for another day."""
+        import app.workers.tasks.aggregator_task as agt
+
+        jobs = [_job() for _ in range(8)]
+
+        class _Res:
+            def scalars(self): return self
+            def all(self): return jobs
+
+        class _S:
+            def execute(self, stmt): return _Res()
+            def rollback(self): pass
+            def close(self): pass
+
+        monkeypatch.setattr(agt, "SyncSession", lambda: _S())
+        monkeypatch.setattr(agt, "PAUSE_SECONDS", 0)
+        calls = []
+        def fake_resolve(session, job):
+            calls.append(job.id)
+            return {"status": "blocked"}
+        monkeypatch.setattr(agt, "resolve_job", fake_resolve)
+        out = agt.resolve_aggregator_links()
+        assert len(calls) == agt.BLOCKED_STREAK_STOP
+        assert out["blocked"] == 3 and out["skipped_after_block"] == 5
