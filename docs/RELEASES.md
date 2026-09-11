@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 960e140 · sha-960e140
+Merge: own-words rule for drafts, third worker child (F396 fix, F397)
+
+
 ## 2026-09-11 · 0315f3b · sha-0315f3b
 Merge: Opus 5 everywhere + drafted answers for approval (F395, F396)
 
