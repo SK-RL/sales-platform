@@ -65,9 +65,9 @@ class TestProbe:
         calls = []
         def fetch(p, s):
             calls.append((p, s))
-            return [{"title": "Other role", "url": "x"}] if (p, s) == ("greenhouse", "acmecorp") else []
+            return [{"title": "Other role", "url": "x"}] if (p, s) == ("greenhouse", "acme") else []
         assert probe_boards("Acme Corp", "SRE", fetch=fetch) is None
-        assert {s for _, s in calls} == {"acmecorp"}          # never went on to "acme-corp"
+        assert {s for _, s in calls} == {"acme"}          # never went on to the raw "acme-corp"
         assert len(calls) == len(PROBE_PLATFORMS)
 
     def test_no_board_anywhere(self):
