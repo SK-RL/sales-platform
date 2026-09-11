@@ -28,10 +28,18 @@ BLOCKED_STREAK_STOP = 3
 _STATUSES = ("new", "under_review", "accepted")
 
 
-@celery_app.task
+@celery_app.task(acks_late=False)
 def resolve_aggregator_links(limit: int = BATCH) -> dict:
+    """Hourly. F401: non-reentrant and never redelivered — prod had two
+    copies running side by side after a day of deploy restarts (acks_late
+    re-queued each interrupted run), holding both default-queue children
+    while interactive apply tasks sat PENDING for half an hour."""
     from app.models.job import Job
+    from app.utils.scan_lock import acquire_scan_lock_sync, release_scan_lock
 
+    if not acquire_scan_lock_sync("aggregator", ttl=3000):
+        logger.info("resolve_aggregator_links: another run is in progress, skipping")
+        return {"skipped": "already running"}
     session = SyncSession()
     counts: dict[str, int] = {}
     try:
@@ -70,6 +78,7 @@ def resolve_aggregator_links(limit: int = BATCH) -> dict:
         return {"processed": len(jobs), **counts}
     finally:
         session.close()
+        release_scan_lock("aggregator")
 
 
 @celery_app.task

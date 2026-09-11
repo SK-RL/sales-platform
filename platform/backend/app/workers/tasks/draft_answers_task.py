@@ -17,7 +17,7 @@ from app.workers.tasks._db import SyncSession
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, max_retries=0, soft_time_limit=300, time_limit=360)
+@celery_app.task(bind=True, max_retries=0, acks_late=False, soft_time_limit=300, time_limit=360)
 def draft_gap_answers_task(self, application_id: str) -> dict:
     from sqlalchemy import select
 

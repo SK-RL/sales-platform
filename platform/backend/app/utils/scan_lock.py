@@ -104,6 +104,21 @@ async def acquire_scan_lock(scope: str) -> bool:
             pass
 
 
+def acquire_scan_lock_sync(scope: str, ttl: int | None = None) -> bool:
+    """Sync twin of ``acquire_scan_lock`` for Celery tasks (F401). Same
+    atomic ``SET NX EX``; fails open when Redis is unreachable."""
+    settings = get_settings()
+    try:
+        client = redis.Redis.from_url(settings.redis_url, decode_responses=True, socket_timeout=3)
+        try:
+            return bool(client.set(_key_for(scope), "1", nx=True, ex=ttl or _ttl_for(scope)))
+        finally:
+            client.close()
+    except Exception as e:
+        logger.warning("acquire_scan_lock_sync(%s) failed: %s; falling open", scope, e)
+        return True
+
+
 def release_scan_lock(scope: str) -> None:
     """Release a scan lock. Safe to call from Celery tasks (sync
     context). Idempotent — a DEL on a non-existent key is a no-op.
