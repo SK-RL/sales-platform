@@ -258,3 +258,11 @@ class TestRepostLinks:
                             lambda session, row: {"resolved_job_id": str(real_id), "apply_platform": "greenhouse"})
         out = applications._resolve_repost(ResolvedJob(str(repost_id), "himalayas", "bishop-fox", "himalayas-x", "Penetration Tester", "Bishop Fox", "https://himalayas.app/x", False))
         assert out.job_id == str(real_id) and out.platform == "greenhouse" and out.company_name == "Bishop Fox"
+
+
+    def test_slow_resolution_is_bounded_with_a_retry_message(self):
+        import inspect
+        from app.api.v1 import applications
+        src = inspect.getsource(applications.application_from_url)
+        assert "asyncio.wait_for" in src and "REPOST_RESOLVE_BUDGET_S" in src and "504" in src
+        assert applications.REPOST_RESOLVE_BUDGET_S < 60
