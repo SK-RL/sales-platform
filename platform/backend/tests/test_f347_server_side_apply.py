@@ -88,6 +88,42 @@ class TestHumanWallDetection:
     def test_ordinary_form_is_not_a_wall(self):
         assert detect_human_wall("<form><input id='first_name'></form>") is None
 
+    # F368 — the anchor iframe is mounted by BOTH the v2 checkbox and
+    # invisible v3. Only the former needs a person. Srcs are the live
+    # ones (Ashby ramp; BambooHR icmarkets), entity-encoded as
+    # page.content() returns them.
+    ASHBY_V3 = (
+        '<iframe src="https://www.recaptcha.net/recaptcha/api2/anchor?ar=1&amp;k=6LeFb'
+        '&amp;co=aHR0&amp;hl=en&amp;v=Bnq&amp;size=invisible&amp;anchor-ms=20000"></iframe>'
+        '<textarea name="g-recaptcha-response"></textarea>'
+    )
+    BAMBOO_V2 = (
+        '<iframe src="https://www.google.com/recaptcha/api2/anchor?ar=1&amp;k=6LfZ'
+        '&amp;co=aHR&amp;hl=en&amp;v=Bnq&amp;size=normal&amp;anchor-ms="></iframe>'
+    )
+
+    def test_invisible_recaptcha_v3_is_not_a_wall(self):
+        """Ashby. Treating this as a wall made a drivable ATS
+        extraction-only — the false-positive failure the docstring
+        warns about, and it was live for F366."""
+        assert detect_human_wall(self.ASHBY_V3) is None
+
+    def test_recaptcha_checkbox_is_a_wall(self):
+        assert detect_human_wall(self.BAMBOO_V2) == "recaptcha/api2/anchor"
+
+    def test_image_challenge_frame_is_a_wall(self):
+        assert detect_human_wall('<iframe src="https://www.google.com/recaptcha/api2/bframe?hl=en"></iframe>')
+
+    def test_invisible_widget_is_not_a_wall(self):
+        """The v2-invisible pattern: a .g-recaptcha with data-size=invisible."""
+        assert detect_human_wall('<div class="g-recaptcha" data-sitekey="k" data-size="invisible"></div>') is None
+
+    def test_one_visible_anchor_among_invisible_still_walls(self):
+        assert detect_human_wall(self.ASHBY_V3 + self.BAMBOO_V2) == "recaptcha/api2/anchor"
+
+    def test_datadome_interstitial_is_a_wall(self):
+        assert detect_human_wall("<script>var dd={'rt':'c','cid':'x'}</script>") is not None
+
     def test_none_html_is_safe(self):
         assert detect_human_wall("") is None
 

@@ -4,9 +4,12 @@ F357 unwired Ashby because its posting-api application-form endpoint
 returns 401 on every public board. That was the wrong probe. The
 application PAGE (jobs.ashbyhq.com/{org}/{id}/application) renders fully
 in headless Chromium — verified on ramp, supabase, linear and vanta — so
-extraction goes through the page. Every board also carries a reCAPTCHA
-v2 checkbox, so unattended submission is gated: Ashby is extraction-only
-and routes to the review queue, exactly like Lever.
+extraction goes through the page.
+
+(F366 originally called Ashby's reCAPTCHA a v2 checkbox and gated it as
+extraction-only. That was the bare ``api2/anchor`` marker talking; the
+anchor is ``size=invisible`` — v3 — and there is no checkbox. F368
+corrected the detector and added the submitter.)
 
 Fixture is the row shape ``_ASHBY_STRUCT_JS`` returned for a live Ramp
 posting (Security Engineer, Cloud), trimmed not invented.
@@ -79,9 +82,10 @@ class TestNormalisation:
 
 
 class TestWiringAndGate:
-    def test_ashby_is_extractable_but_never_auto_submitted(self):
+    def test_ashby_is_extractable_and_auto_submittable(self):
+        """Both halves: we read the form (F366) and can drive it (F368)."""
         assert "ashby" in SUPPORTED_QUESTION_PLATFORMS
-        assert "ashby" not in auto_submittable_platforms()
+        assert "ashby" in auto_submittable_platforms()
 
     def test_elaborate_is_not_a_compensation_question(self):
         """The 'rate' false positive found on this very form."""

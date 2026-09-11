@@ -80,6 +80,7 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
     from app.models.company import CompanyATSBoard
     from app.models.job import Job
     from app.models.resume import Resume
+    from app.fetchers.questions import human_wall_for
     from app.services.question_service import get_or_fetch_questions_sync
     from app.services.submitters import (
         SubmitField,
@@ -107,10 +108,15 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
 
         # ── Gate 2: do we have an adapter? ─────────────────────────
         if job.platform not in auto_submittable_platforms():
+            # F368 — when the reason is a known human wall, say so. "No
+            # submitter" reads as our gap; "hCaptcha" tells the user
+            # what to do (apply in their browser, mark it applied).
+            wall = human_wall_for(job.platform)
             return _halt(
                 session,
                 app_row,
-                f"no server-side submitter for platform '{job.platform}'",
+                wall["reason"] if wall
+                else f"no server-side submitter for platform '{job.platform}'",
             )
 
         board = session.execute(

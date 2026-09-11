@@ -37,6 +37,46 @@ SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
     {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr"}
 )
 
+# F368 — platforms whose application form is behind a wall only a person
+# can pass. Each entry was established on a live board, not assumed:
+#
+#   lever           hCaptcha checkbox on every apply page (F359).
+#   bamboohr        reCAPTCHA v2, ``size=normal`` anchor + bframe, plus a
+#                   "please leave this field blank" honeypot — verified
+#                   on icmarkets.bamboohr.com/careers/128.
+#   smartrecruiters DataDome in front of the oneclick-ui apply form. It
+#                   served the CAPTCHA interstitial to headless, new-
+#                   headless AND headed Chromium, and eventually to a
+#                   real Chrome on the same IP — reputation-based, so a
+#                   server will always be challenged. Getting past it is
+#                   detection evasion, which we do not do.
+#
+# Ashby is deliberately NOT here: its reCAPTCHA is invisible v3, which
+# mints its token on submit with nobody clicking anything (same class
+# as Greenhouse's enterprise build). ``base._interactive_recaptcha``
+# makes that distinction at the DOM level; this map makes it at the
+# platform level so the review queue can say *why* a form needs you
+# instead of "no submitter".
+KNOWN_HUMAN_WALLS: dict[str, dict[str, str]] = {
+    "lever": {
+        "vendor": "hCaptcha",
+        "reason": "Lever puts an hCaptcha checkbox on every application, so a person has to submit it.",
+    },
+    "bamboohr": {
+        "vendor": "reCAPTCHA",
+        "reason": "BambooHR puts an \"I'm not a robot\" reCAPTCHA on its application form, so a person has to submit it.",
+    },
+    "smartrecruiters": {
+        "vendor": "DataDome",
+        "reason": "SmartRecruiters protects its application form with DataDome bot detection, which challenges automated browsers, so it has to be applied in your own browser.",
+    },
+}
+
+
+def human_wall_for(platform: str) -> dict[str, str] | None:
+    """The wall on a platform's form, if we know of one."""
+    return KNOWN_HUMAN_WALLS.get((platform or "").strip().lower())
+
 
 # ---------------------------------------------------------------------------
 # Standard fallback fields for platforms without public form APIs

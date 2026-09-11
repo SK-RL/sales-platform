@@ -52,15 +52,15 @@ class TestOnlyRealExtractorsAreClaimed:
     Ashby was re-examined in F366: its PAGE renders, so it is claimed again.)
     """
 
-    def test_ashby_is_claimed_but_not_submittable(self):
+    def test_ashby_is_claimed_and_submittable(self):
         """F366 corrected F357: the API 401s, but the application PAGE
-        renders in headless Chromium, so extraction is real. Every board
-        carries a reCAPTCHA v2 checkbox, so it must never be
-        auto-submittable."""
+        renders in headless Chromium, so extraction is real. F368 then
+        corrected F366: the reCAPTCHA is invisible v3, not a checkbox,
+        so Ashby is drivable — see test_f368."""
         from app.services.submitters import auto_submittable_platforms
 
         assert "ashby" in SUPPORTED_QUESTION_PLATFORMS
-        assert "ashby" not in auto_submittable_platforms()
+        assert "ashby" in auto_submittable_platforms()
 
     def test_every_supported_platform_has_a_wired_extractor(self):
         import inspect

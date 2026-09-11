@@ -1153,6 +1153,9 @@ export interface JobQuestionsPreview {
     extraction_mode: "extracted" | "fallback";
     platform: string;
     supported: boolean;
+    // F368 — set when the platform's form sits behind something only a
+    // person can pass (hCaptcha, a reCAPTCHA checkbox, DataDome).
+    wall?: { vendor: string; reason: string } | null;
   };
   blocking?: BlockingGap[];
   safe_to_auto_submit?: boolean;
