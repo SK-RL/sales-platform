@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · f858a5e · sha-f858a5e
+feat(ats): JazzHR (scan + extract, walled) and Teamtailor (scan, extract, submit); faster paste flow
+
+
 ## 2026-09-11 · 912fa70 · sha-912fa70
 feat(ats): Breezy HR — scan, extract, submit
 
