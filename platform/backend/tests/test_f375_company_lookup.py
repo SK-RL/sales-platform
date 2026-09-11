@@ -58,12 +58,17 @@ class TestProbe:
         assert r[0] == "greenhouse" and r[1] == "bishopfox"
 
     def test_existing_board_without_the_title_stops_the_probe(self):
+        """Platforms for one slug are probed in parallel (F376b); a board
+        that exists without the title stops the search before the next
+        slug is tried."""
+        from app.services.company_lookup import PROBE_PLATFORMS
         calls = []
         def fetch(p, s):
             calls.append((p, s))
-            return [{"title": "Other role", "url": "x"}] if (p, s) == ("greenhouse", "acme") else []
-        assert probe_boards("Acme", "SRE", fetch=fetch) is None
-        assert calls[-1] == ("greenhouse", "acme")  # did not go on to ashby/acme etc.
+            return [{"title": "Other role", "url": "x"}] if (p, s) == ("greenhouse", "acmecorp") else []
+        assert probe_boards("Acme Corp", "SRE", fetch=fetch) is None
+        assert {s for _, s in calls} == {"acmecorp"}          # never went on to "acme-corp"
+        assert len(calls) == len(PROBE_PLATFORMS)
 
     def test_no_board_anywhere(self):
         assert probe_boards("Nobody Corp", "SRE", fetch=lambda p, s: []) is None

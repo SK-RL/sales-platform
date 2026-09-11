@@ -80,8 +80,10 @@ class FakeSession:
 
 
 def _job():
-    return Row(id=uuid.uuid4(), url=PAGE, platform="himalayas", apply_url=None, apply_platform=None,
-               resolved_job_id=None, apply_resolve_status=None, apply_resolved_at=None)
+    # remoteok, not himalayas: F376b skips the page for aggregators known
+    # to challenge every server fetch, and these tests exercise the page path.
+    return Row(id=uuid.uuid4(), url=PAGE, platform="remoteok", title="SRE", company_id=None, raw_json={},
+               apply_url=None, apply_platform=None, resolved_job_id=None, apply_resolve_status=None, apply_resolved_at=None)
 
 
 class TestResolveJob:
