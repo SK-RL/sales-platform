@@ -71,3 +71,11 @@ describe("AutoApplyPage", () => {
     expect(await screen.findByText(/Nothing needs you right now/)).toBeTruthy();
   });
 });
+
+describe("AutoApplyPage → guide link (F393)", () => {
+  it("links to the per-site guide section in the docs", async () => {
+    renderPage();
+    const a = (await screen.findByText(/Which sites are automatic\?/)).closest("a");
+    expect(a?.getAttribute("href")).toBe("/docs#auto-apply");
+  });
+});

@@ -1,4 +1,5 @@
 import type { ResolvedJobFromUrl,
+  AtsCoverage,
   UserNotice,
   User,
   Job,
@@ -1395,6 +1396,10 @@ export async function getRoutineTopToApply(limit = 10): Promise<TopToApplyRespon
 }
 
 // F257 — preferences + manual queue/exclude
+export async function getAtsCoverage(): Promise<AtsCoverage> {
+  return request<AtsCoverage>("/applications/ats-coverage");
+}
+
 export async function getRoutinePreferences(): Promise<RoutinePreferences> {
   return request<RoutinePreferences>("/routine/preferences");
 }

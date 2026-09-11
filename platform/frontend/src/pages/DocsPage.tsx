@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { getAtsCoverage } from "@/lib/api";
+import type { AtsCoverageRow } from "@/lib/types";
 import { useAuth } from "@/lib/auth";
 import {
   Shield,
@@ -28,6 +31,7 @@ import {
   Upload,
   Brain,
   Settings,
+  Bot,
 } from "lucide-react";
 
 // ── Collapsible Section ─────────────────────────────────────────────────────
@@ -36,17 +40,28 @@ function Section({
   icon: Icon,
   defaultOpen = false,
   badge,
+  id,
   children,
 }: {
   title: string;
   icon: React.ElementType;
   defaultOpen?: boolean;
   badge?: string;
+  id?: string;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const location = useLocation();
+  const targeted = Boolean(id) && location.hash === `#${id}`;
+  const [open, setOpen] = useState(defaultOpen || targeted);
+  // A deep link (/docs#auto-apply from the Auto-apply page) opens and
+  // scrolls to its section.
+  useEffect(() => {
+    if (!targeted) return;
+    setOpen(true);
+    document.getElementById(id as string)?.scrollIntoView?.({ block: "start" });
+  }, [targeted, id]);
   return (
-    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+    <div id={id} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-3 p-5 text-left hover:bg-gray-50 transition-colors"
@@ -90,6 +105,69 @@ function Warning({ children }: { children: React.ReactNode }) {
     <div className="flex gap-2.5 rounded-lg bg-amber-50 border border-amber-100 px-4 py-3 text-sm text-amber-800">
       <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-600" />
       <div>{children}</div>
+    </div>
+  );
+}
+
+// ── Auto-apply per-ATS guide (F393) ─────────────────────────────────────────
+// Rows come from GET /applications/ats-coverage, which derives each site's
+// level from the live submitter / extractor registries — the guide can't
+// promise more than the code does.
+const LEVEL_STYLE: Record<AtsCoverageRow["level"], string> = {
+  automatic: "bg-green-100 text-green-800",
+  review: "bg-amber-100 text-amber-800",
+  link: "bg-gray-100 text-gray-700",
+  closed: "bg-red-100 text-red-800",
+};
+
+function AtsRow({ row }: { row: AtsCoverageRow }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="rounded-lg border border-gray-200 bg-white" id={`ats-${row.platform}`}>
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50">
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${LEVEL_STYLE[row.level]}`}>{row.level_label}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{row.name}</span>
+        <code className="hidden truncate text-[11px] text-gray-400 sm:block">{row.link_example}</code>
+        {open ? <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" /> : <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" />}
+      </button>
+      {open && (
+        <div className="grid gap-4 border-t border-gray-100 px-4 py-3 text-sm sm:grid-cols-2">
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Automatic</p>
+            {row.automatic.length === 0 ? (
+              <p className="text-gray-500">Nothing — we can't drive this site.</p>
+            ) : (
+              <ul className="list-disc space-y-1 pl-4 text-gray-700">{row.automatic.map((t) => <li key={t}>{t}</li>)}</ul>
+            )}
+          </div>
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">You</p>
+            <ul className="list-disc space-y-1 pl-4 text-gray-700">{row.you.map((t) => <li key={t}>{t}</li>)}</ul>
+            {row.notes.length > 0 && (
+              <p className="mt-2 text-xs text-gray-500">{row.notes.join(" · ")}</p>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 sm:col-span-2">Paste links that look like <code>{row.link_example}</code></p>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function AtsCoverageGuide() {
+  const q = useQuery({ queryKey: ["ats-coverage"], queryFn: getAtsCoverage, staleTime: 5 * 60_000 });
+  if (q.isLoading) return <p className="text-sm text-gray-500">Loading the site list…</p>;
+  if (q.isError || !q.data) return <p className="text-sm text-red-700">Couldn't load the site list — try again later.</p>;
+  const c = q.data.counts;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span className={`rounded-full px-2 py-0.5 font-semibold ${LEVEL_STYLE.automatic}`}>{c.automatic} automatic</span>
+        <span className={`rounded-full px-2 py-0.5 font-semibold ${LEVEL_STYLE.review}`}>{c.review} we fill, you submit</span>
+        <span className={`rounded-full px-2 py-0.5 font-semibold ${LEVEL_STYLE.link}`}>{c.link} link only</span>
+        <span className={`rounded-full px-2 py-0.5 font-semibold ${LEVEL_STYLE.closed}`}>{c.closed} not supported</span>
+      </div>
+      <ul className="space-y-2">{q.data.items.map((r) => <AtsRow key={r.platform} row={r} />)}</ul>
     </div>
   );
 }
@@ -538,6 +616,46 @@ export function DocsPage() {
               Your answer book auto-fills the application form. Review the answers, edit if needed, then submit.
               Track all applications in the <strong>Applications</strong> tab.
             </p>
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Auto-apply: what is automatic on each site (F393) ─────────── */}
+      <Section title="Auto-apply: what is automatic on each site" icon={Bot} id="auto-apply">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            <Link to="/apply" className="font-semibold text-primary-600 hover:text-primary-700 underline">Auto-apply</Link> fills
+            and submits the employer&apos;s real application form for you. What it can do depends on the site the form is
+            hosted on. Paste a posting link on the Auto-apply page and the site is recognised automatically.
+          </p>
+
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Where the answers come from</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li>Every answer comes from your <Link to="/answer-book" className="font-semibold text-primary-600 hover:text-primary-700 underline">Answer Book</Link> (plus your name, email and phone from your résumé). Nothing is invented.</li>
+              <li>A question with <strong>no answer</strong> stops the application in <strong>Needs you</strong> — you answer it once, it&apos;s saved, and the application continues.</li>
+              <li>Work authorization, sponsorship, salary and diversity questions are <strong>never guessed</strong>: only an answer you saved under that exact question is used.</li>
+              <li>A loose match (same category, different wording) is shown as <strong>&ldquo;Guessed — not sent&rdquo;</strong> when you review. Guesses are never sent: a required one stops in Needs you, an optional one is left blank.</li>
+              <li>If your saved answer isn&apos;t one of the form&apos;s options (e.g. &ldquo;5&rdquo; where the form offers 0 / 1 / 2+), it stops in Needs you instead of being forced.</li>
+            </ul>
+            <Warning>
+              A wrong answer that exactly matches a question <em>will</em> be sent — the system cannot tell a wrong answer from a right one. Keep the Answer Book accurate and replace any entry marked &ldquo;[TEST …]&rdquo;.
+            </Warning>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Levels</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li><strong>Automatic</strong> — we fill and submit; only an unanswered question stops it.</li>
+              <li><strong>We fill, you submit</strong> — the site puts a CAPTCHA checkbox on submit. We prepare every answer; you paste them in your own browser and press &ldquo;Mark applied&rdquo;.</li>
+              <li><strong>Link only</strong> — we find the posting but can&apos;t drive the form.</li>
+              <li><strong>Not supported</strong> — a pasted link is refused with the reason.</li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Every site</h3>
+            <AtsCoverageGuide />
           </div>
         </div>
       </Section>

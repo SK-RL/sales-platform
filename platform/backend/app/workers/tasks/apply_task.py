@@ -201,7 +201,10 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
             # File fields are passed through even with no answer: the
             # adapter uploads the resume itself and needs to see the
             # field to know its alternative group is satisfied (F350).
-            if m["field_type"] == "file" or m["answer"]
+            # F394 — a category-fallback guess is never placed, in either
+            # mode: an optional field is left blank rather than filled
+            # with an unrelated answer (audit: "Website" = first name).
+            if m["field_type"] == "file" or (m["answer"] and m.get("confidence") != "low")
         ]
 
         submitter = get_submitter(job.platform)

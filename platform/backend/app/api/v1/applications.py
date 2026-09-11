@@ -267,6 +267,19 @@ def credentials_required(platform: str) -> bool:
     return (platform or "").strip().lower() not in auto_submittable_platforms()
 
 
+@router.get("/ats-coverage")
+async def get_ats_coverage(user: User = Depends(get_current_user)):
+    """F393 — what auto-apply does on each ATS, for the platform guide.
+    Capability levels come from the live registries, never from prose."""
+    from app.services.ats_coverage import ats_coverage
+
+    rows = ats_coverage()
+    return {
+        "items": rows,
+        "counts": {level: sum(1 for r in rows if r["level"] == level) for level in ("automatic", "review", "link", "closed")},
+    }
+
+
 @router.get("/readiness/{job_id}")
 async def get_apply_readiness(
     job_id: UUID,
