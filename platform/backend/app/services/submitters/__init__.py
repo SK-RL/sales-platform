@@ -22,11 +22,13 @@ from app.services.submitters.base import (
     SubmitField,
     SubmitOutcome,
 )
+from app.services.submitters.ashby import AshbySubmitter
 from app.services.submitters.greenhouse import GreenhouseSubmitter
 from app.services.submitters.recruitee import RecruiteeSubmitter
 from app.services.submitters.workable import WorkableSubmitter
 
 _REGISTRY: dict[str, type[BaseSubmitter]] = {
+    AshbySubmitter.platform: AshbySubmitter,
     GreenhouseSubmitter.platform: GreenhouseSubmitter,
     RecruiteeSubmitter.platform: RecruiteeSubmitter,
     WorkableSubmitter.platform: WorkableSubmitter,

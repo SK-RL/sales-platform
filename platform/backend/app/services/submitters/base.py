@@ -144,12 +144,11 @@ class BaseSubmitter(ABC):
 # identifiable by their challenge iframe / explicit widget rather than
 # by the word "recaptcha" appearing anywhere on the page.
 _HUMAN_REQUIRED_MARKERS: tuple[str, ...] = (
-    # reCAPTCHA v2 checkbox — the anchor iframe is the clickable widget.
-    "recaptcha/api2/anchor",
-    # reCAPTCHA v2 image challenge popup.
+    # reCAPTCHA v2 image challenge popup. The anchor iframe and the
+    # ``.g-recaptcha`` widget are handled by ``_interactive_recaptcha``
+    # below, because both are ALSO what an invisible v3 integration
+    # mounts — see F368.
     "recaptcha/api2/bframe",
-    'class="g-recaptcha"',
-    "class='g-recaptcha'",
     # hCaptcha's interactive checkbox widget. F359 — the old marker was
     # the single script filename "hcaptcha.com/1/api.js", and Lever
     # loads "js.hcaptcha.com/1/secure-api.js" instead, so a live Lever
@@ -196,6 +195,59 @@ def detect_human_wall(page_html: str) -> str | None:
     for marker in _HUMAN_REQUIRED_MARKERS:
         if marker in haystack:
             return marker
+    return _interactive_recaptcha(haystack)
+
+
+_RECAPTCHA_ANCHOR = "recaptcha/api2/anchor"
+_RECAPTCHA_WIDGET = ("class=\"g-recaptcha\"", "class='g-recaptcha'")
+
+
+def _interactive_recaptcha(haystack: str) -> str | None:
+    """A reCAPTCHA is a wall only when it has a checkbox to click.
+
+    F368. ``recaptcha/api2/anchor`` was a bare marker, but that iframe
+    is mounted by every non-enterprise integration — the v2 checkbox
+    AND score-based v3, which is invisible and mints its token on
+    submit with nobody clicking anything. Ashby is v3
+    (``api.js?render=<key>``, anchor ``size=invisible``, no widget, no
+    "I'm not a robot") and was misclassified as a wall on that marker
+    alone, which made it extraction-only for no reason. BambooHR is the
+    real thing: ``size=normal`` anchor plus a bframe.
+
+    Greenhouse never tripped this because its enterprise build lives
+    under ``recaptcha/enterprise/`` — a path difference, not a
+    detection.
+
+    So: an anchor whose src says ``size=invisible`` is not a wall; any
+    other anchor is. A ``.g-recaptcha`` widget with
+    ``data-size="invisible"`` is the v2-invisible pattern and likewise
+    not a wall; a bare widget is the checkbox.
+    """
+    start = 0
+    while True:
+        i = haystack.find(_RECAPTCHA_ANCHOR, start)
+        if i < 0:
+            break
+        src = haystack[i : i + 800]
+        cut = [n for n in (src.find('"'), src.find("'"), src.find(">"), src.find(" ")) if n > 0]
+        if cut:
+            src = src[: min(cut)]
+        if "size=invisible" not in src:
+            return _RECAPTCHA_ANCHOR
+        start = i + len(_RECAPTCHA_ANCHOR)
+
+    for widget in _RECAPTCHA_WIDGET:
+        start = 0
+        while True:
+            i = haystack.find(widget, start)
+            if i < 0:
+                break
+            tag_start = haystack.rfind("<", 0, i)
+            tag_end = haystack.find(">", i)
+            tag = haystack[max(tag_start, 0) : tag_end if tag_end > 0 else i + 400]
+            if "data-size=\"invisible\"" not in tag and "data-size='invisible'" not in tag:
+                return widget
+            start = i + len(widget)
     return None
 
 

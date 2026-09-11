@@ -190,6 +190,42 @@ describe("guessed form", () => {
   });
 });
 
+describe("human wall (F368)", () => {
+  /** SmartRecruiters (DataDome), BambooHR and Lever (captcha checkboxes)
+   *  can be read but never driven. The page must say WHY and what to
+   *  do, not "no submitter" — that reads as our bug, and the user
+   *  would wait for a fix that isn't coming. */
+  beforeEach(() => {
+    questions = {
+      questions: [],
+      coverage: { total: 0, answered: 0, high_confidence: 0, new_entries: 0 },
+      schema: {
+        extraction_mode: "fallback", platform: "smartrecruiters", supported: false,
+        wall: { vendor: "DataDome", reason: "SmartRecruiters protects its application form with DataDome bot detection, so it has to be applied in your own browser." },
+      },
+      blocking: [],
+      safe_to_auto_submit: false,
+    };
+  });
+
+  it("names the wall instead of the generic guessed-form text", async () => {
+    renderPage();
+    expect(await screen.findByText(/DataDome bot detection/i)).toBeTruthy();
+    expect(screen.queryByText(/couldn't read this posting's real application form/i)).toBeNull();
+  });
+
+  it("tells the user what to do next", async () => {
+    renderPage();
+    expect(await screen.findByText(/Apply on the posting page/i)).toBeTruthy();
+  });
+
+  it("keeps submit disabled", async () => {
+    renderPage();
+    const btn = (await screen.findByText("Submit application")) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+});
+
 describe("clean application", () => {
   beforeEach(() => {
     questions = {

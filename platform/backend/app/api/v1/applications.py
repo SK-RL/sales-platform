@@ -1146,7 +1146,7 @@ async def preview_job_questions(
     import logging
     from app.services.question_service import get_or_fetch_questions, auto_populate_answer_book
     from app.workers.tasks._answer_prep import blocking_gaps, match_questions_to_answers
-    from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS
+    from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS, human_wall_for
 
     logger = logging.getLogger(__name__)
 
@@ -1270,6 +1270,9 @@ async def preview_job_questions(
             "extraction_mode": extraction_mode,
             "platform": job.platform,
             "supported": job.platform in SUPPORTED_QUESTION_PLATFORMS,
+            # F368 — why a form we may even have read still needs a
+            # person. None for platforms we can drive.
+            "wall": human_wall_for(job.platform),
         },
         "blocking": blocking,
         "safe_to_auto_submit": not blocking and extraction_mode == "extracted",

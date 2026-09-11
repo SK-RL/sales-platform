@@ -107,6 +107,9 @@ export function ApplyReviewPage() {
   // the gate never ran (a manually prepared application).
   const blocking = gate.blocking?.length ? gate.blocking : preview?.blocking ?? [];
   const guessedForm = preview?.schema?.extraction_mode === "fallback";
+  // A wall is the more useful explanation than "couldn't read the form"
+  // when both are true (SmartRecruiters): it says what to do next.
+  const wall = preview?.schema?.wall ?? null;
 
   // Until the gate record and the form have both loaded we don't know
   // whether anything blocks — so Submit must not be offered yet. Without
@@ -238,12 +241,20 @@ export function ApplyReviewPage() {
       </div>
 
       {/* Why it stopped. The single most important thing on the page. */}
-      {(blocking.length > 0 || gate.reason || guessedForm) && (
+      {(blocking.length > 0 || gate.reason || guessedForm || wall) && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-medium text-amber-900">
-            {gate.reason ?? "This application needs your input before it can be sent."}
+            {gate.reason ?? wall?.reason ?? "This application needs your input before it can be sent."}
           </p>
-          {guessedForm && (
+          {wall && (
+            <p className="mt-1.5 text-sm text-amber-800">
+              {gate.reason && gate.reason !== wall.reason ? `${wall.reason} ` : ""}
+              Apply on the posting page, then mark it{" "}
+              <span className="font-medium">I applied manually</span> here — the
+              answers below are ready to copy.
+            </p>
+          )}
+          {guessedForm && !wall && (
             <p className="mt-1.5 text-sm text-amber-800">
               We couldn't read this posting's real application form, so we won't
               submit it automatically — a form we guessed can't be a form we
