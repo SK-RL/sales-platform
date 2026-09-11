@@ -151,7 +151,7 @@ On the VM, give the `deploy` user a read-only GHCR PAT (stored in `/home/deploy/
 
 ### 4.6 Deploy safety rails
 
-1. **Pre-deploy DB backup** — `pg_dump` → `/opt/sales-platform/backups/pre-deploy-<tag>.sql.gz`, keep 14.
+1. **DB backup** — the nightly Celery backup (03:00 UTC, keeps the last 3) is the only backup stream; pre-deploy dumps were retired on 2026-09-11 after 53 of them (70 GB) filled the disk. Before a risky deploy, take one on demand: `POST /api/v1/monitoring/backup` (Monitoring → Backup now).
 2. **Migrations first** — `alembic upgrade head` runs in a one-shot container before the swap. Failure = hard stop, no swap.
 3. **Rolling restart** — backend first (health-check 30 s), then celery + frontend + nginx.
 4. **Health-check** — `curl -fsS https://salesplatform.reventlabs.com/api/v1/monitoring` returns 2xx/401 within 60 s, else auto-rollback.

@@ -6,7 +6,6 @@ One-time setup to wire up the auto-deploy pipeline. After this is done, every pu
 GitHub Actions
   └─ build & push images → ghcr.io/betaque-team/sales-platform/{backend,frontend}:sha-<short>
      └─ SSH to VM as `deploy` user (forced-command → ci-deploy.sh only)
-        └─ pre-deploy DB backup
         └─ docker pull new tag
         └─ alembic upgrade head
         └─ rolling restart backend → health-check → celery/frontend/nginx
@@ -127,8 +126,8 @@ Not automated. If you really need to restore the DB (rare — usually the app ro
 ```bash
 ssh ubuntu@<VM_HOST>
 cd /opt/sales-platform
-ls backups/pre-deploy-*.sql.gz
-bash scripts/restore.sh <backup-file>
+ls -d backups/*/            # nightly + manual backups (last 3 kept), each a dated directory
+bash scripts/restore.sh <backup-dir>
 ```
 
 ---
