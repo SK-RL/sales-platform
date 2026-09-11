@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · a2cb3e3 · sha-a2cb3e3
+Merge: stop demanding an ATS login where the server drives a public form
+
+
 ## 2026-09-11 · b9d2f3a · sha-b9d2f3a
 Merge: Ashby server-side submitter; name the wall on SR/BambooHR/Lever
 
