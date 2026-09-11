@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · c6b6e11 · sha-c6b6e11
+Merge: a board whose fetch throws keeps its ScanLog (F402, tester)
+
+
 ## 2026-09-11 · 596352b · sha-596352b
 Merge: retire pre-deploy dumps, nightly backup keeps 3
 
