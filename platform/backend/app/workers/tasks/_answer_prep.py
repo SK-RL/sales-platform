@@ -262,6 +262,23 @@ def blocking_gaps(
                 "reason": "We only had a guess for this. Auto-apply doesn't send guesses — confirm the answer or save one in your Answer Book.",
             })
             continue
+        # F386 — a saved answer that is not one of the form's options can
+        # never be placed; say so here instead of after a browser run
+        # (production, Teamtailor "Locations": saved "Bengaluru, India"
+        # against [USA, Latin America] failed the adapter, not the gate).
+        if m.get("required") and m.get("field_type") in ("select", "multi_select") and (m.get("answer") or "").strip() and m.get("options"):
+            from app.services.submitters.base import coerce_option
+
+            answer = m.get("answer") or ""
+            parts = [answer] if m.get("field_type") == "select" else [v.strip() for v in re.split(r"\s*[;|]\s*", answer) if v.strip()]
+            if any(coerce_option(v, m["options"]) is None for v in parts):
+                labels = [o.get("label") or o.get("value") if isinstance(o, dict) else str(o) for o in m["options"]][:6]
+                gaps.append({
+                    "field_key": m.get("field_key", ""),
+                    "label": m.get("label") or m.get("field_key", ""),
+                    "reason": f"Your saved answer \"{answer[:40]}\" isn't one of this form's options ({', '.join(labels)}). Pick one.",
+                })
+                continue
         if not m.get("needs_user"):
             continue
         if m.get("never_infer"):

@@ -231,6 +231,15 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
             logger.warning(
                 "apply_task: submit failed for %s — %s", app_row.id, outcome.error
             )
+            # F386 — retry only what a retry can change. "Required fields
+            # could not be placed" is deterministic: the same form, the
+            # same answers, the same result, at the cost of a fresh
+            # Chromium each time (seen on production: three runs for one
+            # unplaceable Teamtailor field). Browser/network errors and a
+            # missing confirmation are worth a second look.
+            deterministic = (outcome.error or "").startswith("required fields could not be")
+            if deterministic:
+                return {"status": STATUS_FAILED, "error": outcome.error}
             raise self.retry(
                 exc=RuntimeError(outcome.error or "submit failed"),
                 countdown=60 * (2 ** self.request.retries),
