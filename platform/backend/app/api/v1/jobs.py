@@ -731,6 +731,42 @@ async def review_queue(
     }
 
 
+@router.post("/{job_id}/resolve-apply-link")
+async def resolve_apply_link(
+    job_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """F374 — resolve an aggregator repost to its employer form, now.
+
+    The hourly task does this for high-scoring rows; this is the
+    on-demand path from the job page, and the way coverage was first
+    measured on production. Returns the recorded outcome.
+    """
+    import asyncio
+
+    from app.services.aggregator_resolver import AGGREGATOR_PLATFORMS
+
+    job = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.platform not in AGGREGATOR_PLATFORMS:
+        raise HTTPException(status_code=422, detail=f"{job.platform} postings already point at their form.")
+
+    def _run():
+        from app.workers.tasks._db import SyncSession
+        from app.services.aggregator_resolver import resolve_job
+
+        session = SyncSession()
+        try:
+            row = session.get(Job, job_id)
+            return resolve_job(session, row)
+        finally:
+            session.close()
+
+    return await asyncio.to_thread(_run)
+
+
 @router.get("/{job_id}")
 async def get_job(job_id: UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(

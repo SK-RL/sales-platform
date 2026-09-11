@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, JSON, Float, Integer, Index
+from sqlalchemy import String, DateTime, ForeignKey, JSON, Float, Integer, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -76,6 +76,22 @@ class Job(Base):
     submitted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+
+    # F374 — aggregator apply-link resolution. Himalayas (and any other
+    # aggregator) reposts an employer's posting; the real form lives on
+    # the employer's ATS behind an "Apply" redirect. ``apply_url`` is that
+    # resolved destination, ``apply_platform`` what the URL fingerprinted
+    # as, ``resolved_job_id`` the catalogue Job created from it when the
+    # ATS is one we read (so the apply path can use it), and
+    # ``apply_resolve_status`` why not otherwise:
+    #   resolved | external | blocked | no_link | error
+    apply_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    apply_platform: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    resolved_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    apply_resolve_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    apply_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     company: Mapped["Company"] = relationship()

@@ -101,6 +101,11 @@ export interface Job {
   title: string;
   url: string;
   source_platform: string;
+  // F374 — an aggregator repost's resolved employer form, if we found it.
+  apply_url?: string | null;
+  apply_platform?: string | null;
+  resolved_job_id?: string | null;
+  apply_resolve_status?: string | null;
   remote_scope: string;
   location_restriction: string;
   employment_type: string | null;

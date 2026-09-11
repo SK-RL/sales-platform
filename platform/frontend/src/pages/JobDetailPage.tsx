@@ -556,7 +556,7 @@ export function JobDetailPage() {
                 return (
                   <>
                     <a
-                      href={job.url}
+                      href={job.apply_url || job.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:text-primary-700"
@@ -995,9 +995,17 @@ export function JobDetailPage() {
                   actual ATS. Relabel to "Open Posting" for
                   aggregators so the expectation matches reality.
                 */}
+                {/* F374 — say where an aggregator repost's real form is. */}
+                {job.apply_url && (
+                  <p className="mb-2 text-xs text-gray-500">
+                    {job.resolved_job_id
+                      ? `Real form found on ${job.apply_platform ?? "the employer's ATS"} — Prepare uses it.`
+                      : `Real form is on ${job.apply_platform ?? "the employer's site"}; open it to apply there.`}
+                  </p>
+                )}
                 <div className="flex gap-2">
                   <a
-                    href={job.url}
+                    href={job.apply_url || job.url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
