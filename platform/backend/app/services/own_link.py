@@ -68,6 +68,12 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("personio", re.compile(r"^https?://([a-z0-9-]+)\.jobs\.personio\.(?:com|de)/job/(\d+)", re.I)),
     ("rippling", re.compile(r"^https?://ats\.rippling\.com/([^/?#]+)/jobs/([0-9a-f]{8}-[0-9a-f-]{27})", re.I)),
     ("teamtailor", re.compile(r"^https?://(?!www\.|app\.|api\.)([a-z0-9-]+)(?:\.[a-z]{2})?\.teamtailor\.com/jobs/(\d+)", re.I)),
+    ("pinpoint", re.compile(r"^https?://(?!www\.|app\.|api\.)([a-z0-9-]+)\.pinpointhq\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?postings/([0-9a-f]{8}-[0-9a-f-]{27})", re.I)),
+    ("hireology", re.compile(r"^https?://careers\.hireology\.com/([a-z0-9-]+)/(\d+)(?:/|$|\?)", re.I)),
+    ("dover", re.compile(r"^https?://app\.dover\.com/apply/([A-Za-z0-9-]+)/([0-9a-f]{8}-[0-9a-f-]{27})", re.I)),
+    ("gem", re.compile(r"^https?://jobs\.gem\.com/([a-z0-9-]+)/([A-Za-z0-9_-]{6,})(?:[/?#]|$)", re.I)),
+    ("zoho", re.compile(r"^https?://(?!www\.|careers\.)([a-z0-9-]+)\.zohorecruit\.(?:com|in|eu)/jobs/[^/?#]+/(\d{12,})", re.I)),
+    ("jobvite", re.compile(r"^https?://jobs\.jobvite\.com/(?:careers/)?(?!careers/)([a-z0-9-]+)/job/([A-Za-z0-9]{6,})", re.I)),
     ("jazzhr", re.compile(r"^https?://(?!www\.|app\.)([a-z0-9-]+)\.applytojob\.com/apply/([A-Za-z0-9]{6,})(?:[/?#]|$)", re.I)),
     ("bamboohr", re.compile(r"^https?://(?!www\.|api\.|jobs\.)([a-z0-9-]+)\.bamboohr\.com/careers/(\d+)", re.I)),
     ("smartrecruiters", re.compile(r"^https?://jobs\.smartrecruiters\.com/([^/?#]+)/(\d+)", re.I)),
@@ -86,13 +92,21 @@ _KNOWN_UNRESOLVABLE: tuple[tuple[re.Pattern[str], str], ...] = (
      "That's a Workable search page; paste the apply.workable.com link for the posting instead."),
     (re.compile(r"myworkdayjobs\.com", re.I),
      "Workday postings need an account on the employer's site, which we can't create for you."),
+    (re.compile(r"^https?://(?:www\.)?workatastartup\.com/(?:jobs|companies)/", re.I),
+     "Y Combinator's Work at a Startup only takes applications through your own YC account, so we can't apply there for you; open the posting and apply with your YC login."),
+    (re.compile(r"^https?://(?:www\.)?join\.com/companies/", re.I),
+     "JOIN verifies your email (a code or Google sign-in) before it shows the form, so we can't apply there for you; open the posting and apply yourself."),
+    (re.compile(r"^https?://jobs\.polymer\.co/", re.I),
+     "Polymer's job pages sit behind a Cloudflare bot check that we don't bypass; open the posting and apply yourself."),
+    (re.compile(r"^https?://[a-z0-9-]+\.careerplug\.com/", re.I),
+     "CareerPlug asks you to create an account before applying, which we can't do for you; open the posting and apply yourself."),
     (re.compile(r"linkedin\.com/jobs", re.I),
      "LinkedIn needs you signed in; open the posting's own apply link and paste that."),
 )
 
 _SUPPORTED_HINT = (
     "Paste a posting link from Greenhouse, Lever, Ashby, Workable, Recruitee, "
-    "BambooHR, SmartRecruiters, Breezy, Personio, Rippling, JazzHR, Teamtailor, or a Himalayas job page."
+    "BambooHR, SmartRecruiters, Breezy, Personio, Rippling, JazzHR, Teamtailor, Pinpoint, Jobvite, Hireology, Dover, Gem, or a Himalayas job page."
 )
 
 
@@ -100,7 +114,7 @@ def _external_id(platform: str, slug: str, token: str) -> str | None:
     """The fetcher's external_id for this token, mirroring each fetcher."""
     if platform in ("greenhouse", "lever", "ashby", "workable"):
         return token
-    if platform in ("breezy", "personio", "rippling", "jazzhr", "teamtailor"):
+    if platform in ("breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "jobvite", "hireology", "dover", "gem", "zoho"):
         return f"{platform}-{token}"  # namespaced, mirroring each fetcher (jobs.external_id is UNIQUE)
     if platform == "bamboohr":
         return f"bamboo-{slug}-{token}"

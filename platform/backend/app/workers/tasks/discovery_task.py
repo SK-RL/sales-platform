@@ -100,7 +100,7 @@ BAMBOOHR_PROBE_SLUGS = [
 # returns [] and the stale-board auto-deactivator culls any legacy
 # jobvite boards still in the DB. Monitor for platform recovery and
 # restore slugs here if/when it comes back.
-JOBVITE_PROBE_SLUGS: list[str] = []
+JOBVITE_PROBE_SLUGS: list[str] = ["progress"]  # F388: host alive again for current tenants (HTML board)
 
 # Workday — enterprise Fortune-500 coverage. Slug is the composite
 # ``{tenant}/{cluster}/{site}`` — see app/fetchers/workday.py docstring.
@@ -208,6 +208,14 @@ def _crawl_greenhouse_sitemap(session, run: DiscoveryRun) -> int:
     return new_count
 
 
+_HTML_BOARD_MARKERS: dict[str, str] = {
+    "jobvite": "jv-job-list-name",
+    "jazzhr": "list-group-item",
+    "teamtailor": "<item>",
+    "zoho": "Posting_Title",
+}
+
+
 def _probe_platform_slugs(session, run: DiscoveryRun, platform: str, slugs: list[str], url_template: str) -> int:
     """Generic slug prober for any platform with a public API."""
     new_count = 0
@@ -237,7 +245,11 @@ def _probe_platform_slugs(session, run: DiscoveryRun, platform: str, slugs: list
                                 data.get("result") or data.get("data")
                             )
                     except Exception:
-                        has_data = False
+                        # HTML / RSS boards (F388): the page itself is the
+                        # feed — accept it when it carries the board's
+                        # listing markup.
+                        marker = _HTML_BOARD_MARKERS.get(platform)
+                        has_data = bool(marker and marker in resp.text)
 
                     if has_data:
                         from app.schemas.company import ATS_URL_PATTERNS
@@ -304,6 +316,22 @@ PLATFORM_PROBE_CONFIG = {
     "teamtailor": {
         "slugs": RECRUITEE_PROBE_SLUGS,
         "url": "https://{slug}.teamtailor.com/jobs.rss",
+    },
+    "pinpoint": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.pinpointhq.com/postings.json",
+    },
+    "hireology": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://api.hireology.com/v2/public/careers/{slug}",
+    },
+    "dover": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://app.dover.com/api/v1/careers-page-slug/{slug}",
+    },
+    "zoho": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.zohorecruit.com/jobs/Careers",
     },
     "bamboohr": {
         "slugs": BAMBOOHR_PROBE_SLUGS,

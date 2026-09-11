@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from json import dumps as json_dumps
 from typing import Any
 
 import httpx
@@ -34,7 +35,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "jobvite", "hireology", "dover", "gem"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -69,6 +70,10 @@ KNOWN_HUMAN_WALLS: dict[str, dict[str, str]] = {
     "jazzhr": {
         "vendor": "reCAPTCHA",
         "reason": "JazzHR puts an \"I'm not a robot\" reCAPTCHA on its application form, so a person has to submit it.",
+    },
+    "zoho": {
+        "vendor": "image CAPTCHA",
+        "reason": "Zoho Recruit ends its \"I'm interested\" form with an image CAPTCHA to type, so a person has to submit it.",
     },
     "smartrecruiters": {
         "vendor": "DataDome",
@@ -143,6 +148,11 @@ def fetch_application_questions(
         "rippling": _fetch_rippling_questions,
         "jazzhr": _fetch_jazzhr_questions,
         "teamtailor": _fetch_teamtailor_questions,
+        "pinpoint": _fetch_pinpoint_questions,
+        "jobvite": _fetch_jobvite_questions,
+        "hireology": _fetch_hireology_questions,
+        "dover": _fetch_dover_questions,
+        "gem": _fetch_gem_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1520,3 +1530,530 @@ def _fetch_teamtailor_questions(job_external_id: str, slug: str) -> list[dict[st
     if not raw:
         return []
     return normalise_teamtailor_rows(teamtailor_form_rows(raw["url"].rstrip("/") + "/applications/new"))
+
+
+# ---------------------------------------------------------------------------
+# Jobvite — F388, read from the rendered application form
+# ---------------------------------------------------------------------------
+# ``{job url}/apply`` is an AngularJS app (verified on progress). Some
+# tenants gate it with a data-consent step: ``#jv-country-select``
+# ("Location of Residence and Language") + "I Accept". That choice is
+# surfaced as the ``jv_consent_region`` question so the user picks it
+# once; extraction picks any option just to render the form. Behind it,
+# every question is a ``.jv-form-field`` block whose label / legend is
+# the question (trailing ``*`` = required): text inputs named
+# ``input-{id}``, radios named ``{id}`` with <label for> options,
+# selects named ``input-{id}``. The résumé is the hidden ``#file-input-0``.
+# reCAPTCHA is present but ``size=invisible`` (score-based) — not a wall.
+
+_JOBVITE_CONSENT_SELECT = "#jv-country-select"
+_JOBVITE_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const rows = [];
+  const gate = document.querySelector('#jv-country-select');
+  if (gate) {
+    const lab = gate.id && document.querySelector(`label[for="${CSS.escape(gate.id)}"]`);
+    rows.push({ kind: 'consent', label: norm(lab ? lab.innerText : 'Location of Residence and Language'),
+                options: [...gate.options].filter(o => o.value && !/^select/i.test(norm(o.textContent))).map(o => norm(o.textContent)) });
+  }
+  const resumeHdr = document.querySelector('#jv-resume-header, .jv-step-header');
+  if (document.querySelector('#file-input-0')) rows.push({ kind: 'resume', required: /\*/.test(norm(resumeHdr ? resumeHdr.innerText : '')) });
+  for (const g of document.querySelectorAll('form .jv-form-field')) {
+    const ctls = [...g.querySelectorAll('input,select,textarea')].filter(e => e.type !== 'hidden' && e.type !== 'submit');
+    if (!ctls.length) continue;
+    const q = g.querySelector('legend, label.jv-form-field-label, label');
+    const question = norm(q ? q.innerText : '');
+    const first = ctls[0];
+    const kinds = ctls.map(e => e.type);
+    const choice = kinds.every(k => k === 'radio' || k === 'checkbox');
+    const opts = choice
+      ? ctls.map(e => { const l = e.id && g.querySelector(`label[for="${CSS.escape(e.id)}"]`); return norm(l ? l.innerText : e.value); }).filter(Boolean)
+      : (first.tagName === 'SELECT' ? [...first.options].filter(o => o.value && !/^select an option/i.test(norm(o.textContent))).map(o => norm(o.textContent)) : []);
+    rows.push({ kind: 'field', tag: first.tagName.toLowerCase(), type: choice ? kinds[0] : (first.type || ''), name: first.name || '', id: first.id || '',
+                question, required: /\*\s*$/.test(question) || ctls.some(e => e.required || e.getAttribute('aria-required') === 'true'), options: opts });
+  }
+  return rows;
+})()
+"""
+
+_JOBVITE_FIXED_LABELS: dict[str, str] = {
+    "first name": "first_name", "last name": "last_name", "email": "email", "email address": "email",
+    "phone": "phone", "phone number": "phone", "mobile": "phone",
+}
+
+
+def jobvite_form_rows(apply_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(apply_url, wait_until="domcontentloaded", wait_for_selector="body")
+            await asyncio_sleep(3.5)
+            rows = await session.eval_js(_JOBVITE_STRUCT_JS) or []
+            gate = next((r for r in rows if r.get("kind") == "consent"), None)
+            if gate and gate.get("options"):
+                # Any region renders the form; the user's own choice is
+                # surfaced as a question and made at submit time.
+                pick = next((o for o in gate["options"] if "any other" in o.lower() or "united states" in o.lower()), gate["options"][0])
+                await session.eval_js(
+                    "(() => { const s = document.querySelector(%s); const o = [...s.options].find(o => o.textContent.trim() === %s);"
+                    " if (!o) return false; s.value = o.value; s.dispatchEvent(new Event('change', {bubbles: true})); return true; })()"
+                    % (json_dumps(_JOBVITE_CONSENT_SELECT), json_dumps(pick)))
+                await asyncio_sleep(1.5)
+                try:
+                    await session.click('button:has-text("I Accept"), button:has-text("Accept")')
+                except Exception:
+                    pass
+                await asyncio_sleep(4.0)
+                rows = [gate] + [r for r in (await session.eval_js(_JOBVITE_STRUCT_JS) or []) if r.get("kind") != "consent"]
+            return rows
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_jobvite_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in rows:
+        kind = r.get("kind")
+        if kind == "consent":
+            results.append({"field_key": "jv_consent_region", "label": (r.get("label") or "Location of Residence and Language").rstrip(":").strip(),
+                            "field_type": "select", "required": True, "options": list(r.get("options") or []),
+                            "description": "Jobvite asks this before showing the form; it picks which privacy notice applies."})
+            continue
+        if kind == "resume":
+            if "resume" not in seen:
+                seen.add("resume")
+                results.append({"field_key": "resume", "label": "Resume", "field_type": "file", "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        name = r.get("name") or ""
+        if not name:
+            continue
+        question = re.sub(r"\s*\*\s*$", "", r.get("question") or "").strip()
+        typ, tag = (r.get("type") or "").lower(), r.get("tag")
+        fixed = _JOBVITE_FIXED_LABELS.get(question.lower())
+        key = fixed or name
+        if key in seen:
+            continue
+        seen.add(key)
+        if typ == "radio":
+            ftype = "select"
+        elif typ == "checkbox":
+            ftype = "multi_select" if len(r.get("options") or []) > 1 else "boolean"
+        elif tag == "select":
+            ftype = "select"
+        elif tag == "textarea":
+            ftype = "textarea"
+        else:
+            ftype = "text"
+        results.append({"field_key": key, "label": question or name, "field_type": ftype, "required": bool(r.get("required")),
+                        "options": list(r.get("options") or []) if ftype in ("select", "multi_select") else [], "description": ""})
+    return results
+
+
+def _fetch_jobvite_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.jobvite import JobviteFetcher
+
+    raw = JobviteFetcher().fetch_one(slug, job_external_id)
+    if not raw or not raw.get("url"):
+        return []
+    return normalise_jobvite_rows(jobvite_form_rows(raw["url"].split("?", 1)[0].rstrip("/") + "/apply"))
+
+
+# ---------------------------------------------------------------------------
+# Hireology — F390, read from the public application-form schema
+# ---------------------------------------------------------------------------
+# ``api.hireology.com/v2/public/application_forms/{job id}`` returns the
+# form as ``template.sections[].fieldsets[].fields[{id, attributes{type,
+# required, options[{name, value}]}}]`` — no browser needed. The rendered
+# page addresses each field as ``#{id}-0`` (radios ``#{id}-{value}-0``).
+# Labels aren't in the JSON; the basic section's ids are well known and
+# custom ones get a humanised id plus the fieldset's own label when set.
+
+_HIREOLOGY_FIXED: dict[str, tuple[str, str, str]] = {
+    "first_name": ("first_name", "First name", "text"),
+    "last_name": ("last_name", "Last name", "text"),
+    "email_address": ("email", "Email address", "text"),
+    "home_phone": ("phone", "Phone number", "text"),
+    "street_address": ("address", "Address", "text"),
+    "city": ("city", "City", "text"),
+    "state_id": ("state", "State/Province", "select"),
+    "zip_code": ("postcode", "Zip/Postal code", "text"),
+    "resume": ("resume", "Resume", "file"),
+    "candidate_referred": ("candidate_referred", "Were you referred by a current employee?", "select"),
+    "referred_by": ("referred_by", "Who referred you?", "text"),
+    "cover_letter": ("cover_letter", "Cover letter", "textarea"),
+}
+_HIREOLOGY_TYPE = {"text": "text", "email": "text", "tel": "text", "number": "text", "url": "text", "date": "text",
+                   "textarea": "textarea", "select": "select", "radio": "select", "checkbox": "boolean", "file": "file"}
+
+
+def normalise_hireology_form(form: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for section in ((form or {}).get("template") or {}).get("sections") or []:
+        for fs in section.get("fieldsets") or []:
+            fs_label = (fs.get("label") or fs.get("title") or "").strip()
+            for f in fs.get("fields") or []:
+                fid = f.get("id") or ""
+                attrs = f.get("attributes") or {}
+                if not fid or attrs.get("hidden"):
+                    continue
+                raw_type = (attrs.get("type") or "text").lower()
+                options = [str(o.get("name") if isinstance(o, dict) else o) for o in (attrs.get("options") or [])]
+                options = [o for o in options if o and o != "--"]
+                if fid in _HIREOLOGY_FIXED:
+                    key, label, ftype = _HIREOLOGY_FIXED[fid]
+                    if fid == "candidate_referred" and not options:
+                        options = ["Yes", "No"]
+                elif fid == "sms_opt_in":
+                    # Default-checked consent to text messages; never a blocker.
+                    key, label, ftype = "sms_opt_in", "I would like to communicate with the hiring team via text message", "boolean"
+                else:
+                    key = fid
+                    label = (attrs.get("label") or f.get("label") or fs_label or fid.replace("_", " ").capitalize()).strip()
+                    ftype = _HIREOLOGY_TYPE.get(raw_type, "text")
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append({"field_key": key, "label": label, "field_type": ftype,
+                                "required": bool(attrs.get("required")) and key != "sms_opt_in",
+                                "options": options if ftype in ("select", "multi_select") else [], "description": ""})
+    return results
+
+
+def _fetch_hireology_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id:
+        return []
+    from app.fetchers.hireology import FORM_URL
+
+    job_id = job_external_id.split("-")[-1]
+    if not job_id.isdigit():
+        return []
+    try:
+        with httpx.Client(timeout=20.0, headers=_BROWSER_UA) as client:
+            resp = client.get(FORM_URL.format(job_id=job_id))
+            if resp.status_code != 200:
+                return []
+            return normalise_hireology_form(resp.json())
+    except (httpx.RequestError, ValueError):
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Dover — F389, read from the posting's public JSON
+# ---------------------------------------------------------------------------
+# ``app.dover.com/api/v1/inbound/application-portal-job/{uuid}`` carries
+# ``application_questions``: {id, question, input_type (SHORT_ANSWER |
+# LONG_ANSWER | MULTIPLE_CHOICE | FILE_UPLOAD), question_type (CUSTOM |
+# RESUME | LINKEDIN_URL | PHONE_NUMBER), required, multiple_choice_options,
+# max_selections}. First / last name and email are always on the form.
+
+_DOVER_FIXED_TYPES: dict[str, tuple[str, str]] = {
+    "RESUME": ("resume", "file"),
+    "LINKEDIN_URL": ("linkedin", "text"),
+    "PHONE_NUMBER": ("phone", "text"),
+}
+
+
+def normalise_dover_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = [
+        {"field_key": "first_name", "label": "First name", "field_type": "text", "required": True, "options": [], "description": ""},
+        {"field_key": "last_name", "label": "Last name", "field_type": "text", "required": True, "options": [], "description": ""},
+        {"field_key": "email", "label": "Email", "field_type": "text", "required": True, "options": [], "description": ""},
+    ]
+    seen = {r["field_key"] for r in results}
+    for q in questions or []:
+        if not isinstance(q, dict) or q.get("hidden"):
+            continue
+        qid, text = str(q.get("id") or ""), (q.get("question") or "").strip()
+        itype, qtype = (q.get("input_type") or "").upper(), (q.get("question_type") or "").upper()
+        if qtype in _DOVER_FIXED_TYPES:
+            key, ftype = _DOVER_FIXED_TYPES[qtype]
+        elif itype == "FILE_UPLOAD":
+            key, ftype = qid, "file"
+        elif itype == "MULTIPLE_CHOICE":
+            key = qid
+            ftype = "multi_select" if (q.get("max_selections") or 1) > 1 else "select"
+        elif itype == "LONG_ANSWER":
+            key, ftype = qid, "textarea"
+        else:
+            key, ftype = qid, "text"
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        options = [str(o) for o in (q.get("multiple_choice_options") or [])] if ftype in ("select", "multi_select") else []
+        results.append({"field_key": key, "label": text or key, "field_type": ftype, "required": bool(q.get("required")),
+                        "options": options, "description": ""})
+    return results
+
+
+def _fetch_dover_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.dover import DoverFetcher
+
+    raw = DoverFetcher().fetch_one(slug, job_external_id)
+    if not raw:
+        return []
+    return normalise_dover_questions((raw.get("raw_json") or {}).get("application_questions") or [])
+
+
+# ---------------------------------------------------------------------------
+# Gem — F391, read from the posting's public GraphQL schema
+# ---------------------------------------------------------------------------
+# ``oatsJobPostFieldsAndQuestions`` lists the form's fixed ``fields``
+# (FIRST_NAME, LAST_NAME, EMAIL, LINKEDIN_URL, PHONE, LOCATION, RESUME;
+# each with isRequired) and custom ``questions`` {extId, answerType,
+# text, isRequired, options[{extId, value}]}, plus an optional
+# ``demographicSurvey`` (EEO). Questions are keyed by their extId; the
+# submitter re-reads this schema to map an option's text to the radio it
+# renders as (the radio's DOM id is the option extId).
+
+_GEM_FIXED_FIELDS: dict[str, tuple[str, str, str]] = {
+    "FIRST_NAME": ("first_name", "First name", "text"),
+    "LAST_NAME": ("last_name", "Last name", "text"),
+    "EMAIL": ("email", "Email", "text"),
+    "LINKEDIN_URL": ("linkedin", "LinkedIn URL", "text"),
+    "PHONE": ("phone", "Phone number", "text"),
+    "LOCATION": ("location", "Location", "text"),
+    "RESUME": ("resume", "Resume", "file"),
+    "COVER_LETTER": ("cover_letter", "Cover letter", "file"),
+}
+
+
+def _gem_question_type(q: dict[str, Any]) -> str:
+    at = (q.get("answerType") or "").upper()
+    if q.get("options"):
+        return "multi_select" if "MULTI" in at or "CHECKBOX" in (q.get("displayType") or "").upper() else "select"
+    if at in ("LONG_TEXT", "PARAGRAPH"):
+        return "textarea"
+    if at in ("FILE", "ATTACHMENT"):
+        return "file"
+    if at in ("BOOLEAN", "YES_NO"):
+        return "boolean"
+    return "text"
+
+
+def normalise_gem_form(form: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for f in (form or {}).get("fields") or []:
+        spec = _GEM_FIXED_FIELDS.get((f.get("fieldType") or "").upper())
+        if not spec or spec[0] in seen:
+            continue
+        seen.add(spec[0])
+        results.append({"field_key": spec[0], "label": spec[1], "field_type": spec[2], "required": bool(f.get("isRequired")),
+                        "options": [], "description": ""})
+    for q in (form or {}).get("questions") or []:
+        ext = str(q.get("extId") or "")
+        if not ext or ext in seen:
+            continue
+        seen.add(ext)
+        ftype = _gem_question_type(q)
+        options = [str(o.get("value") or "") for o in (q.get("options") or []) if isinstance(o, dict)]
+        results.append({"field_key": ext, "label": re.sub(r"\s*\*+\s*$", "", (q.get("text") or "").strip()) or ext, "field_type": ftype,
+                        "required": bool(q.get("isRequired")), "options": [o for o in options if o],
+                        "description": re.sub(r"<[^>]+>", "", q.get("description") or "").strip()})
+    survey = (form or {}).get("demographicSurvey") or {}
+    for q in survey.get("questions") or []:
+        ext = str(q.get("extId") or "")
+        if not ext or ext in seen:
+            continue
+        seen.add(ext)
+        options = [str(o.get("value") or "") for o in (q.get("options") or []) if isinstance(o, dict)]
+        results.append({"field_key": ext, "label": (q.get("text") or "").strip() or ext, "field_type": "select", "required": False,
+                        "options": [o for o in options if o], "description": "Voluntary self-identification."})
+    return results
+
+
+def _fetch_gem_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.gem import GemFetcher
+
+    raw = GemFetcher().fetch_one(slug, job_external_id)
+    if not raw:
+        return []
+    return normalise_gem_form((raw.get("raw_json") or {}).get("form") or {})
+
+
+# ---------------------------------------------------------------------------
+# Pinpoint — F387, read from the rendered application form
+# ---------------------------------------------------------------------------
+# The posting page shows the form only after "Apply" is clicked; it is a
+# Rails form (no captcha, no shadow DOM) with fixed
+# ``application_form[application][...]`` names and custom questions as
+# ``application_form[application][answers_attributes][N][boolean_answer |
+# text_answer]``. Each question also carries hidden ``[N][title]`` /
+# ``[N][question_type]`` inputs — the title is the label we show.
+# Select-type questions (and Country / State / the equality-monitoring
+# block) are React dropdowns whose mobile fallback is a nameless native
+# <select>; setting that select with React's value setter drives the
+# React state and the hidden value that posts (verified on made-tech).
+# ``_PINPOINT_SELECT_KEY_JS`` maps such a select's id to a stable
+# field_key shared by the extractor and the submitter.
+
+_PINPOINT_SELECT_KEY_JS = r"""
+const nearLabel = (s) => { let n = s.parentElement; for (let i = 0; i < 4 && n; i++) { const l = n.querySelector(':scope > label'); if (l) return (l.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase(); n = n.parentElement; } return ''; };
+const keyForSelect = (s) => {
+  const id = s.id || '';
+  if (id === 'application_form[application][country]') return 'country';
+  if (id === 'application_form[application][state]' || nearLabel(s) === 'state' || nearLabel(s) === 'state / province') return 'state';
+  let m = id.match(/answers_attributes_(\d+)_mobile_select$/);
+  if (m) return 'application_form[application][answers_attributes][' + m[1] + '][choice]';
+  if (id.startsWith('application_form_equality_monitoring_')) return 'equality_monitoring[' + id.slice('application_form_equality_monitoring_'.length) + ']';
+  return '';
+};
+"""
+
+_PINPOINT_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const form = document.querySelector('form');
+  if (!form) return [];
+  """ + _PINPOINT_SELECT_KEY_JS + r"""
+  // A usable question label is specific, not a numbered section header
+  // ("1.Personal Details", "3.Questions", "Diversity and Inclusion …").
+  const usable = t => { const s = norm(t); return s && !/^\d+\.|^(yes|no|select\.\.\.)$/i.test(s) && !/^(diversity and inclusion|personal details|questions)\b/i.test(s) && s.length < 200; };
+  const labelText = (l) => { const t = l.querySelector('.external-form__label--title'); return norm(t ? t.innerText : l.innerText); };
+  const question = (el) => {
+    const own = el.id && form.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (own && usable(labelText(own))) return labelText(own);
+    let sib = el.previousElementSibling;
+    for (let i = 0; i < 3 && sib; i++) { const l = sib.matches('label,h3,h4,p,strong') ? sib : sib.querySelector('label,h3,h4,strong'); if (l && usable(labelText(l))) return labelText(l); sib = sib.previousElementSibling; }
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) {
+      for (const h of n.querySelectorAll(':scope > label, :scope > legend, :scope > p, :scope > h3, :scope > h4, :scope > strong')) {
+        if (usable(labelText(h))) return labelText(h);
+      }
+      n = n.parentElement;
+    }
+    return '';
+  };
+  const requiredMark = (el) => {
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) { if (n.querySelector(':scope > label.external-form__label--required, :scope > label .external-form__label--required')) return true; n = n.parentElement; }
+    return false;
+  };
+  const rows = [];
+  for (const e of form.querySelectorAll('input,select,textarea')) {
+    if (e.type === 'submit') continue;
+    if (e.type === 'hidden') { if (/answers_attributes\]\[\d+\]\[(title|question_type)\]$/.test(e.name)) rows.push({ tag: 'hidden', type: 'hidden', name: e.name, value: e.value }); continue; }
+    const lab = e.id ? form.querySelector(`label[for="${CSS.escape(e.id)}"]`) : null;
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name || '', key: e.tagName === 'SELECT' && !e.name ? keyForSelect(e) : '',
+                label: norm(lab ? labelText(lab) : ''), question: question(e),
+                required: !!(e.required || e.getAttribute('aria-required') === 'true' || requiredMark(e)),
+                options: e.tagName === 'SELECT' ? [...e.options].filter(o => o.value && !/^select\.\.\./i.test(norm(o.textContent))).map(o => norm(o.textContent)) : [] });
+  }
+  return rows;
+})()
+"""
+
+_PINPOINT_FIXED: dict[str, tuple[str, str, str]] = {
+    "first_name": ("first_name", "First name", "text"),
+    "last_name": ("last_name", "Last name", "text"),
+    "preferred_name": ("preferred_name", "Preferred name", "text"),
+    "email": ("email", "Email Address", "text"),
+    "phone": ("phone", "Phone", "text"),
+    "address1": ("address", "Address", "text"),
+    "town": ("city", "Town / City", "text"),
+    "postcode": ("postcode", "Postcode", "text"),
+    "cv": ("resume", "Résumé / CV", "file"),
+    "summary": ("summary", "Personal Summary", "textarea"),
+}
+_PINPOINT_SELECT_LABELS: dict[str, str] = {"country": "Country", "state": "State"}
+_PINPOINT_FIELD_RE = re.compile(r"application_form\[application\]\[([a-z0-9_]+)\]")
+_PINPOINT_ANSWER_RE = re.compile(r"answers_attributes\]\[(\d+)\]\[(boolean_answer|text_answer|choice)\]")
+_PINPOINT_HIDDEN_RE = re.compile(r"answers_attributes\]\[(\d+)\]\[(title|question_type)\]$")
+
+
+def pinpoint_form_rows(posting_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(posting_url, wait_until="domcontentloaded", wait_for_selector="body")
+            await asyncio_sleep(2.0)
+            try:
+                await session.click('a:has-text("Apply"), button:has-text("Apply")')
+            except Exception:
+                pass
+            await asyncio_sleep(3.0)
+            return await session.eval_js(_PINPOINT_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_pinpoint_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    answers: dict[str, dict[str, Any]] = {}
+    titles: dict[str, str] = {}
+    for r in rows:
+        hm = _PINPOINT_HIDDEN_RE.search(r.get("name") or "") if r.get("tag") == "hidden" else None
+        if hm and hm.group(2) == "title" and (r.get("value") or "").strip():
+            titles[hm.group(1)] = (r.get("value") or "").strip()
+    for r in rows:
+        if r.get("tag") == "hidden":
+            continue
+        name, tag, typ = r.get("name") or "", r.get("tag"), (r.get("type") or "").lower()
+        key = r.get("key") or ""
+        m = _PINPOINT_FIELD_RE.match(name)
+        am = _PINPOINT_ANSWER_RE.search(name or key)
+        if am:
+            idx, kind = am.group(1), am.group(2)
+            g = answers.get(idx)
+            if g is None:
+                base = (name or key).split(f"[{kind}]")[0]
+                g = answers[idx] = {"field_key": f"{base}[{kind}]",
+                                    "label": titles.get(idx) or r.get("question") or f"Question {idx}",
+                                    "field_type": "boolean" if kind == "boolean_answer" else ("select" if kind == "choice" else "textarea"),
+                                    "required": bool(r.get("required")), "options": list(r.get("options") or []), "description": ""}
+                results.append(g)
+            g["required"] = g["required"] or bool(r.get("required"))
+            continue
+        if m and m.group(1) in _PINPOINT_FIXED:
+            fk, label, ftype = _PINPOINT_FIXED[m.group(1)]
+            if fk in seen:
+                continue
+            seen.add(fk)
+            results.append({"field_key": fk, "label": r.get("label") or label, "field_type": ftype,
+                            "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        if tag == "select" and not name:
+            if key:
+                label = _PINPOINT_SELECT_LABELS.get(key) or (key[len("equality_monitoring["):-1] if key.startswith("equality_monitoring[") else "") or r.get("question") or key
+            else:
+                # An enhanced dropdown we can't address — surfaced so the
+                # gate asks; the submitter reports it unplaceable.
+                if not r.get("question"):
+                    continue
+                key = "pinpoint_" + _normalise_field_key(r.get("question"))
+                label = r.get("question")
+            if key in seen:
+                continue
+            seen.add(key)
+            # State is rendered only for some countries (seen for the US,
+            # absent for the UK), so it must never block a submission.
+            conditional = key == "state"
+            results.append({"field_key": key, "label": label, "field_type": "select",
+                            "required": bool(r.get("required")) and not conditional, "options": list(r.get("options") or []),
+                            "description": "Only asked for some countries." if conditional else ""})
+    return results
+
+
+def _fetch_pinpoint_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.pinpoint import PinpointFetcher
+
+    raw = PinpointFetcher().fetch_one(slug, job_external_id)
+    if not raw or not raw.get("url"):
+        return []
+    return normalise_pinpoint_rows(pinpoint_form_rows(raw["url"]))
+
+

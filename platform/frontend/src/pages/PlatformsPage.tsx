@@ -54,6 +54,11 @@ const PLATFORM_COLORS: Record<string, string> = {
   rippling: "bg-yellow-100 text-yellow-800",
   jazzhr: "bg-fuchsia-100 text-fuchsia-800",
   teamtailor: "bg-cyan-100 text-cyan-800",
+  pinpoint: "bg-rose-100 text-rose-800",
+  hireology: "bg-lime-100 text-lime-800",
+  dover: "bg-sky-100 text-sky-800",
+  gem: "bg-violet-100 text-violet-800",
+  zoho: "bg-red-100 text-red-800",
   smartrecruiters: "bg-yellow-100 text-yellow-800",
   jobvite: "bg-cyan-100 text-cyan-800",
   himalayas: "bg-emerald-100 text-emerald-800",
@@ -63,7 +68,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   remotive: "bg-violet-100 text-violet-800",
 };
 
-const VALID_PLATFORMS = ["greenhouse", "lever", "ashby", "workable", "bamboohr", "linkedin", "wellfound", "recruitee", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "smartrecruiters", "jobvite", "himalayas"];
+const VALID_PLATFORMS = ["greenhouse", "lever", "ashby", "workable", "bamboohr", "linkedin", "wellfound", "recruitee", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "hireology", "dover", "gem", "zoho", "smartrecruiters", "jobvite", "himalayas"];
 
 function formatTime(iso: string | null) {
   if (!iso) return "Never";

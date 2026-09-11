@@ -120,6 +120,11 @@ ATS_URL_PATTERNS = {
     "rippling": "https://ats.rippling.com/{slug}/jobs",
     "jazzhr": "https://{slug}.applytojob.com/apply/",
     "teamtailor": "https://{slug}.teamtailor.com/jobs",
+    "pinpoint": "https://{slug}.pinpointhq.com/postings.json",
+    "hireology": "https://careers.hireology.com/{slug}",
+    "dover": "https://app.dover.com/jobs/{slug}",
+    "gem": "https://jobs.gem.com/{slug}",
+    "zoho": "https://{slug}.zohorecruit.com/jobs/Careers",
     "linkedin": "https://www.linkedin.com/company/{slug}/jobs",
 }
 
