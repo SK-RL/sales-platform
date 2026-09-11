@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 97148ae · sha-97148ae
+feat(apply): Ashby extraction via the rendered page; fix two gate bugs
+
+
 ## 2026-09-10 · 0e9fab4 · sha-0e9fab4
 feat(apply): Workable extraction + submitter — third auto-apply platform
 
