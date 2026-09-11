@@ -219,23 +219,31 @@ def canonical_posting_url(platform: str, slug: str, raw: dict) -> str:
     return url
 
 
-def lookup(session, job) -> dict | None:
+def lookup(session, job, timings: dict | None = None) -> dict | None:
     """Resolve a repost by company + title. Returns the own-link result
     fields (``platform``, ``apply_url``, ``resolved_job_id``, ``via``) or
-    None when nothing matched."""
+    None when nothing matched. ``timings`` (seconds per stage) is filled
+    in when given — production runs were slow and nothing said where."""
+    import time
+
     from app.models.company import Company
     from app.services.own_link import OwnLinkError, resolve_job_from_url
 
+    t = timings if timings is not None else {}
     company = session.get(Company, job.company_id) if job.company_id else None
     name = (company.name if company else "") or (job.raw_json or {}).get("company_name", "")
     if not name:
         return None
 
+    t0 = time.monotonic()
     hit = find_in_catalogue(session, name, job.title)
+    t["catalogue"] = round(time.monotonic() - t0, 2)
     if hit is not None:
         return {"platform": hit.platform, "apply_url": hit.url, "resolved_job_id": str(hit.id), "via": "catalogue"}
 
+    t0 = time.monotonic()
     probe = probe_boards(name, job.title)
+    t["probe"] = round(time.monotonic() - t0, 2)
     if probe is None:
         from app.fetchers import FETCHER_MAP
 
@@ -252,9 +260,12 @@ def lookup(session, job) -> dict | None:
         return None
     platform, slug, raw = probe
     url = canonical_posting_url(platform, slug, raw)
+    t0 = time.monotonic()
     try:
         linked = resolve_job_from_url(url)
     except OwnLinkError as exc:
+        t["own_link"] = round(time.monotonic() - t0, 2)
         logger.info("company_lookup: %s matched on %s/%s but own-link refused: %s", job.id, platform, slug, exc.detail)
-        return {"platform": platform, "apply_url": url, "resolved_job_id": None, "via": "probe"}
+        return {"platform": platform, "apply_url": url, "resolved_job_id": None, "via": "probe", "detail": exc.detail}
+    t["own_link"] = round(time.monotonic() - t0, 2)
     return {"platform": platform, "apply_url": url, "resolved_job_id": linked.job_id, "via": "probe"}

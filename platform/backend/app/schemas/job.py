@@ -137,6 +137,8 @@ class JobOut(BaseModel):
     apply_platform: str | None = None
     resolved_job_id: UUID | None = None
     apply_resolve_status: str | None = None
+    # Detail endpoint only: {status, detail, timings, at} from the last resolver run.
+    apply_resolve_detail: dict | None = None
 
     model_config = {"from_attributes": True}
 

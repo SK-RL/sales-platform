@@ -737,34 +737,24 @@ async def resolve_apply_link(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """F374 — resolve an aggregator repost to its employer form, now.
+    """F374 — resolve an aggregator repost to its employer form.
 
-    The hourly task does this for high-scoring rows; this is the
-    on-demand path from the job page, and the way coverage was first
-    measured on production. Returns the recorded outcome.
+    Queued to the worker (F376c: the lookup can outlast the proxy's
+    limit); poll ``GET /jobs/{id}`` for ``apply_resolve_status`` and
+    ``apply_resolve_detail`` (stage timings, reason).
     """
-    import asyncio
+    from fastapi.responses import JSONResponse
 
     from app.services.aggregator_resolver import AGGREGATOR_PLATFORMS
+    from app.workers.tasks.aggregator_task import resolve_one_aggregator_job
 
     job = (await db.execute(select(Job).where(Job.id == job_id))).scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.platform not in AGGREGATOR_PLATFORMS:
         raise HTTPException(status_code=422, detail=f"{job.platform} postings already point at their form.")
-
-    def _run():
-        from app.workers.tasks._db import SyncSession
-        from app.services.aggregator_resolver import resolve_job
-
-        session = SyncSession()
-        try:
-            row = session.get(Job, job_id)
-            return resolve_job(session, row)
-        finally:
-            session.close()
-
-    return await asyncio.to_thread(_run)
+    task = resolve_one_aggregator_job.delay(str(job.id))
+    return JSONResponse(status_code=202, content={"queued": True, "job_id": str(job.id), "task_id": task.id})
 
 
 @router.get("/{job_id}")
@@ -778,6 +768,7 @@ async def get_job(job_id: UUID, user: User = Depends(get_current_user), db: Asyn
 
     data = JobOut.model_validate(job)
     data.company_name = job.company.name if job.company else None
+    data.apply_resolve_detail = (job.raw_json or {}).get("apply_resolve") if isinstance(job.raw_json, dict) else None
 
     d = data.model_dump(mode="json")
 

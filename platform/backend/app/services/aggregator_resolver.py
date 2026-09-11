@@ -184,9 +184,10 @@ def resolve_job(session, job, skip_page: bool = False, force_page: bool = False)
             # private: a real employer link we can't drive after all.
             job.apply_resolve_status = "external"
             res.detail = exc.detail
+    timings: dict = {}
     if resolved_job_id is None:
         try:
-            found = lookup(session, job)
+            found = lookup(session, job, timings)
         except Exception:
             logger.warning("company_lookup failed for job %s", job.id, exc_info=True)
             found = None
@@ -195,9 +196,12 @@ def resolve_job(session, job, skip_page: bool = False, force_page: bool = False)
             job.apply_platform = found["platform"]
             resolved_job_id = found.get("resolved_job_id")
             job.apply_resolve_status = "resolved" if resolved_job_id else "external"
-            res.detail = f"matched by company + title via {found['via']}"
+            res.detail = f"matched by company + title via {found['via']}" + (f"; own-link: {found['detail']}" if found.get("detail") else "")
         elif job.apply_resolve_status == "blocked":
             job.apply_resolve_status = "unmatched"
+    # What happened, on the row, so production can be read without logs.
+    job.raw_json = {**(job.raw_json or {}), "apply_resolve": {"status": job.apply_resolve_status, "detail": res.detail,
+                                                              "timings": timings, "at": job.apply_resolved_at.isoformat()}}
     if resolved_job_id:
         import uuid as _uuid
 

@@ -184,3 +184,18 @@ class TestCircuitBreaker:
         assert len(calls) == 8 and out["unmatched"] == 8
         # … but page fetches stop after three challenges in a row
         assert calls == [False] * agt.BLOCKED_STREAK_STOP + [True] * 5
+
+
+class TestOnDemandIsQueued:
+    def test_endpoint_enqueues_and_answers_202(self):
+        import inspect
+        from app.api.v1 import jobs as jobs_api
+        src = inspect.getsource(jobs_api.resolve_apply_link)
+        assert "resolve_one_aggregator_job.delay" in src and "202" in src
+
+    def test_resolver_records_what_happened_on_the_row(self, monkeypatch):
+        monkeypatch.setattr(ar, "resolve_page", lambda url: Resolution("no_link", detail="no apply anchor"))
+        monkeypatch.setattr("app.services.company_lookup.lookup", lambda s, j, t=None: None)
+        job = _job()
+        resolve_job(FakeSession(), job)
+        assert job.raw_json["apply_resolve"]["status"] == "no_link" and "timings" in job.raw_json["apply_resolve"]
