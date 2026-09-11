@@ -157,6 +157,20 @@ def _fetch_board(platform: str, slug: str) -> list[dict]:
     return cls().fetch(slug) or []
 
 
+def _fetch_one(platform: str, slug: str, external_id: str) -> dict | None:
+    """The fetcher's single-posting lookup, for postings the board omits."""
+    from app.fetchers import FETCHER_MAP
+
+    cls = FETCHER_MAP.get(platform)
+    if cls is None:
+        return None
+    try:
+        return cls().fetch_one(slug, external_id) or None
+    except Exception:
+        logger.info("own_link: fetch_one failed for %s/%s", platform, slug, exc_info=True)
+        return None
+
+
 def _matches(raw: dict, parsed: ParsedJobUrl) -> bool:
     if parsed.external_id:
         return str(raw.get("external_id", "")) == parsed.external_id
@@ -204,6 +218,10 @@ def resolve_job_from_url(url: str) -> ResolvedJob:
             raise OwnLinkError(502, f"Couldn't read the {parsed.platform} board '{parsed.slug}' right now ({type(exc).__name__}).")
 
         raw = next((r for r in raw_jobs if _matches(r, parsed)), None)
+        if raw is None and parsed.external_id:
+            # Unlisted but live (JazzHR does this): let the fetcher try the
+            # posting itself before we call it closed.
+            raw = _fetch_one(parsed.platform, parsed.slug, parsed.external_id)
         if raw is None and parsed.platform == "himalayas":
             # Its API ignores an unknown company slug and returns the
             # global feed, so "the board has postings but not this one"

@@ -113,6 +113,8 @@ def wired(monkeypatch):
     state = {"session": FakeSession(), "fetch": lambda platform, slug: [], "upserted": []}
     monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: state["session"])
     monkeypatch.setattr(ol, "_fetch_board", lambda platform, slug: state["fetch"](platform, slug))
+    state["fetch_one"] = lambda platform, slug, ext: None
+    monkeypatch.setattr(ol, "_fetch_one", lambda platform, slug, ext: state["fetch_one"](platform, slug, ext))
 
     def fake_upsert(session, company, board, raw, **kw):
         state["upserted"].append(raw)
@@ -163,6 +165,12 @@ class TestResolve:
         with pytest.raises(OwnLinkError) as e:
             resolve_job_from_url(ASHBY)
         assert e.value.status == 404 and "closed" in e.value.detail
+
+    def test_unlisted_posting_is_resolved_through_fetch_one(self, wired):
+        wired["fetch"] = lambda p, s: [{"external_id": "other", "title": "Other", "url": "x", "company_name": "Ramp"}]
+        wired["fetch_one"] = lambda p, s, e: {"external_id": e, "title": "Security Engineer, Cloud", "url": ASHBY, "company_name": "Ramp"}
+        r = resolve_job_from_url(ASHBY)
+        assert r.created is True and r.title == "Security Engineer, Cloud"
 
     def test_empty_board_says_so(self, wired):
         with pytest.raises(OwnLinkError) as e:

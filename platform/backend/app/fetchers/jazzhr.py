@@ -70,3 +70,28 @@ class JazzHRFetcher(BaseFetcher):
             })
         logger.info("JazzHR %s fetched %d postings", slug, len(out))
         return out
+
+    def fetch_one(self, slug: str, external_id: str) -> dict | None:
+        """A posting can be live while unlisted on the board (seen on
+        lumivero: the DevOps page answers 200 but the board omits it), so
+        a pasted link is resolved from the posting page itself."""
+        listed = next((j for j in self.fetch(slug) if j["external_id"] == external_id), None)
+        if listed:
+            return listed
+        client = self._get_client()
+        try:
+            resp = client.get(f"https://{slug}.applytojob.com/apply/{external_id}/")
+        except httpx.RequestError:
+            return None
+        if resp.status_code != 200 or "applytojob.com" not in str(resp.url):
+            return None
+        soup = BeautifulSoup(resp.text, "html.parser")
+        title = " ".join((soup.title.get_text() if soup.title else "").split())
+        title = re.sub(r"\s*-\s*Career Page\s*$", "", title).strip()
+        if not title:
+            return None
+        return {
+            "external_id": external_id, "company_slug": slug, "title": title,
+            "url": f"https://{slug}.applytojob.com/apply/{external_id}/", "platform": self.PLATFORM,
+            "location_raw": "", "remote_scope": "", "department": "", "raw_json": {"code": external_id, "unlisted": True},
+        }

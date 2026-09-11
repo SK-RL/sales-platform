@@ -59,6 +59,19 @@ class TestJazzHR:
         assert k["resumator-checkbox-9"]["label"].startswith("Are you authorized")
         assert "g-recaptcha-response" not in k
 
+    def test_unlisted_posting_resolves_from_its_own_page(self, monkeypatch):
+        """lumivero's DevOps posting answers 200 but the board omits it."""
+        f = JazzHRFetcher()
+        monkeypatch.setattr(f, "fetch", lambda slug: [])
+        class R:
+            status_code = 200; url = "https://lumivero.applytojob.com/apply/MSVT14vftm/"
+            text = "<html><head><title>Devops Engineer - Career Page</title></head><body></body></html>"
+        class C:
+            def get(self, url): return R()
+        monkeypatch.setattr(f, "_get_client", lambda: C())
+        j = f.fetch_one("lumivero", "MSVT14vftm")
+        assert j["title"] == "Devops Engineer" and j["raw_json"]["unlisted"] is True
+
     def test_walled_and_extract_only(self):
         assert "jazzhr" in SUPPORTED_QUESTION_PLATFORMS
         assert human_wall_for("jazzhr")["vendor"] == "reCAPTCHA"
