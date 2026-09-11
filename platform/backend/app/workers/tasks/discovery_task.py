@@ -305,6 +305,10 @@ PLATFORM_PROBE_CONFIG = {
         "slugs": RECRUITEE_PROBE_SLUGS,
         "url": "https://{slug}.teamtailor.com/jobs.rss",
     },
+    "pinpoint": {
+        "slugs": RECRUITEE_PROBE_SLUGS,
+        "url": "https://{slug}.pinpointhq.com/postings.json",
+    },
     "bamboohr": {
         "slugs": BAMBOOHR_PROBE_SLUGS,
         "url": "https://{slug}.bamboohr.com/careers/list",

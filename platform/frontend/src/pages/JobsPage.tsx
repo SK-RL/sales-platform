@@ -329,6 +329,7 @@ const PLATFORM_OPTIONS = [
   { value: "rippling", label: "Rippling" },
   { value: "jazzhr", label: "JazzHR" },
   { value: "teamtailor", label: "Teamtailor" },
+  { value: "pinpoint", label: "Pinpoint" },
   { value: "wellfound", label: "Wellfound" },
   { value: "himalayas", label: "Himalayas" },
   { value: "linkedin", label: "LinkedIn" },

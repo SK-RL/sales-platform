@@ -35,7 +35,7 @@ router = APIRouter(prefix="/credentials", tags=["credentials"])
 # see the long-form comment on the Literal in schemas/credential.py.
 SUPPORTED_PLATFORMS = [
     "greenhouse", "lever", "ashby", "workable", "smartrecruiters",
-    "recruitee", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "bamboohr", "jobvite", "wellfound", "himalayas",
+    "recruitee", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint", "bamboohr", "jobvite", "wellfound", "himalayas",
     "linkedin",
 ]
 

@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby", "bamboohr", "breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint"}
 )
 
 # F368 — platforms whose application form is behind a wall only a person
@@ -143,6 +143,7 @@ def fetch_application_questions(
         "rippling": _fetch_rippling_questions,
         "jazzhr": _fetch_jazzhr_questions,
         "teamtailor": _fetch_teamtailor_questions,
+        "pinpoint": _fetch_pinpoint_questions,
     }
 
     fetcher_fn = fetchers.get(platform)
@@ -1520,3 +1521,181 @@ def _fetch_teamtailor_questions(job_external_id: str, slug: str) -> list[dict[st
     if not raw:
         return []
     return normalise_teamtailor_rows(teamtailor_form_rows(raw["url"].rstrip("/") + "/applications/new"))
+
+
+# ---------------------------------------------------------------------------
+# Pinpoint — F387, read from the rendered application form
+# ---------------------------------------------------------------------------
+# The posting page shows the form only after "Apply" is clicked; it is a
+# Rails form (no captcha, no shadow DOM) with fixed
+# ``application_form[application][...]`` names and custom questions as
+# ``application_form[application][answers_attributes][N][boolean_answer |
+# text_answer]``. Each question also carries hidden ``[N][title]`` /
+# ``[N][question_type]`` inputs — the title is the label we show.
+# Select-type questions (and Country / State / the equality-monitoring
+# block) are React dropdowns whose mobile fallback is a nameless native
+# <select>; setting that select with React's value setter drives the
+# React state and the hidden value that posts (verified on made-tech).
+# ``_PINPOINT_SELECT_KEY_JS`` maps such a select's id to a stable
+# field_key shared by the extractor and the submitter.
+
+_PINPOINT_SELECT_KEY_JS = r"""
+const nearLabel = (s) => { let n = s.parentElement; for (let i = 0; i < 4 && n; i++) { const l = n.querySelector(':scope > label'); if (l) return (l.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase(); n = n.parentElement; } return ''; };
+const keyForSelect = (s) => {
+  const id = s.id || '';
+  if (id === 'application_form[application][country]') return 'country';
+  if (id === 'application_form[application][state]' || nearLabel(s) === 'state' || nearLabel(s) === 'state / province') return 'state';
+  let m = id.match(/answers_attributes_(\d+)_mobile_select$/);
+  if (m) return 'application_form[application][answers_attributes][' + m[1] + '][choice]';
+  if (id.startsWith('application_form_equality_monitoring_')) return 'equality_monitoring[' + id.slice('application_form_equality_monitoring_'.length) + ']';
+  return '';
+};
+"""
+
+_PINPOINT_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const form = document.querySelector('form');
+  if (!form) return [];
+  """ + _PINPOINT_SELECT_KEY_JS + r"""
+  // A usable question label is specific, not a numbered section header
+  // ("1.Personal Details", "3.Questions", "Diversity and Inclusion …").
+  const usable = t => { const s = norm(t); return s && !/^\d+\.|^(yes|no|select\.\.\.)$/i.test(s) && !/^(diversity and inclusion|personal details|questions)\b/i.test(s) && s.length < 200; };
+  const labelText = (l) => { const t = l.querySelector('.external-form__label--title'); return norm(t ? t.innerText : l.innerText); };
+  const question = (el) => {
+    const own = el.id && form.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (own && usable(labelText(own))) return labelText(own);
+    let sib = el.previousElementSibling;
+    for (let i = 0; i < 3 && sib; i++) { const l = sib.matches('label,h3,h4,p,strong') ? sib : sib.querySelector('label,h3,h4,strong'); if (l && usable(labelText(l))) return labelText(l); sib = sib.previousElementSibling; }
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) {
+      for (const h of n.querySelectorAll(':scope > label, :scope > legend, :scope > p, :scope > h3, :scope > h4, :scope > strong')) {
+        if (usable(labelText(h))) return labelText(h);
+      }
+      n = n.parentElement;
+    }
+    return '';
+  };
+  const requiredMark = (el) => {
+    let n = el.parentElement;
+    for (let i = 0; i < 5 && n; i++) { if (n.querySelector(':scope > label.external-form__label--required, :scope > label .external-form__label--required')) return true; n = n.parentElement; }
+    return false;
+  };
+  const rows = [];
+  for (const e of form.querySelectorAll('input,select,textarea')) {
+    if (e.type === 'submit') continue;
+    if (e.type === 'hidden') { if (/answers_attributes\]\[\d+\]\[(title|question_type)\]$/.test(e.name)) rows.push({ tag: 'hidden', type: 'hidden', name: e.name, value: e.value }); continue; }
+    const lab = e.id ? form.querySelector(`label[for="${CSS.escape(e.id)}"]`) : null;
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type || '', name: e.name || '', key: e.tagName === 'SELECT' && !e.name ? keyForSelect(e) : '',
+                label: norm(lab ? labelText(lab) : ''), question: question(e),
+                required: !!(e.required || e.getAttribute('aria-required') === 'true' || requiredMark(e)),
+                options: e.tagName === 'SELECT' ? [...e.options].filter(o => o.value && !/^select\.\.\./i.test(norm(o.textContent))).map(o => norm(o.textContent)) : [] });
+  }
+  return rows;
+})()
+"""
+
+_PINPOINT_FIXED: dict[str, tuple[str, str, str]] = {
+    "first_name": ("first_name", "First name", "text"),
+    "last_name": ("last_name", "Last name", "text"),
+    "preferred_name": ("preferred_name", "Preferred name", "text"),
+    "email": ("email", "Email Address", "text"),
+    "phone": ("phone", "Phone", "text"),
+    "address1": ("address", "Address", "text"),
+    "town": ("city", "Town / City", "text"),
+    "postcode": ("postcode", "Postcode", "text"),
+    "cv": ("resume", "Résumé / CV", "file"),
+    "summary": ("summary", "Personal Summary", "textarea"),
+}
+_PINPOINT_SELECT_LABELS: dict[str, str] = {"country": "Country", "state": "State"}
+_PINPOINT_FIELD_RE = re.compile(r"application_form\[application\]\[([a-z0-9_]+)\]")
+_PINPOINT_ANSWER_RE = re.compile(r"answers_attributes\]\[(\d+)\]\[(boolean_answer|text_answer|choice)\]")
+_PINPOINT_HIDDEN_RE = re.compile(r"answers_attributes\]\[(\d+)\]\[(title|question_type)\]$")
+
+
+def pinpoint_form_rows(posting_url: str) -> list[dict[str, Any]]:
+    from app.services.playwright_browser import BrowserSession
+
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(posting_url, wait_until="domcontentloaded", wait_for_selector="body")
+            await asyncio_sleep(2.0)
+            try:
+                await session.click('a:has-text("Apply"), button:has-text("Apply")')
+            except Exception:
+                pass
+            await asyncio_sleep(3.0)
+            return await session.eval_js(_PINPOINT_STRUCT_JS) or []
+
+    return _run_in_fresh_loop(_go())
+
+
+def normalise_pinpoint_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    answers: dict[str, dict[str, Any]] = {}
+    titles: dict[str, str] = {}
+    for r in rows:
+        hm = _PINPOINT_HIDDEN_RE.search(r.get("name") or "") if r.get("tag") == "hidden" else None
+        if hm and hm.group(2) == "title" and (r.get("value") or "").strip():
+            titles[hm.group(1)] = (r.get("value") or "").strip()
+    for r in rows:
+        if r.get("tag") == "hidden":
+            continue
+        name, tag, typ = r.get("name") or "", r.get("tag"), (r.get("type") or "").lower()
+        key = r.get("key") or ""
+        m = _PINPOINT_FIELD_RE.match(name)
+        am = _PINPOINT_ANSWER_RE.search(name or key)
+        if am:
+            idx, kind = am.group(1), am.group(2)
+            g = answers.get(idx)
+            if g is None:
+                base = (name or key).split(f"[{kind}]")[0]
+                g = answers[idx] = {"field_key": f"{base}[{kind}]",
+                                    "label": titles.get(idx) or r.get("question") or f"Question {idx}",
+                                    "field_type": "boolean" if kind == "boolean_answer" else ("select" if kind == "choice" else "textarea"),
+                                    "required": bool(r.get("required")), "options": list(r.get("options") or []), "description": ""}
+                results.append(g)
+            g["required"] = g["required"] or bool(r.get("required"))
+            continue
+        if m and m.group(1) in _PINPOINT_FIXED:
+            fk, label, ftype = _PINPOINT_FIXED[m.group(1)]
+            if fk in seen:
+                continue
+            seen.add(fk)
+            results.append({"field_key": fk, "label": r.get("label") or label, "field_type": ftype,
+                            "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+        if tag == "select" and not name:
+            if key:
+                label = _PINPOINT_SELECT_LABELS.get(key) or (key[len("equality_monitoring["):-1] if key.startswith("equality_monitoring[") else "") or r.get("question") or key
+            else:
+                # An enhanced dropdown we can't address — surfaced so the
+                # gate asks; the submitter reports it unplaceable.
+                if not r.get("question"):
+                    continue
+                key = "pinpoint_" + _normalise_field_key(r.get("question"))
+                label = r.get("question")
+            if key in seen:
+                continue
+            seen.add(key)
+            # State is rendered only for some countries (seen for the US,
+            # absent for the UK), so it must never block a submission.
+            conditional = key == "state"
+            results.append({"field_key": key, "label": label, "field_type": "select",
+                            "required": bool(r.get("required")) and not conditional, "options": list(r.get("options") or []),
+                            "description": "Only asked for some countries." if conditional else ""})
+    return results
+
+
+def _fetch_pinpoint_questions(job_external_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_external_id or not slug:
+        return []
+    from app.fetchers.pinpoint import PinpointFetcher
+
+    raw = PinpointFetcher().fetch_one(slug, job_external_id)
+    if not raw or not raw.get("url"):
+        return []
+    return normalise_pinpoint_rows(pinpoint_form_rows(raw["url"]))
+
+

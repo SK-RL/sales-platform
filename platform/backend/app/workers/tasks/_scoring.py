@@ -23,6 +23,7 @@ SOURCE_TIERS = {
     "rippling": 2,
     "jazzhr": 2,
     "teamtailor": 2,
+    "pinpoint": 2,
     "wellfound": 2,
     "linkedin": 2,
     "builtin": 2,

@@ -120,6 +120,7 @@ ATS_URL_PATTERNS = {
     "rippling": "https://ats.rippling.com/{slug}/jobs",
     "jazzhr": "https://{slug}.applytojob.com/apply/",
     "teamtailor": "https://{slug}.teamtailor.com/jobs",
+    "pinpoint": "https://{slug}.pinpointhq.com/postings.json",
     "linkedin": "https://www.linkedin.com/company/{slug}/jobs",
 }
 

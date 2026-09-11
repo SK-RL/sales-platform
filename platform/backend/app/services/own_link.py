@@ -68,6 +68,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("personio", re.compile(r"^https?://([a-z0-9-]+)\.jobs\.personio\.(?:com|de)/job/(\d+)", re.I)),
     ("rippling", re.compile(r"^https?://ats\.rippling\.com/([^/?#]+)/jobs/([0-9a-f]{8}-[0-9a-f-]{27})", re.I)),
     ("teamtailor", re.compile(r"^https?://(?!www\.|app\.|api\.)([a-z0-9-]+)(?:\.[a-z]{2})?\.teamtailor\.com/jobs/(\d+)", re.I)),
+    ("pinpoint", re.compile(r"^https?://(?!www\.|app\.|api\.)([a-z0-9-]+)\.pinpointhq\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?postings/([0-9a-f]{8}-[0-9a-f-]{27})", re.I)),
     ("jazzhr", re.compile(r"^https?://(?!www\.|app\.)([a-z0-9-]+)\.applytojob\.com/apply/([A-Za-z0-9]{6,})(?:[/?#]|$)", re.I)),
     ("bamboohr", re.compile(r"^https?://(?!www\.|api\.|jobs\.)([a-z0-9-]+)\.bamboohr\.com/careers/(\d+)", re.I)),
     ("smartrecruiters", re.compile(r"^https?://jobs\.smartrecruiters\.com/([^/?#]+)/(\d+)", re.I)),
@@ -92,7 +93,7 @@ _KNOWN_UNRESOLVABLE: tuple[tuple[re.Pattern[str], str], ...] = (
 
 _SUPPORTED_HINT = (
     "Paste a posting link from Greenhouse, Lever, Ashby, Workable, Recruitee, "
-    "BambooHR, SmartRecruiters, Breezy, Personio, Rippling, JazzHR, Teamtailor, or a Himalayas job page."
+    "BambooHR, SmartRecruiters, Breezy, Personio, Rippling, JazzHR, Teamtailor, Pinpoint, or a Himalayas job page."
 )
 
 
@@ -100,7 +101,7 @@ def _external_id(platform: str, slug: str, token: str) -> str | None:
     """The fetcher's external_id for this token, mirroring each fetcher."""
     if platform in ("greenhouse", "lever", "ashby", "workable"):
         return token
-    if platform in ("breezy", "personio", "rippling", "jazzhr", "teamtailor"):
+    if platform in ("breezy", "personio", "rippling", "jazzhr", "teamtailor", "pinpoint"):
         return f"{platform}-{token}"  # namespaced, mirroring each fetcher (jobs.external_id is UNIQUE)
     if platform == "bamboohr":
         return f"bamboo-{slug}-{token}"
