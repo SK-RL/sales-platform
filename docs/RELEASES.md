@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 00194f9 · sha-00194f9
+Merge: ATS batch 2 — Pinpoint, Jobvite, Hireology, Dover, Gem auto-apply; Zoho scan; YC/JOIN/Polymer/CareerPlug refusals
+
+
 ## 2026-09-11 · f635a17 · sha-f635a17
 fix(gate): an answer that isn't one of the form's options is a gap; don't retry unplaceable fields
 
