@@ -338,6 +338,19 @@ describe("field provenance", () => {
     ).toBeTruthy();
   });
 
+  it("calls a low-confidence answer a guess and says the sweep won't send it", async () => {
+    questions = {
+      questions: [{
+        field_key: "cSummary", label: "Summary", field_type: "textarea", required: true,
+        options: [], description: "", answer: "No. My release automation…", match_source: "category",
+        question_key: "release_process", confidence: "low", extraction_mode: "extracted",
+      }],
+      coverage: { total: 1, answered: 1, high_confidence: 0, new_entries: 0 },
+    };
+    renderPage();
+    expect(await screen.findByText(/Guessed — check it before sending/i)).toBeTruthy();
+  });
+
   it("marks a field that needs the user", async () => {
     questions = {
       questions: [{
