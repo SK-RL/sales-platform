@@ -114,3 +114,13 @@ def test_f401_periodic_sweeps_leave_the_default_queue_and_do_not_pile_up():
     import inspect
     src = inspect.getsource(aggregator_task.resolve_aggregator_links)
     assert 'acquire_scan_lock_sync("aggregator"' in src and 'release_scan_lock("aggregator")' in src
+
+
+def test_f401_periodic_tasks_have_time_limits_and_revoke_endpoint_exists():
+    from app.workers.tasks import aggregator_task, career_page_task, scan_task
+    from tests._routes import registered_paths
+
+    for t in (aggregator_task.resolve_aggregator_links, aggregator_task.resolve_one_aggregator_job,
+              career_page_task.check_career_pages, scan_task.scan_all_platforms):
+        assert t.time_limit and t.acks_late is False, t.name
+    assert "/api/v1/monitoring/celery/revoke/{task_id}" in registered_paths()

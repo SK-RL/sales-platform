@@ -981,7 +981,7 @@ def _scan_board(
     return stats
 
 
-@celery_app.task(name="app.workers.tasks.scan_task.scan_all_platforms", bind=True, max_retries=2)
+@celery_app.task(name="app.workers.tasks.scan_task.scan_all_platforms", bind=True, max_retries=2, acks_late=False, soft_time_limit=3 * 3600, time_limit=3 * 3600 + 300)
 def scan_all_platforms(self):
     """Iterate all active CompanyATSBoard records and scan each one."""
     logger.info("Starting scan_all_platforms")

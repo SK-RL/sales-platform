@@ -308,6 +308,26 @@ async def get_celery_health():
     return await asyncio.get_running_loop().run_in_executor(None, _inspect)
 
 
+@router.post("/celery/revoke/{task_id}", dependencies=[Depends(require_role("admin"))])
+async def revoke_celery_task(task_id: str):
+    """F401 — stop a runaway task (admin only). ``terminate=True`` kills the
+    child running it; the worker replaces the child. Use for a periodic
+    sweep that is hogging a worker child, never for a submit that may be
+    mid-form (fail it through the sweeper instead)."""
+    import asyncio
+    import re
+
+    if not re.fullmatch(r"[0-9a-f-]{36}", task_id):
+        raise HTTPException(status_code=422, detail="task_id must be a UUID")
+    from app.workers.celery_app import celery_app
+
+    def _revoke():
+        celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+        return {"task_id": task_id, "revoked": True}
+
+    return await asyncio.get_running_loop().run_in_executor(None, _revoke)
+
+
 _BACKUP_LABEL_MAX_LEN = 64
 
 
