@@ -370,15 +370,32 @@ class FromUrlRequest(BaseModel):
 REPOST_RESOLVE_BUDGET_S = 45
 
 
-def _resolve_repost(resolved):
-    """Run the aggregator resolver on a repost and return the employer's job.
+class PendingResolution(Exception):
+    """The repost's resolution was queued; the client should poll the job."""
 
-    Raises HTTPException(422) when nothing drivable was found, with the
-    reason — never a silent fallback to the repost.
+    def __init__(self, job_id: str, title: str):
+        super().__init__(job_id)
+        self.job_id, self.title = job_id, title
+
+
+REPOST_RETRY_AFTER_S = 15 * 60
+
+
+def _resolve_repost(resolved):
+    """Hand back the employer's job for a repost, or queue its resolution.
+
+    F376c — seen on production: even with the page skipped and the
+    board probes in parallel, a Bishop Fox paste ran past the proxy's
+    limit. The lookup now runs in the worker: a first paste queues it
+    and answers 202 ``pending``; the UI polls the job until
+    ``apply_resolve_status`` is set, then prepares the employer's
+    posting (already resolved → answered immediately). A recent
+    failure is reported without re-running; an older one is retried.
     """
+    from datetime import datetime, timedelta, timezone
+
     from app.models.company import Company
     from app.models.job import Job
-    from app.services.aggregator_resolver import resolve_job
     from app.services.own_link import ResolvedJob
     from app.workers.tasks._db import SyncSession
 
@@ -387,7 +404,19 @@ def _resolve_repost(resolved):
         row = session.get(Job, UUID(resolved.job_id))
         if row is None:
             raise HTTPException(status_code=404, detail="The repost could not be loaded.")
-        out = resolve_job(session, row)
+        if row.resolved_job_id:
+            real = session.get(Job, row.resolved_job_id)
+            if real is not None:
+                company = session.get(Company, real.company_id)
+                return ResolvedJob(str(real.id), real.platform, "", real.external_id, real.title,
+                                   company.name if company else "", real.url, created=False)
+        recent = row.apply_resolved_at and (datetime.now(timezone.utc) - row.apply_resolved_at) < timedelta(seconds=REPOST_RETRY_AFTER_S)
+        if not recent:
+            from app.workers.tasks.aggregator_task import resolve_one_aggregator_job
+
+            resolve_one_aggregator_job.delay(str(row.id))
+            raise PendingResolution(str(row.id), row.title)
+        out = {"resolved_job_id": None, "apply_platform": row.apply_platform, "detail": row.apply_resolve_status}
         if not out.get("resolved_job_id"):
             from app.services.submitters import auto_submittable_platforms
 
@@ -454,6 +483,10 @@ async def application_from_url(
         resolved = await asyncio.wait_for(asyncio.to_thread(_whole_flow), timeout=REPOST_RESOLVE_BUDGET_S)
     except OwnLinkError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail)
+    except PendingResolution as pending:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=202, content={"pending": True, "job_id": pending.job_id, "title": pending.title})
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=504,

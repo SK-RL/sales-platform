@@ -228,45 +228,7 @@ class TestRepostLinks:
         src = inspect.getsource(applications.application_from_url)
         assert "AGGREGATOR_PLATFORMS" in src and "_resolve_repost" in src
 
-    def test_unresolved_repost_is_refused_not_prepared(self, monkeypatch):
-        from fastapi import HTTPException
-        from app.api.v1 import applications
-        from app.services.own_link import ResolvedJob
-
-        class S:
-            def get(self, model, pk):
-                return Row(id=pk, title="DevSecOps Engineer", company_id=None)
-            def close(self):
-                pass
-        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: S())
-        monkeypatch.setattr("app.services.aggregator_resolver.resolve_job",
-                            lambda session, row: {"resolved_job_id": None, "apply_platform": "workday"})
-        r = ResolvedJob(str(uuid.uuid4()), "himalayas", "caci", "himalayas-x", "DevSecOps Engineer", "CACI", "https://himalayas.app/x", False)
-        with pytest.raises(HTTPException) as e:
-            applications._resolve_repost(r)
-        assert e.value.status_code == 422
-        assert "workday" in e.value.detail and "paste the employer" in e.value.detail
-
-    def test_resolved_repost_returns_the_employers_job(self, monkeypatch):
-        from app.api.v1 import applications
-        from app.services.own_link import ResolvedJob
-
-        real_id, repost_id, co_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-        rows = {repost_id: Row(id=repost_id, title="Penetration Tester", company_id=co_id),
-                real_id: Row(id=real_id, platform="greenhouse", external_id="1", title="Penetration Tester",
-                             url="https://boards.greenhouse.io/bishopfox/jobs/1", company_id=co_id),
-                co_id: Row(id=co_id, name="Bishop Fox")}
-        class S:
-            def get(self, model, pk):
-                return rows.get(pk)
-            def close(self):
-                pass
-        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: S())
-        monkeypatch.setattr("app.services.aggregator_resolver.resolve_job",
-                            lambda session, row: {"resolved_job_id": str(real_id), "apply_platform": "greenhouse"})
-        out = applications._resolve_repost(ResolvedJob(str(repost_id), "himalayas", "bishop-fox", "himalayas-x", "Penetration Tester", "Bishop Fox", "https://himalayas.app/x", False))
-        assert out.job_id == str(real_id) and out.platform == "greenhouse" and out.company_name == "Bishop Fox"
-
+    # (the synchronous refusal/resolution cases moved to TestRepostIsQueued — F376c)
 
     def test_slow_resolution_is_bounded_with_a_retry_message(self):
         import inspect
@@ -296,3 +258,54 @@ class TestRepostLinks:
         r = resolve_job_from_url("https://greenbone-ag.jobs.personio.com/job/2546372")
         kinds = [a.__class__.__name__ for a in wired["session"].added]
         assert "Company" not in kinds and r.company_name == "Greenbone Networks"
+
+
+class TestRepostIsQueued:
+    """F376c — the repost lookup runs in the worker; the paste answers 202."""
+
+    def _row(self, **kw):
+        base = dict(id=uuid.uuid4(), title="Penetration Tester", company_id=None, resolved_job_id=None,
+                    apply_resolved_at=None, apply_platform=None, apply_resolve_status=None)
+        base.update(kw)
+        return Row(**base)
+
+    def _session(self, rows):
+        class S:
+            def get(self_, model, pk):
+                return rows.get(pk)
+            def close(self_): pass
+        return S()
+
+    def test_first_paste_queues_and_answers_pending(self, monkeypatch):
+        from app.api.v1 import applications
+        from app.services.own_link import ResolvedJob
+        row = self._row()
+        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: self._session({row.id: row}))
+        queued = []
+        monkeypatch.setattr("app.workers.tasks.aggregator_task.resolve_one_aggregator_job", Row(delay=lambda jid: queued.append(jid)))
+        with pytest.raises(applications.PendingResolution) as e:
+            applications._resolve_repost(ResolvedJob(str(row.id), "himalayas", "x", "himalayas-y", row.title, "", "u", False))
+        assert queued == [str(row.id)] and e.value.job_id == str(row.id)
+
+    def test_already_resolved_answers_immediately(self, monkeypatch):
+        from app.api.v1 import applications
+        from app.services.own_link import ResolvedJob
+        real = Row(id=uuid.uuid4(), platform="greenhouse", external_id="1", title="Penetration Tester",
+                   url="https://boards.greenhouse.io/bishopfox/jobs/1", company_id=uuid.uuid4())
+        row = self._row(resolved_job_id=real.id)
+        co = Row(id=real.company_id, name="Bishop Fox")
+        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: self._session({row.id: row, real.id: real, real.company_id: co}))
+        out = applications._resolve_repost(ResolvedJob(str(row.id), "himalayas", "x", "himalayas-y", row.title, "", "u", False))
+        assert out.job_id == str(real.id) and out.company_name == "Bishop Fox"
+
+    def test_recent_failure_is_reported_without_requeue(self, monkeypatch):
+        from datetime import datetime, timezone
+        from fastapi import HTTPException
+        from app.api.v1 import applications
+        from app.services.own_link import ResolvedJob
+        row = self._row(apply_resolved_at=datetime.now(timezone.utc), apply_resolve_status="external", apply_platform="workday")
+        monkeypatch.setattr("app.workers.tasks._db.SyncSession", lambda: self._session({row.id: row}))
+        monkeypatch.setattr("app.workers.tasks.aggregator_task.resolve_one_aggregator_job", Row(delay=lambda jid: (_ for _ in ()).throw(AssertionError("must not requeue"))))
+        with pytest.raises(HTTPException) as e:
+            applications._resolve_repost(ResolvedJob(str(row.id), "himalayas", "x", "himalayas-y", row.title, "", "u", False))
+        assert e.value.status_code == 422 and "workday" in e.value.detail

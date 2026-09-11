@@ -1792,8 +1792,10 @@ export interface HumanizeResult {
   style_match_examples_used: number;
 }
 
-// F371 — POST /applications/from-url
+// F371 — POST /applications/from-url. A repost whose resolution was just
+// queued answers 202 with only `pending`, `job_id` and `title` (F376c).
 export interface ResolvedJobFromUrl {
+  pending?: boolean;
   job_id: string;
   platform: string;
   slug: string;

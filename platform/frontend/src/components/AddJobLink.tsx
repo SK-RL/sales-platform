@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Link2 } from "lucide-react";
-import { prepareApplication, resolveJobFromUrl } from "@/lib/api";
+import { getJob, prepareApplication, resolveJobFromUrl } from "@/lib/api";
 
 /**
  * F371 — "Add your own link", the Tsenta feature done honestly.
@@ -16,16 +16,44 @@ export function AddJobLink({ className = "" }: { className?: string }) {
   const navigate = useNavigate();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // F376c — a repost's resolution runs in the worker: poll the job until
+  // it lands on the employer's form (or says why it can't).
+  async function awaitResolution(jobId: string): Promise<string> {
+    setPhase("Finding the employer's form…");
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 2500));
+      const job = await getJob(jobId);
+      if (job.resolved_job_id) return job.resolved_job_id;
+      if (job.apply_resolve_status && job.apply_resolve_status !== "blocked") {
+        const plat = job.apply_platform;
+        const where = plat
+          ? ["workday", "icims", "taleo", "successfactors", "linkedin"].includes(plat)
+            ? ` The employer's form is on ${plat}, which needs an account on their site.`
+            : ` The employer's form is on ${plat}, which we can't drive from here.`
+          : "";
+        throw new Error(
+          `Found the repost, but couldn't reach that role on an ATS we can drive.${where} Open it on Himalayas and paste the employer's apply link instead.`
+        );
+      }
+    }
+    throw new Error("Still looking for the employer's form — try again in a minute.");
+  }
 
   async function go() {
     const u = url.trim();
     if (!u || busy) return;
     setBusy(true);
     setError(null);
+    setPhase(null);
     try {
       const resolved = await resolveJobFromUrl(u);
-      const app = await prepareApplication(resolved.job_id);
+      const jobId = resolved.pending ? await awaitResolution(resolved.job_id) : resolved.job_id;
+      setPhase("Preparing…");
+      const app = await prepareApplication(jobId);
       const id = app?.id ?? app?.application_id;
       if (!id) throw new Error("The application could not be prepared.");
       navigate(`/applications/review?app=${id}`);
@@ -38,6 +66,7 @@ export function AddJobLink({ className = "" }: { className?: string }) {
       );
     } finally {
       setBusy(false);
+      setPhase(null);
     }
   }
 
@@ -69,7 +98,7 @@ export function AddJobLink({ className = "" }: { className?: string }) {
           disabled={busy || !url.trim()}
           className="shrink-0 rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-40"
         >
-          {busy ? "Reading…" : "Prepare"}
+          {busy ? phase ?? "Reading…" : "Prepare"}
         </button>
       </form>
       {error && (

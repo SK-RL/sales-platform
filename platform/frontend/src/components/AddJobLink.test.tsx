@@ -14,9 +14,11 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 const resolveJobFromUrl = vi.fn();
 const prepareApplication = vi.fn();
+const getJob = vi.fn();
 vi.mock("@/lib/api", () => ({
   resolveJobFromUrl: (...a: any[]) => resolveJobFromUrl(...a),
   prepareApplication: (...a: any[]) => prepareApplication(...a),
+  getJob: (...a: any[]) => getJob(...a),
 }));
 
 import { AddJobLink } from "./AddJobLink";
@@ -64,6 +66,35 @@ describe("AddJobLink", () => {
     fireEvent.click(screen.getByText("Prepare"));
     await waitFor(() => expect(prepareApplication).toHaveBeenCalledWith("j9"));
     expect(await screen.findByText("AT /applications/review?app=app9")).toBeTruthy();
+  });
+
+  it("polls a queued repost until it resolves, then prepares the employer's job", async () => {
+    vi.useFakeTimers();
+    resolveJobFromUrl.mockResolvedValue({ pending: true, job_id: "repost1", title: "Penetration Tester" });
+    getJob
+      .mockResolvedValueOnce({ id: "repost1", apply_resolve_status: null })
+      .mockResolvedValueOnce({ id: "repost1", apply_resolve_status: "resolved", resolved_job_id: "real9" });
+    prepareApplication.mockResolvedValue({ id: "app9" });
+    renderIt();
+    fireEvent.change(screen.getByLabelText("Job posting link"), { target: { value: "https://himalayas.app/companies/x/jobs/y" } });
+    fireEvent.click(screen.getByText("Prepare"));
+    await vi.advanceTimersByTimeAsync(6000);
+    vi.useRealTimers();
+    await waitFor(() => expect(prepareApplication).toHaveBeenCalledWith("real9"));
+    expect(await screen.findByText("AT /applications/review?app=app9")).toBeTruthy();
+  });
+
+  it("explains a repost that resolved to an account-gated ATS", async () => {
+    vi.useFakeTimers();
+    resolveJobFromUrl.mockResolvedValue({ pending: true, job_id: "repost2" });
+    getJob.mockResolvedValue({ id: "repost2", apply_resolve_status: "external", apply_platform: "workday" });
+    renderIt();
+    fireEvent.change(screen.getByLabelText("Job posting link"), { target: { value: "https://himalayas.app/companies/x/jobs/z" } });
+    fireEvent.click(screen.getByText("Prepare"));
+    await vi.advanceTimersByTimeAsync(3000);
+    vi.useRealTimers();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/workday, which needs an account/i);
+    expect(prepareApplication).not.toHaveBeenCalled();
   });
 
   it("disables Prepare until something is typed", () => {
