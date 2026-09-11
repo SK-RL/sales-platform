@@ -230,3 +230,15 @@ class TestKnownWalls:
         import inspect
         from app.api.v1 import applications
         assert '"wall": human_wall_for(job.platform)' in inspect.getsource(applications.preview_job_questions)
+
+    def test_preview_never_calls_a_walled_form_safe(self):
+        """Seen on production: a Lever application with 10 extracted
+        fields and no blockers reported safe_to_auto_submit=True."""
+        import inspect
+        from app.api.v1 import applications
+        src = inspect.getsource(applications.preview_job_questions)
+        i = src.find('"safe_to_auto_submit"')
+        assert i > 0
+        clause = src[i : i + 400]
+        assert "human_wall_for(job.platform) is None" in clause
+        assert "job.platform in auto_submittable_platforms()" in clause
