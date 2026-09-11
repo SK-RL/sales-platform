@@ -367,6 +367,9 @@ class FromUrlRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
+REPOST_RESOLVE_BUDGET_S = 50
+
+
 def _resolve_repost(resolved):
     """Run the aggregator resolver on a repost and return the employer's job.
 
@@ -386,11 +389,21 @@ def _resolve_repost(resolved):
             raise HTTPException(status_code=404, detail="The repost could not be loaded.")
         out = resolve_job(session, row)
         if not out.get("resolved_job_id"):
-            where = f" The employer's form is on {out['apply_platform']}, which needs an account on their site." if out.get("apply_platform") else ""
+            from app.services.submitters import auto_submittable_platforms
+
+            plat = out.get("apply_platform")
+            if plat in ("workday", "icims", "taleo", "successfactors", "linkedin"):
+                where = f" The employer's form is on {plat}, which needs an account on their site."
+            elif plat in auto_submittable_platforms():
+                where = f" We found it on {plat} but couldn't load the posting ({out.get('detail') or 'it may have closed'})."
+            elif plat:
+                where = f" The employer's form is on {plat}, which we can read but not submit for you."
+            else:
+                where = ""
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Found the repost ({row.title}), but couldn't find that role on an ATS we can drive"
+                    f"Found the repost ({row.title}), but couldn't reach that role on an ATS we can drive."
                     f"{where} Open it on Himalayas and paste the employer's apply link instead."
                 ),
             )
@@ -433,7 +446,17 @@ async def application_from_url(
     from app.services.aggregator_resolver import AGGREGATOR_PLATFORMS
 
     if resolved.platform in AGGREGATOR_PLATFORMS:
-        resolved = await asyncio.to_thread(_resolve_repost, resolved)
+        # Bounded: the API sits behind a 60 s proxy hop and a probe of
+        # several boards can be slow. The thread keeps running and
+        # records its result on the row, so the hourly task / a retry
+        # picks it up rather than the user staring at a spinner.
+        try:
+            resolved = await asyncio.wait_for(asyncio.to_thread(_resolve_repost, resolved), timeout=REPOST_RESOLVE_BUDGET_S)
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail="Finding the employer's form is taking longer than usual. Try again in a minute — the lookup continues in the background.",
+            )
 
     return {
         "job_id": resolved.job_id,
