@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · be645ce · sha-be645ce
+Merge: draft task observability
+
+
 ## 2026-09-11 · f7a5edb · sha-f7a5edb
 Merge: periodic task limits + revoke (F401)
 
