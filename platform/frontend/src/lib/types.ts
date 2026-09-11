@@ -1187,6 +1187,9 @@ export interface AnswerDraft {
 export interface ApplyGateResult {
   // F396 — drafts keyed by field_key, written by the worker.
   drafts?: Record<string, AnswerDraft>;
+  // F398 — the last enqueued run; the worker replaces platform_response
+  // when it finishes, so its presence means "queued or running".
+  queued?: { task_id: string; dry_run: boolean; at: string };
   // "blocked" | "passed" (a dry run that placed everything it needed)
   // | "submitted" | "failed"
   gate?: string;

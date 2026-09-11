@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getRoutineTopToApply,
@@ -117,7 +117,10 @@ export function RoutinePage() {
             Apply Routine
           </h1>
           <p className="text-sm text-neutral-500">
-            Operator panel for the MCP-Chrome routine.
+            Two ways to apply live here: the <strong>Claude Desktop routine</strong> (semi-attended, its own
+            10-a-day cap, shown above) and <strong>Auto-apply</strong> (fully unattended, its own cap — settings{" "}
+            <a href="#auto-apply" className="underline">below</a>, home at{" "}
+            <Link to="/apply" className="underline">Auto-apply</Link>).
           </p>
         </div>
       </div>
@@ -176,8 +179,8 @@ export function RoutinePage() {
             )}
           </PreflightCell>
           <PreflightCell
-            label="Daily cap"
-            value={`${dailyRemaining} / 10`}
+            label="Routine cap (Claude Desktop runs)"
+            value={`${dailyRemaining} of 10 left`}
             good={dailyGood}
             icon={Clock}
             detail={
@@ -499,6 +502,15 @@ function PreferencesCard() {
     },
   });
 
+  // F398 — /routine#auto-apply (the Auto-apply page's settings link)
+  // lands on the auto-apply block, not the top of the operator panel.
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash === "#auto-apply") {
+      document.getElementById("auto-apply")?.scrollIntoView?.({ block: "start" });
+    }
+  }, [location.hash, prefsQ.data]);
+
   if (prefsQ.isLoading || draft === null) {
     return (
       <div className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
@@ -527,11 +539,11 @@ function PreferencesCard() {
         {/* F360 — auto-apply. Deliberately first and deliberately blunt:
             this is the only control on the page that sends applications
             to employers with nobody watching. */}
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div id="auto-apply" className="scroll-mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <label className="text-sm font-medium text-amber-900">
-                Apply automatically
+                Auto-apply: apply automatically
               </label>
               <p className="text-xs text-amber-800">
                 Submits applications on your behalf without asking first.

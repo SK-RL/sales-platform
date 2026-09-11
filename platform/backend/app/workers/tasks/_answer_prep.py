@@ -12,7 +12,7 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     "name": ["full_name", "name", "first_name", "your_name", "whats_your_name"],
     "email": ["email", "email_address", "whats_your_email", "whats_your_email_address"],
     "phone": ["phone", "phone_number", "mobile", "whats_your_phone_number", "telephone"],
-    "linkedin_url": ["linkedin", "linkedin_url", "linkedin_profile", "linkedincom"],
+    "linkedin_url": ["linkedin", "linkedin_url", "linkedin_profile", "linkedincom", "linkedin_link", "linkedin_profile_url"],
     "website": ["website", "portfolio", "personal_website", "website_portfolio", "github", "github_url"],
     "cover_letter": ["cover_letter", "why_do_you_want_to_work", "tell_us_about_yourself"],
     "salary": ["salary", "salary_expectations", "expected_salary", "desired_salary", "compensation"],
@@ -21,14 +21,14 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     "how_did_you_hear": ["how_did_you_hear", "how_did_you_hear_about_us", "referral_source"],
     "years_experience": ["years_of_experience", "years_experience", "how_many_years"],
     "start_date": ["start_date", "earliest_start_date", "when_can_you_start", "availability"],
-    "gender": ["gender", "gender_identity"],
-    "race": ["race", "ethnicity", "race_ethnicity"],
-    "veteran_status": ["veteran", "veteran_status", "are_you_a_veteran"],
-    "disability_status": ["disability", "disability_status"],
+    "gender": ["gender", "gender_identity", "eeo_gender", "eeoc_gender", "eeocgender"],
+    "race": ["race", "ethnicity", "race_ethnicity", "race_or_ethnicity", "eeo_race_ethnicity", "eeoc_race_ethnicity", "eeocrace_ethnicity", "eeo_race", "eeo_ethnicity"],
+    "veteran_status": ["veteran", "veteran_status", "are_you_a_veteran", "eeo_veteran_status", "eeoc_veteran_status", "eeocveteran_status", "protected_veteran_status"],
+    "disability_status": ["disability", "disability_status", "eeo_disability_status", "eeoc_disability_status", "eeocdisability_status"],
     # F394 — the fixed keys the newer adapters emit (Dover/Gem "linkedin",
     # Pinpoint/Hireology address parts) resolve at high confidence to
     # the Answer Book's usual spellings instead of via token matching.
-    "linkedin": ["linkedin_url", "linkedin", "linkedin_profile", "linkedin_profile_url"],
+    "linkedin": ["linkedin_url", "linkedin", "linkedin_profile", "linkedin_profile_url", "linkedin_link", "linkedincom"],
     "city": ["city", "town", "current_city"],
     "address": ["address", "street_address", "address1", "address_line_1"],
     "postcode": ["postcode", "zip_code", "zip", "postal_code", "zip_postal_code"],
@@ -131,6 +131,32 @@ _CATEGORY_HINTS: dict[str, str] = {
 }
 
 
+_ALIAS_GROUPS: dict[str, frozenset[str]] = {}
+for _name, _members in _FIELD_ALIASES.items():
+    _group = frozenset([_name, *_members])
+    for _m in _group:
+        _ALIAS_GROUPS[_m] = _ALIAS_GROUPS.get(_m, frozenset()) | _group
+
+
+def alias_group(key: str) -> frozenset[str]:
+    """Every key that means the same thing as ``key`` (including itself)."""
+    return _ALIAS_GROUPS.get(key or "", frozenset([key]) if key else frozenset())
+
+
+_PLACEHOLDER_ANSWER_RE = re.compile(
+    r"^\s*(\[\s*(test|todo|tbd|placeholder|replace|fill me|xxx)[^\]]*\]"   # "[TEST — replace…] …"
+    r"|(test|todo|tbd|placeholder|xxx)\s*([:\-—–]|$))",                    # "TODO", "tbd", "TEST: …"
+    re.I,
+)
+
+
+def is_placeholder_answer(answer: str) -> bool:
+    """An answer someone typed as a marker, not as the truth — the
+    "[TEST — replace…]" entries a test pass leaves behind. Never sent;
+    treated as empty so the next strategy (or the gate) takes over."""
+    return bool(_PLACEHOLDER_ANSWER_RE.match(answer or ""))
+
+
 def _normalise_key(text: str) -> str:
     key = text.lower().strip()
     key = re.sub(r"[^\w\s]", "", key)
@@ -173,6 +199,8 @@ def match_questions_to_answers(
     by_key: dict[str, dict] = {}
     by_category: dict[str, list[dict]] = {}
     for entry in answer_entries:
+        if is_placeholder_answer(entry.get("answer") or ""):
+            entry = {**entry, "answer": ""}
         qk = entry.get("question_key", "")
         if qk:
             by_key[qk] = entry
@@ -362,9 +390,15 @@ def _find_best_match(
             return hit
         placeholder = placeholder or hit
 
-    # 2. Alias match: check if field_key maps to known aliases
-    aliases = _FIELD_ALIASES.get(field_key, [])
-    for alias in aliases:
+    # 2. Alias match. Symmetric (F398): the form's key may be any member
+    # of a group, not only the group's name — Breezy emits ``race_ethnicity``
+    # and ``gender`` while the Answer Book holds ``eeo_race_ethnicity`` and
+    # ``eeo_gender`` (finding 1, 2026-09-11: the real answers sat two keys
+    # over from empty twins, and the never-infer gate correctly refused to
+    # guess). The normalised label joins the lookup so "Race or Ethnicity"
+    # reaches the same group.
+    aliases = alias_group(field_key) | alias_group(_normalise_key(label))
+    for alias in sorted(aliases):
         if alias in by_key:
             hit = _exact(by_key[alias], alias)
             if (hit["answer"] or "").strip():

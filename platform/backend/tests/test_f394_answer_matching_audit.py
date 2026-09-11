@@ -38,9 +38,9 @@ class TestSubstringHazards:
         assert _best("Where are you currently residing? (City and Country)", [_e("country", "UAE")]) == ("", "none")
 
     def test_qualifier_words_still_match(self):
-        assert _best("LinkedIn Profile URL", [_e("linkedin_url", "https://li")]) == ("https://li", "medium")
-        assert _best("Phone Number", [_e("phone", "+1")]) == ("+1", "medium")
-        assert _best("Current location", [_e("location", "Dubai")]) == ("Dubai", "medium")
+        assert _best("LinkedIn Profile URL", [_e("linkedin_url", "https://li")]) == ("https://li", "high")  # F398: alias group, exact
+        assert _best("Phone Number", [_e("phone", "+1")]) == ("+1", "high")  # F398: alias group
+        assert _best("Current location", [_e("location", "Dubai")]) == ("Dubai", "high")  # F398: alias group
         assert _best("What is your notice period?", [_e("notice_period", "30 days")]) == ("30 days", "medium")
 
     def test_token_overlap_rules(self):
@@ -65,7 +65,7 @@ class TestGuessesAreNeverSent:
     def test_required_guess_is_a_gap_in_both_modes(self):
         # "tell_us" hints the experience category, whose first entry is a guess.
         m = match_questions_to_answers([_q("Tell us about yourself", "tell_us_more", required=True, ftype="textarea")],
-                                       [_e("why_are_you_a_great_fit", "[TEST] fit", "experience")])[0]
+                                       [_e("why_are_you_a_great_fit", "Because I ship reliable platforms.", "experience")])[0]
         assert m["confidence"] == "low"
         for unattended in (False, True):
             gaps = blocking_gaps([{**m, "alternative_group": ""}], unattended=unattended)

@@ -255,7 +255,7 @@ async def auto_populate_answer_book(db: AsyncSession, user_id, questions: list[d
 
     Skips file-type fields. Returns count of new entries created.
     """
-    from app.workers.tasks._answer_prep import _FIELD_ALIASES
+    from app.workers.tasks._answer_prep import alias_group
 
     # Load existing entries for this user (base only)
     result = await db.execute(
@@ -267,14 +267,14 @@ async def auto_populate_answer_book(db: AsyncSession, user_id, questions: list[d
     existing = result.scalars().all()
     existing_keys = {e.question_key for e in existing}
 
-    # Build reverse alias map: alias -> canonical key
-    all_known_keys = set(existing_keys)
-    for canonical, aliases in _FIELD_ALIASES.items():
-        for alias in aliases:
-            if alias in existing_keys or _normalise_key(alias) in existing_keys:
-                all_known_keys.add(canonical)
-                all_known_keys.update(_normalise_key(a) for a in aliases)
-                break
+    # F398 — a placeholder is only created when NO spelling of the same
+    # fact exists yet. The old check walked the alias table one way and
+    # missed the Answer Book's eeo_* spellings, which is how ``gender``
+    # and ``race_ethnicity`` came to sit empty next to ``eeo_gender`` and
+    # ``eeo_race_ethnicity`` (finding 1, 2026-09-11).
+    def known(key: str, label_key: str) -> bool:
+        group = alias_group(key) | alias_group(label_key) | {key, label_key}
+        return any(k in existing_keys for k in group if k)
 
     added = 0
     for q in questions:
@@ -285,19 +285,7 @@ async def auto_populate_answer_book(db: AsyncSession, user_id, questions: list[d
         if not field_key:
             continue
 
-        if field_key in all_known_keys:
-            continue
-
-        # Check aliases
-        is_known = False
-        for canonical, aliases in _FIELD_ALIASES.items():
-            norm_aliases = [_normalise_key(a) for a in aliases]
-            if field_key in norm_aliases or canonical == field_key:
-                if canonical in all_known_keys or any(a in all_known_keys for a in norm_aliases):
-                    is_known = True
-                    break
-
-        if is_known:
+        if known(field_key, _normalise_key(q.get("label", "") or "")):
             continue
 
         # Guess category
@@ -316,7 +304,7 @@ async def auto_populate_answer_book(db: AsyncSession, user_id, questions: list[d
             source="ats_discovered",
         )
         db.add(entry)
-        all_known_keys.add(field_key)
+        existing_keys.add(field_key)
         added += 1
 
     if added:

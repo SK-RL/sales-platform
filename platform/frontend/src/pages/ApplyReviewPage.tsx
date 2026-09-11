@@ -75,6 +75,14 @@ export function ApplyReviewPage() {
     queryKey: ["application", current?.id],
     queryFn: () => getApplication(current!.id),
     enabled: Boolean(current?.id),
+    // F398 — while a run is queued or in flight, poll so the page moves
+    // on its own. The tester clicked Dry run and saw nothing for
+    // minutes; the worker was busy and the page had no way to say so.
+    refetchInterval: (q) => {
+      const d = q.state.data as { status?: string; platform_response?: { queued?: unknown } } | undefined;
+      const running = d?.status === "in_flight" || Boolean(d?.platform_response?.queued);
+      return running ? 3000 : false;
+    },
   });
 
   const questionsQ = useQuery({
@@ -256,9 +264,14 @@ export function ApplyReviewPage() {
         </div>
       </div>
 
+      {/* F398 — a run is queued or filling the form. Say so, and how long. */}
+      {(gate.queued || detailQ.data?.status === "in_flight") && (
+        <RunningBanner queuedAt={gate.queued?.at} dryRun={gate.queued?.dry_run ?? true} inFlight={detailQ.data?.status === "in_flight"} />
+      )}
+
       {/* F373 — a dry run that passed: the form was filled and read back,
           nothing was sent. The one bit of good news this page can carry. */}
-      {gate.gate === "passed" && (
+      {gate.gate === "passed" && !gate.queued && (
         <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
           <p className="font-medium">
             Dry run passed — {gate.placed ?? "all"}
@@ -354,15 +367,19 @@ export function ApplyReviewPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => submitM.mutate({ dryRun: true })}
-            disabled={submitM.isPending}
+            disabled={submitM.isPending || Boolean(gate.queued) || detailQ.data?.status === "in_flight"}
             className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            title="Fills the real form and stops before the submit click. Nothing is sent."
+            title={
+              blocking.length > 0
+                ? "Re-checks the form and the gate. With open questions it will stop again, but confirms the form still reads correctly."
+                : "Fills the real form and stops before the submit click. Nothing is sent."
+            }
           >
-            Dry run
+            {submitM.isPending ? "Queuing…" : gate.queued || detailQ.data?.status === "in_flight" ? "Running…" : "Dry run"}
           </button>
           <button
             onClick={() => submitM.mutate({ dryRun: false })}
-            disabled={submitM.isPending || !canSubmit}
+            disabled={submitM.isPending || !canSubmit || Boolean(gate.queued)}
             className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
             title={
               !checksReady
@@ -381,6 +398,32 @@ export function ApplyReviewPage() {
           {(submitM.error as Error)?.message}
         </p>
       )}
+    </div>
+  );
+}
+
+/** F398 — "we heard you": the run is queued or the browser is filling the form. */
+function RunningBanner({ queuedAt, dryRun, inFlight }: { queuedAt?: string; dryRun: boolean; inFlight: boolean }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = queuedAt ? Math.max(0, Math.round((now - new Date(queuedAt).getTime()) / 1000)) : 0;
+  const mins = Math.floor(secs / 60);
+  const what = dryRun ? "Dry run" : "Submission";
+  return (
+    <div className="mt-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status">
+      <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-blue-500" />
+      <div>
+        <p className="font-medium">
+          {inFlight ? `${what} in progress — filling the real form now.` : `${what} queued — waiting for a free worker.`}
+        </p>
+        <p className="text-blue-800">
+          {mins > 0 ? `${mins} min ${secs % 60}s` : `${secs}s`} so far. This page updates itself
+          {secs > 120 && !inFlight ? "; the worker is busy with a scan, which can take a few minutes" : ""}.
+        </p>
+      </div>
     </div>
   );
 }

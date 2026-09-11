@@ -2173,6 +2173,15 @@ async def submit_application(
     from app.workers.tasks.apply_task import submit_application_task
 
     task = submit_application_task.delay(str(app_id), dry_run=body.dry_run)
+    # F398 — stamp the queued task on the row so the review page can show
+    # "queued / running" instead of nothing, and an operator can look the
+    # task up (GET /platforms/scan/status/{task_id}) when a row looks stuck.
+    prev = app_row.platform_response if isinstance(app_row.platform_response, dict) else {}
+    app_row.platform_response = {
+        **prev,
+        "queued": {"task_id": task.id, "dry_run": body.dry_run, "at": datetime.now(timezone.utc).isoformat()},
+    }
+    await db.commit()
     return SubmitApplicationResponse(
         task_id=task.id,
         status="queued",
