@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 0315f3b · sha-0315f3b
+Merge: Opus 5 everywhere + drafted answers for approval (F395, F396)
+
+
 ## 2026-09-11 · 317cb8f · sha-317cb8f
 Merge: per-site auto-apply guide + answer-matching correctness (F393, F394)
 
