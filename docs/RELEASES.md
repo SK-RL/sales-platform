@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · bfec046 · sha-bfec046
+Merge: give the paste-a-link box its own row
+
+
 ## 2026-09-11 · 9544719 · sha-9544719
 Merge: load the whole model registry in the worker — no submission had ever run
 
