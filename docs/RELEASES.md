@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · a9e24a4 · sha-a9e24a4
+fix(ui): pasting a job you already have opens it instead of erroring
+
+
 ## 2026-09-11 · 390f818 · sha-390f818
 feat(ui): the auto-apply home — paste, "Needs you" with reasons, today's cap, recent
 
