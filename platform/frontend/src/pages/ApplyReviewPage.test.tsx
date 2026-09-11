@@ -449,3 +449,21 @@ describe("F396 — answering a gap inline", () => {
     expect(answerGap.mock.calls[0][1].answer).toBe("London");
   });
 });
+
+describe("F398 — a queued run is visible", () => {
+  beforeEach(() => {
+    appDetail = {
+      id: "a1", status: "prepared",
+      platform_response: { gate: "passed", dry_run: true, placed: 5, field_count: 5, queued: { task_id: "t1", dry_run: true, at: new Date(Date.now() - 65_000).toISOString() } },
+    };
+  });
+
+  it("says the dry run is queued, shows elapsed time, and disables the buttons meanwhile", async () => {
+    renderPage();
+    expect(await screen.findByText(/Dry run queued — waiting for a free worker/)).toBeTruthy();
+    expect(screen.getByText(/1 min 5s so far/)).toBeTruthy();
+    const dry = screen.getByText("Running…") as HTMLButtonElement;
+    expect(dry.disabled).toBe(true);
+    expect(screen.queryByText(/Dry run passed/)).toBeNull(); // the old result is not shown as if it were current
+  });
+});

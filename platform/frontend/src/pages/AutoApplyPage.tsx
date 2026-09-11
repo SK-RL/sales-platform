@@ -83,8 +83,8 @@ export function AutoApplyPage() {
           <Link to="/docs#auto-apply" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
             <BookOpen className="h-4 w-4" /> Which sites are automatic?
           </Link>
-          <Link to="/routine" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
-            <Settings2 className="h-4 w-4" /> Settings
+          <Link to="/routine#auto-apply" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
+            <Settings2 className="h-4 w-4" /> Auto-apply settings
           </Link>
         </div>
       </div>

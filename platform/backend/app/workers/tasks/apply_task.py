@@ -37,6 +37,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 from app.workers.celery_app import celery_app
 from app.workers.tasks._db import SyncSession
 
@@ -81,7 +83,15 @@ def _halt(session, app_row, reason: str, gaps: list[dict] | None = None) -> dict
     return {"status": STATUS_NEEDS_USER, "reason": reason, "blocking": gaps or []}
 
 
-@celery_app.task(bind=True, max_retries=MAX_RETRIES)
+# F398 — a hung browser session must not hold a worker child forever
+# (prod: one did, for 4.5 h, until a deploy restarted the worker; the
+# sweeper itself was queued behind it). Soft limit raises inside the
+# task so the row is failed with a reason; the hard limit kills the child.
+APPLY_SOFT_TIME_LIMIT = 600
+APPLY_TIME_LIMIT = 720
+
+
+@celery_app.task(bind=True, max_retries=MAX_RETRIES, soft_time_limit=APPLY_SOFT_TIME_LIMIT, time_limit=APPLY_TIME_LIMIT)
 def submit_application_task(self, application_id: str, dry_run: bool = False) -> dict:
     """Fill and submit one application server-side.
 
@@ -224,6 +234,18 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
         resume_path = _materialise_resume(resume)
         try:
             outcome = asyncio.run(_drive(submitter, job.url, fields, resume_path, dry_run))
+        except SoftTimeLimitExceeded:
+            # F398 — the browser hung. Fail the row with a reason now
+            # rather than leaving it in_flight for the sweeper.
+            app_row.status = STATUS_FAILED
+            app_row.platform_response = {
+                "gate": "failed",
+                "error": f"the form did not finish within {APPLY_SOFT_TIME_LIMIT // 60} minutes — the browser hung. "
+                         "Nothing was confirmed by the employer; retry, or apply on the posting page.",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+            session.commit()
+            return {"status": STATUS_FAILED, "reason": "timeout"}
         finally:
             if resume_path:
                 try:

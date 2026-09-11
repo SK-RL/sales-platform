@@ -79,3 +79,11 @@ describe("AutoApplyPage → guide link (F393)", () => {
     expect(a?.getAttribute("href")).toBe("/docs#auto-apply");
   });
 });
+
+describe("AutoApplyPage → settings link (F398)", () => {
+  it("names the feature and deep-links to its block on the routine page", async () => {
+    renderPage();
+    const a = (await screen.findByText(/Auto-apply settings/)).closest("a");
+    expect(a?.getAttribute("href")).toBe("/routine#auto-apply");
+  });
+});
