@@ -61,8 +61,12 @@ _NEVER_INFER_PATTERNS: tuple[str, ...] = (
     "criminal", "conviction", "felony", "background_check",
     "security_clearance", "clearance", "export_control",
     "non_compete", "noncompete", "drug_test",
-    # Compensation — a wrong number here is quoted back at offer stage
-    "salary", "compensation", "expected_pay", "desired_pay", "rate",
+    # Compensation — a wrong number here is quoted back at offer stage.
+    # F366: a bare "rate" matched inside elabo-rate / corpo-rate / ope-rate
+    # and flagged an ordinary Ashby question ("Please elaborate on your
+    # experience…") as legal/protected-class. Only the pay-rate phrasings.
+    "salary", "compensation", "expected_pay", "desired_pay",
+    "hourly_rate", "day_rate", "pay_rate", "rate_expectation",
 )
 
 
@@ -75,7 +79,13 @@ def is_never_infer_field(field_key: str, label: str) -> bool:
     (``are_you_legally_authorized_to_work``) while Workday uses opaque
     keys (``primaryQuestion--1``) and puts the question in the label.
     """
-    combined = f"{field_key} {label}".lower()
+    # F366: whitespace is folded to "_" so the multi-word patterns
+    # ("legal_right", "hourly_rate", "self_identif") match LABEL text,
+    # not only snake_case keys. Before this they never fired on a Workday-
+    # style label behind an opaque key. Strictly widens coverage in the
+    # safe direction — every multi-word pattern is specific enough that
+    # the fold introduces no new false positives.
+    combined = re.sub(r"\s+", "_", f"{field_key} {label}".lower())
     return any(pattern in combined for pattern in _NEVER_INFER_PATTERNS)
 
 

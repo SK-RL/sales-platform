@@ -85,6 +85,14 @@ class TestNeverInferClassification:
             "Are you legally authorized to work in the United States?",
         )
 
+    def test_rate_inside_a_word_is_not_compensation(self):
+        """F366 regression: a live Ashby question 'Please elaborate on
+        your experience…' was flagged because "rate" matched inside
+        "elaborate". Only pay-rate phrasings should."""
+        assert not is_never_infer_field("q1", "Please elaborate on your experience building software")
+        assert not is_never_infer_field("q2", "Describe how you operate under pressure")
+        assert is_never_infer_field("q3", "What is your expected hourly rate?")
+
     def test_ordinary_fields_are_not_never_infer(self):
         for key in ("first_name", "linkedin_url", "website", "how_did_you_hear"):
             assert not is_never_infer_field(key, ""), key

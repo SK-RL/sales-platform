@@ -49,11 +49,18 @@ class TestOnlyRealExtractorsAreClaimed:
 
     (F358 subsequently gave Lever a real extractor — it reads the
     server-rendered apply page — so it is legitimately back on the list.
-    Ashby is not: its form endpoint 401s on every public board.)
+    Ashby was re-examined in F366: its PAGE renders, so it is claimed again.)
     """
 
-    def test_ashby_is_not_claimed(self):
-        assert "ashby" not in SUPPORTED_QUESTION_PLATFORMS
+    def test_ashby_is_claimed_but_not_submittable(self):
+        """F366 corrected F357: the API 401s, but the application PAGE
+        renders in headless Chromium, so extraction is real. Every board
+        carries a reCAPTCHA v2 checkbox, so it must never be
+        auto-submittable."""
+        from app.services.submitters import auto_submittable_platforms
+
+        assert "ashby" in SUPPORTED_QUESTION_PLATFORMS
+        assert "ashby" not in auto_submittable_platforms()
 
     def test_every_supported_platform_has_a_wired_extractor(self):
         import inspect

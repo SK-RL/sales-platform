@@ -34,7 +34,7 @@ _BROWSER_UA = {
 # SmartRecruiters posting we return eight generic fields, and before
 # F346 nothing in the response said "these were invented".
 SUPPORTED_QUESTION_PLATFORMS: frozenset[str] = frozenset(
-    {"greenhouse", "recruitee", "lever", "workable"}
+    {"greenhouse", "recruitee", "lever", "workable", "ashby"}
 )
 
 
@@ -51,6 +51,19 @@ _STANDARD_FIELDS: list[dict[str, Any]] = [
     {"field_key": "linkedin_url", "label": "LinkedIn URL", "field_type": "text", "required": False, "options": [], "description": ""},
     {"field_key": "website", "label": "Website / Portfolio", "field_type": "text", "required": False, "options": [], "description": ""},
 ]
+
+
+def _normalise_field_key(text: str) -> str:
+    """Normalise a raw field name / label into a stable key.
+
+    Restored in F366: the definition lived inside the old Ashby block
+    that F366 replaced, and Greenhouse, Lever and Workable all call it.
+    The fallback path masked the NameError as "fetch failed".
+    """
+    key = (text or "").lower().strip()
+    key = re.sub(r"[^\w\s]", "", key)
+    key = re.sub(r"\s+", "_", key)
+    return key[:255]
 
 
 def fetch_application_questions(
@@ -78,8 +91,7 @@ def fetch_application_questions(
         "greenhouse": _fetch_greenhouse_questions,
         "lever": _fetch_lever_questions,
         "workable": _fetch_workable_questions,
-        # F357 — ashby is deliberately NOT wired; its application-form
-        # endpoint needs auth we do not hold (401 on every public board).
+        "ashby": _fetch_ashby_questions,
         "recruitee": _fetch_recruitee_questions,
     }
 
@@ -328,82 +340,138 @@ def _fetch_lever_questions(posting_id: str, slug: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Ashby
 # ---------------------------------------------------------------------------
-# Ashby Application Form API: POST /posting-api/job-board/{slug}/application-form
-# Body: { jobPostingId: "<id>" }
-# Returns form field definitions.
+# F366. The posting-api application-form endpoint 401s for every public
+# board (it needs the employer's key), which is why F357 unwired Ashby.
+# That was the wrong probe: the application PAGE
+# (jobs.ashbyhq.com/{org}/{id}/application) renders fully in headless
+# Chromium — verified on ramp, supabase, linear and vanta (13–33 fields,
+# no shadow DOM, no bot wall). So extraction goes through the page.
+#
+# Every board also carries a reCAPTCHA v2 checkbox, so unattended
+# SUBMISSION is gated (same class as Lever): Ashby is extraction-only and
+# routes to the review queue, where the never-infer gate still flags the
+# sponsorship/salary questions and the human submits from their browser.
+#
+# Field shapes (live): system fields carry stable ids (_systemfield_name,
+# _systemfield_email, _systemfield_resume); everything else is a UUID that
+# is both id and name, labelled via label[for]. A lone checkbox is a yes/no
+# question whose text lives on the enclosing _fieldEntry wrapper. Radios
+# share a name (communicationConsent) and are labelled by their option.
 
-_ASHBY_FORM_URL = "https://api.ashbyhq.com/posting-api/job-board/{slug}/application-form"
+_ASHBY_APPLY_URL = "https://jobs.ashbyhq.com/{slug}/{job_id}/application"
+_ASHBY_FORM_READY = "#_systemfield_name, input[name='_systemfield_name']"
 
-_ASHBY_FIELD_TYPE_MAP = {
-    "String": "text",
-    "Email": "text",
-    "Phone": "text",
-    "LongText": "textarea",
-    "File": "file",
-    "Boolean": "boolean",
-    "ValueSelect": "select",
-    "MultiValueSelect": "multi_select",
-}
+_ASHBY_STRUCT_JS = r"""
+(() => {
+  const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+  const rows = [];
+  for (const e of document.querySelectorAll('input,select,textarea')) {
+    if (e.type === 'hidden') continue;
+    const name = e.name || '';
+    const id = e.id || '';
+    if (name === 'g-recaptcha-response') continue;
+    let label = '';
+    if (id) label = norm(document.querySelector(`label[for="${CSS.escape(id)}"]`)?.innerText || '');
+    if (!label) label = norm(e.getAttribute('aria-label') || '');
+    const wrap = e.closest('[class*="_fieldEntry"]');
+    const wrapLabel = wrap ? norm(wrap.querySelector('label, [class*="label"], [class*="Label"]')?.innerText || '') : '';
+    const own = e.closest('label') ? norm(e.closest('label').innerText) : '';
+    rows.push({ tag: e.tagName.toLowerCase(), type: e.type, name, id, label, wrapLabel, option: own,
+                required: !!(e.required || e.getAttribute('aria-required') === 'true') });
+  }
+  return rows;
+})()
+"""
 
 
-def _fetch_ashby_questions(job_id: str, slug: str) -> list[dict[str, Any]]:
-    # F357 — correct code, but unwired: the endpoint requires auth we
-    # do not have. Verified 401 on every public board tried (ramp,
-    # linear, vanta, openai, supabase, 1password, anyscale). Kept so
-    # it can be re-enabled the day we hold an Ashby key.
-    url = _ASHBY_FORM_URL.format(slug=slug)
+def ashby_form_rows(job_id: str, slug: str) -> list[dict[str, Any]]:
+    """Raw per-input rows from the rendered application page (browser)."""
+    from app.services.playwright_browser import BrowserSession
 
-    with httpx.Client(timeout=15, follow_redirects=True) as client:
-        resp = client.post(url, json={"jobPostingId": job_id})
-        resp.raise_for_status()
+    async def _go():
+        async with BrowserSession() as session:
+            await session.navigate(
+                _ASHBY_APPLY_URL.format(slug=slug, job_id=job_id),
+                wait_until="domcontentloaded",
+                wait_for_selector=_ASHBY_FORM_READY,
+            )
+            return await session.eval_js(_ASHBY_STRUCT_JS) or []
 
-    data = resp.json()
+    return _run_in_fresh_loop(_go())
 
-    # Ashby returns { formDefinition: { sections: [ { fields: [...] } ] } }
-    form_def = data.get("formDefinition") or data.get("form") or {}
-    sections = form_def.get("sections", [])
 
+def normalise_ashby_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn raw input rows into our question schema (pure, testable)."""
     results: list[dict[str, Any]] = []
-    for section in sections:
-        for field in section.get("fields", []):
-            f_path = field.get("path", "") or ""
-            f_title = field.get("title", "") or field.get("label", "") or ""
-            f_type_raw = field.get("type", "String") or "String"
-            f_type = _ASHBY_FIELD_TYPE_MAP.get(f_type_raw, "text")
-            required = field.get("isRequired", False)
-            description = field.get("descriptionPlain", "") or field.get("description", "") or ""
+    seen: set[str] = set()
+    radio_groups: dict[str, dict[str, Any]] = {}
 
-            options = []
-            for opt in field.get("selectableValues", []):
-                if isinstance(opt, dict):
-                    options.append({"value": str(opt.get("value", "")), "label": opt.get("label", str(opt.get("value", "")))})
-                else:
-                    options.append({"value": str(opt), "label": str(opt)})
+    for r in rows:
+        typ = (r.get("type") or "").lower()
+        name, rid = r.get("name") or "", r.get("id") or ""
+        label = r.get("label") or r.get("wrapLabel") or ""
 
-            field_key = _normalise_field_key(f_path or f_title)
+        if typ == "file":
+            if rid == "_systemfield_resume":
+                if "resume" not in seen:
+                    seen.add("resume")
+                    results.append({"field_key": "resume", "label": "Resume / CV", "field_type": "file",
+                                    "required": bool(r.get("required")), "options": [], "description": ""})
+            elif label.lower().startswith("cover"):
+                if "cover_letter_file" not in seen:
+                    seen.add("cover_letter_file")
+                    results.append({"field_key": "cover_letter_file", "label": label or "Cover Letter",
+                                    "field_type": "file", "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
 
-            results.append({
-                "field_key": field_key,
-                "label": f_title,
-                "field_type": f_type,
-                "required": required,
-                "options": options,
-                "description": description,
-            })
+        if typ == "radio":
+            g = radio_groups.get(name)
+            if g is None:
+                g = radio_groups[name] = {"field_key": name, "label": r.get("wrapLabel") or name, "field_type": "select",
+                                          "required": bool(r.get("required")), "options": [], "description": ""}
+                results.append(g)
+            opt = r.get("option") or r.get("label") or ""
+            if opt and opt not in g["options"]:
+                g["options"].append(opt)
+            continue
 
+        if typ == "checkbox":
+            key = name or rid
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            results.append({"field_key": key, "label": r.get("wrapLabel") or label or key, "field_type": "boolean",
+                            "required": bool(r.get("required")), "options": [], "description": ""})
+            continue
+
+        key = rid or name
+        if not key:
+            wl = r.get("wrapLabel") or ""
+            if not wl:
+                continue
+            key = f"ashby_{_normalise_field_key(wl)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        canonical = {"_systemfield_name": ("name", "Full Name"), "_systemfield_email": ("email", "Email")}.get(key)
+        if canonical:
+            key, label = canonical
+        elif label.lower() == "phone":
+            key = "phone"
+        ftype = "textarea" if r.get("tag") == "textarea" else "text"
+        results.append({"field_key": key, "label": label or key, "field_type": ftype,
+                        "required": bool(r.get("required")), "options": [], "description": ""})
+
+    for g in radio_groups.values():
+        if g["field_key"] == "communicationConsent":
+            g["label"] = "Communication consent (SMS)"
     return results
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _normalise_field_key(text: str) -> str:
-    """Turn a label or field name into a normalised key for matching."""
-    key = text.lower().strip()
-    key = re.sub(r"[^\w\s]", "", key)
-    key = re.sub(r"\s+", "_", key)
-    return key[:255]
+def _fetch_ashby_questions(job_id: str, slug: str) -> list[dict[str, Any]]:
+    if not job_id or not slug:
+        return []
+    return normalise_ashby_rows(ashby_form_rows(job_id, slug))
 
 
 # ---------------------------------------------------------------------------
