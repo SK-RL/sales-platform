@@ -69,7 +69,9 @@ celery_app.conf.update(
     # Child restart is cheap (fork of the prewarmed parent, ~100ms) and
     # invisible to callers; acks_late means a task mid-recycle is
     # redelivered, not dropped.
-    worker_max_memory_per_child=768_000,   # ~750 MiB
+    # F397: 3 children under the 2048 MiB container limit →
+    #     2048 − ~130 parent = ~1918 / 3 ≈ 640 each; recycle at ~600.
+    worker_max_memory_per_child=614_400,   # ~600 MiB
     worker_max_tasks_per_child=200,
     result_expires=3600,
     # Regression finding 204: persist the task's positional args on the
