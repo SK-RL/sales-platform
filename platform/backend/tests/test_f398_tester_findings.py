@@ -61,3 +61,31 @@ def test_celery_health_endpoint_registered():
     from tests._routes import registered_paths
 
     assert "/api/v1/monitoring/celery" in registered_paths()
+
+
+def test_f400_guess_never_becomes_the_answer_even_on_optional_fields():
+    """Round 2, finding 1: a category-fallback guess reached Personio's
+    "Upload Cover letter" and Breezy's "Experience Summary" as ``answer``
+    with needs_user=false. It now travels as ``guess`` and ``answer`` is
+    empty everywhere — preview, prepared_answers, submitter."""
+    book = [_e("have_you_managed_multi_language_build_pipelines", "Partly. I have run pipelines covering Python…", "experience")]
+    qs = [{"field_key": "cover_letter", "label": "Upload Cover letter", "field_type": "textarea", "required": False},
+          {"field_key": "cSummary", "label": "Experience Summary", "field_type": "textarea", "required": False},
+          {"field_key": "q1", "label": "Tell us about yourself", "field_type": "textarea", "required": True}]
+    m = match_questions_to_answers(qs, book)
+    for r in m:
+        assert r["answer"] == "", r["label"]
+    guessed = [r for r in m if r["guess"]]
+    assert guessed and all(r["confidence"] == "low" for r in guessed)
+    gaps = {g["field_key"]: g["reason"] for g in blocking_gaps(m)}
+    assert "cover_letter" not in gaps and "cSummary" not in gaps  # optional → blank, not a gap
+    assert "q1" in gaps  # required and unanswered either way — a guess never satisfies it
+
+
+def test_f400_stale_pass_is_reported_as_stale():
+    from app.workers.tasks._answer_prep import GATE_RULES_CHANGED_AT, gate_result_is_stale
+
+    assert gate_result_is_stale({"gate": "passed", "checked_at": "2026-09-10T09:00:00+00:00"})
+    assert not gate_result_is_stale({"gate": "passed", "checked_at": "2026-09-11T14:00:00+00:00"})
+    assert not gate_result_is_stale({"gate": "blocked", "checked_at": "2026-09-10T09:00:00+00:00"})
+    assert GATE_RULES_CHANGED_AT.endswith("+00:00")

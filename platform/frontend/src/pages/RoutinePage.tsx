@@ -5,6 +5,7 @@ import {
   getRoutineTopToApply,
   getKillSwitch,
   setKillSwitch,
+  getApplications,
   listRoutineRuns,
   getRoutinePreferences,
   putRoutinePreferences,
@@ -74,6 +75,15 @@ export function RoutinePage() {
     queryFn: () => listRoutineRuns(10),
     refetchInterval: POLL_MS,
   });
+  // F400 (tester round 2, finding 6): applications the routine recorded
+  // through /applications/record never create a routine_runs row, so the
+  // panel said "No routine runs yet" while the cap counted ten of them.
+  const routineAppsQ = useQuery({
+    queryKey: ["routine-applications"],
+    queryFn: () => getApplications({ submission_source: "routine", page: 1, page_size: 50 }),
+    refetchInterval: POLL_MS,
+  });
+  const routineApps = routineAppsQ.data?.items ?? [];
 
   const killSwitchMutation = useMutation({
     mutationFn: (payload: { disabled: boolean; reason?: string | null }) =>
@@ -341,6 +351,30 @@ export function RoutinePage() {
         )}
       </div>
 
+      {/* ── Applications recorded by the routine (F400) ─────────── */}
+      {routineApps.length > 0 && (
+        <div className="rounded-lg border border-neutral-200 bg-white shadow-sm">
+          <div className="border-b border-neutral-100 px-6 py-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+              Applied by the routine
+            </h2>
+          </div>
+          <ul className="divide-y divide-neutral-100">
+            {routineApps.slice(0, 10).map((a) => (
+              <li key={a.id} className="flex items-center justify-between px-6 py-3 text-sm">
+                <span className="min-w-0 truncate">
+                  <span className="font-medium text-neutral-900">{a.job_title}</span>
+                  <span className="text-neutral-500"> · {a.company_name}</span>
+                </span>
+                <span className="ml-3 shrink-0 text-xs text-neutral-500">
+                  {a.status}{a.applied_at ? ` · ${new Date(a.applied_at).toLocaleDateString()}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* ── Recent runs ───────────────────────────────────────────── */}
       <div className="rounded-lg border border-neutral-200 bg-white shadow-sm">
         <div className="border-b border-neutral-100 px-6 py-4">
@@ -350,7 +384,9 @@ export function RoutinePage() {
         </div>
         {!runs.length ? (
           <div className="p-6 text-sm text-neutral-500">
-            No routine runs yet.
+            {routineApps.length === 0
+              ? "No routine runs yet."
+              : `No batch runs logged, but the routine has recorded ${routineApps.length} application${routineApps.length === 1 ? "" : "s"} one by one — these are what the cap counts.`}
           </div>
         ) : (
           <ul className="divide-y divide-neutral-100">

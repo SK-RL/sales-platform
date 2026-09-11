@@ -55,7 +55,7 @@ class TestGuessesAreNeverSent:
         # The category fallback offers first_name for an optional "Website".
         m = match_questions_to_answers([_q("Website", "question_8135802005", required=False, ftype="textarea")],
                                        [_e("first_name", "Sarthak", "personal_info")])[0]
-        assert m["confidence"] == "low" and m["answer"] == "Sarthak"
+        assert m["confidence"] == "low" and m["answer"] == "" and m["guess"] == "Sarthak"  # F400: a guess is never the answer
         # apply_task's field build skips low-confidence answers (see the
         # `confidence != "low"` filter); mirror that rule here.
         placed = [x for x in [m] if x["field_type"] == "file" or (x["answer"] and x.get("confidence") != "low")]

@@ -74,6 +74,7 @@ def test_employer_asking_for_own_words_is_honoured():
     q = "Explain your Cloud Inference experience in 3-4 lines. Please refrain from using AI to complete answer this questions."
     assert employer_wants_own_words(q) and not draftable({"field_key": "x", "label": q, "field_type": "textarea"})
     assert employer_wants_own_words("Answer in your own words") and employer_wants_own_words("", "Do not use ChatGPT")
+    assert employer_wants_own_words("During this application process I agree to use only my own words. I understand…")  # Canonical
     assert not employer_wants_own_words("Describe your experience with AI tooling")
 
 

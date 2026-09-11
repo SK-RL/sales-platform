@@ -224,6 +224,18 @@ def match_questions_to_answers(
         # from a fuzzy strategy on a never-infer field (which
         # `_find_best_match` already refuses to return, so this reduces
         # to "required and not confidently answered").
+        # F400 — a category-fallback guess is never the field's ANSWER.
+        # F394 kept it out of the submitter, but the preview and the
+        # prepared_answers snapshot (which the Claude Desktop routine copies
+        # from) still carried it as ``answer`` with needs_user=false on
+        # optional fields — the tester found a CI/CD paragraph queued for
+        # Personio's "Upload Cover letter" and Breezy's "Experience Summary".
+        # The guess now travels separately as ``guess`` so the review page
+        # can say what was considered, and ``answer`` is empty.
+        guess = ""
+        if match["confidence"] == "low" and (match["answer"] or "").strip():
+            guess = match["answer"]
+            match = {**match, "answer": ""}
         answered = bool(match["answer"])
         trusted = match["confidence"] in ("high", "medium")
         results.append({
@@ -240,6 +252,7 @@ def match_questions_to_answers(
             # alternatives satisfying a single ATS question.
             "alternative_group": q.get("alternative_group", ""),
             "answer": match["answer"],
+            "guess": guess,
             "match_source": match["source"],
             "question_key": match["question_key"],
             "confidence": match["confidence"],
@@ -301,7 +314,7 @@ def blocking_gaps(
         # (audit: Gem "Website" = the first name). A required field with
         # only a guess is a gap in both modes; the person saves the real
         # answer once and it is high-confidence from then on.
-        if m.get("required") and m.get("confidence") == "low" and (m.get("answer") or "").strip():
+        if m.get("required") and m.get("confidence") == "low" and ((m.get("guess") or m.get("answer") or "")).strip():
             gaps.append({
                 "field_key": m.get("field_key", ""),
                 "label": m.get("label") or m.get("field_key", ""),
@@ -457,6 +470,21 @@ def _find_best_match(
                 }
 
     return empty
+
+
+# F400 — when the gate's rules change, a "dry run passed" recorded before
+# the change no longer proves anything. Bump this when never-infer
+# patterns, matching strategies or the guess rule change; the list and
+# review views call an older pass stale and ask for a fresh run.
+GATE_RULES_CHANGED_AT = "2026-09-11T12:00:00+00:00"
+
+
+def gate_result_is_stale(platform_response: dict | None) -> bool:
+    pr = platform_response if isinstance(platform_response, dict) else {}
+    if pr.get("gate") != "passed":
+        return False
+    checked = str(pr.get("checked_at") or "")
+    return not checked or checked < GATE_RULES_CHANGED_AT
 
 
 _TOKEN_STOPWORDS = frozenset((

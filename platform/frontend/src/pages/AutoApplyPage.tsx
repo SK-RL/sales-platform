@@ -25,7 +25,12 @@ const TERMINAL_NOTE: Record<string, (a: Application) => string> = {
   in_flight: () => "Filling the form now…",
   failed: (a) => a.gate_error ?? a.gate_reason ?? "Failed — open to see why.",
   needs_user: (a) => a.gate_reason ?? "Needs your answer.",
-  prepared: (a) => (a.gate === "passed" ? "Dry run passed — ready to submit." : "Prepared, not sent."),
+  prepared: (a) =>
+    a.gate === "passed"
+      ? "Dry run passed — ready to submit."
+      : a.gate === "stale"
+        ? "Dry run passed earlier, but the rules changed since — run it again."
+        : "Prepared, not sent.",
 };
 
 function isToday(iso: string | null | undefined): boolean {
