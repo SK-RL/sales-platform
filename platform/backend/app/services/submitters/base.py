@@ -28,6 +28,8 @@ you didn't say.
 
 from __future__ import annotations
 
+import re
+
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -337,4 +339,58 @@ def coerce_option(value: str, options: list[Any]) -> str | None:
         for submit_value, texts in candidates:
             if texts & target:
                 return submit_value
+
+    # F403 — two more exact-semantics classes, still never a guess:
+    #  * the EEO opt-out: every vendor words "I'd rather not say"
+    #    differently, and a saved "Prefer not to say" must reach the
+    #    form's own phrasing rather than stop the application;
+    #  * a number against a numeric range option ("3" → "2+", "3-5",
+    #    "1-3 years"), where exactly one option contains the number.
+    if needle in _OPT_OUT_PHRASES:
+        hits = [sv for sv, texts in candidates if any(t in _OPT_OUT_PHRASES or _looks_like_opt_out(t) for t in texts)]
+        if len(hits) == 1:
+            return hits[0]
+    number = _as_number(needle)
+    if number is not None:
+        hits = [sv for sv, texts in candidates if any(_range_contains(t, number) for t in texts)]
+        if len(hits) == 1:
+            return hits[0]
     return None
+
+
+_OPT_OUT_PHRASES = frozenset({
+    "prefer not to say", "prefer not to answer", "prefer not to disclose", "prefer not to respond",
+    "i prefer not to say", "i prefer not to answer", "decline to self identify", "decline to self-identify",
+    "decline to answer", "decline to state", "i don't wish to answer", "i do not wish to answer",
+    "i dont wish to answer", "choose not to disclose", "do not wish to disclose", "not specified",
+    "rather not say", "i'd rather not say", "id rather not say",
+})
+
+
+def _looks_like_opt_out(text: str) -> bool:
+    t = text.lower()
+    return ("prefer not" in t or "decline to" in t or "rather not" in t or "wish to answer" in t
+            or "not wish to disclose" in t or "choose not to" in t)
+
+
+def _as_number(text: str) -> float | None:
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(?:\+|years?|yrs?)?\s*", text)
+    return float(m.group(1)) if m else None
+
+
+def _range_contains(option_text: str, n: float) -> bool:
+    """Does an option like "2+", "3-5", "1-3 years", "5 or more", "less than 1" cover n?"""
+    t = option_text.lower().replace("–", "-").replace("—", "-")
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|or more|and above|and more|or above)", t)
+    if m:
+        return n >= float(m.group(1))
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)", t)
+    if m:
+        return float(m.group(1)) <= n <= float(m.group(2))
+    m = re.search(r"(?:less than|under|fewer than|<)\s*(\d+(?:\.\d+)?)", t)
+    if m:
+        return n < float(m.group(1))
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)?\s*", t)
+    if m:
+        return n == float(m.group(1))
+    return False

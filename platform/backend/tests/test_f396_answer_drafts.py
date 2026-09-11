@@ -43,11 +43,24 @@ def test_grounded_draft_with_clean_check():
     assert "Never invent" in c.calls[0]["system"] and "CANDIDATE RÉSUMÉ" in c.calls[0]["messages"][0]["content"]
 
 
-def test_unsupported_claims_are_flagged_not_hidden():
+def test_unsupported_claims_are_revised_away_when_possible():
+    # F403: draft → check (1 claim) → revise → check (clean) = a clean draft with a note.
     c = _Client(json.dumps({"enough_information": True, "answer": "I led a 40-person platform team at Acme.", "facts_used": []}),
-                json.dumps({"unsupported_claims": ["led a 40-person platform team"]}))
+                json.dumps({"unsupported_claims": ["led a 40-person platform team"]}),
+                json.dumps({"answer": "At Acme I ran GPU inference clusters on Kubernetes."}),
+                json.dumps({"unsupported_claims": []}))
     d = draft_answer(client=c, **ARGS)
-    assert d.text and d.unsupported_claims == ["led a 40-person platform team"] and "could not be traced" in d.note
+    assert d.text == "At Acme I ran GPU inference clusters on Kubernetes." and d.unsupported_claims == [] and "revised to drop 1 claim" in d.note
+    assert len(c.calls) == 4 and "correcting" in c.calls[2]["system"]
+
+
+def test_unsupported_claims_are_flagged_when_revision_still_fails():
+    c = _Client(json.dumps({"enough_information": True, "answer": "I led a 40-person platform team at Acme.", "facts_used": []}),
+                json.dumps({"unsupported_claims": ["led a 40-person platform team"]}),
+                json.dumps({"answer": "I led a 30-person team at Acme."}),
+                json.dumps({"unsupported_claims": ["led a 30-person team"]}))
+    d = draft_answer(client=c, **ARGS)
+    assert d.text == "I led a 30-person team at Acme." and d.unsupported_claims == ["led a 30-person team"] and "could not be traced" in d.note
 
 
 def test_not_enough_information_means_no_draft():

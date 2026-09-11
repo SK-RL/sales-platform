@@ -982,6 +982,8 @@ export type ApplyMethod = "api_submit" | "manual_copy" | "career_page" | "claude
 export type ApplicationSubmissionSource = "manual_prepare" | "review_queue" | "routine";
 
 export interface Application {
+  // F403 — Needs-you questions that already have a drafted answer waiting.
+  drafts_ready?: number;
   id: string;
   job_id: string;
   job_title: string;

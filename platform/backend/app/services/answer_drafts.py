@@ -31,12 +31,18 @@ _DRAFT_SYSTEM = """You write short answers to job-application questions on behal
 
 Rules that override everything else:
 - Use ONLY facts in the candidate's résumé and saved answers. Never invent employers, dates, tools, projects, numbers, certifications or outcomes. Do not embellish.
+- Keep each fact attached to the employer or project where the material lists it. Do not merge roles, and do not describe a listed skill as daily work unless the material says so.
+- If the job's stated location or work arrangement conflicts with the candidate's saved preferences, you may say so briefly and honestly; never claim a willingness the material does not state.
 - If the material does not cover what the question asks, set "enough_information" to false and leave "answer" empty. Do not write a vague filler answer.
 - Match the length the question asks for; otherwise 2-5 sentences. No headings, no bullet lists unless the question asks for a list, no sign-off.
 - Do not mention that you are an AI, do not mention "the résumé", and do not address the recruiter by name.
 - Do not use em dashes.
 
 Respond with JSON only: {"enough_information": true|false, "answer": "...", "facts_used": ["short fact from the material", ...]}"""
+
+_REVISE_SYSTEM = """You are correcting a job-application answer written on behalf of a candidate. A fact-check found claims that the candidate's material does not support. Rewrite the answer so that every remaining claim is supported by the résumé or saved answers: remove the unsupported claims, or restate them only as far as the material supports (for example attribute a technology to the employer where the résumé lists it). Keep the candidate's first-person voice, the same length band, no em dashes, no mention of AI or of the résumé.
+
+Respond with JSON only: {"answer": "..."}"""
 
 _VERIFY_SYSTEM = """You are checking a job-application answer against the candidate's material. List every factual claim in the answer that is NOT supported by the résumé or saved answers (an employer, a duration, a tool, a project, a number, a certification, an outcome). Paraphrase and reasonable framing of supported facts are fine. Opinions and intentions ("I'm excited to...") are fine.
 
@@ -116,10 +122,28 @@ def draft_answer(
         claims = []
         note = "Drafted from your résumé and the job description. The fact-check pass failed, so read it carefully."
         return Draft(text=answer, enough_information=True, note=note)
-    if claims:
-        return Draft(text=answer, enough_information=True, unsupported_claims=claims,
-                     note="Drafted from your résumé and the job description, but these claims could not be traced to your material. Edit them out or correct them before using it: " + "; ".join(claims[:4]))
-    return Draft(text=answer, enough_information=True, note="Drafted from your résumé and the job description. Every claim traced back to your material. Edit freely, then save.")
+    if not claims:
+        return Draft(text=answer, enough_information=True, note="Drafted from your résumé and the job description. Every claim traced back to your material. Edit freely, then save.")
+
+    # F403 — one revision pass: ask for the unsupported claims to be removed
+    # or restated within the material, then check again. On the first prod
+    # draft the checker caught two overreaches; the person should get a
+    # clean answer, not a red list to fix by hand.
+    try:
+        rtext, _ = complete(f"{material}\n\nCURRENT ANSWER:\n{answer}\n\nUNSUPPORTED CLAIMS FOUND:\n- " + "\n- ".join(claims),
+                            system=_REVISE_SYSTEM, answer_tokens=700, client=client)
+        revised = re.sub(r"\s*—\s*", ", ", str(_json_block(rtext).get("answer") or "").strip())
+        if revised:
+            vtext, _ = complete(f"{material}\n\nANSWER TO CHECK:\n{revised}", system=_VERIFY_SYSTEM, answer_tokens=400, client=client)
+            still = [str(c).strip() for c in (_json_block(vtext).get("unsupported_claims") or []) if str(c).strip()]
+            if not still:
+                return Draft(text=revised, enough_information=True,
+                             note=f"Drafted from your résumé and the job description, then revised to drop {len(claims)} claim{'s' if len(claims) != 1 else ''} your material didn't support. Every remaining claim traced back. Edit freely, then save.")
+            answer, claims = revised, still
+    except Exception as exc:
+        logger.info("answer_drafts: revise failed for %r: %s", question[:60], exc)
+    return Draft(text=answer, enough_information=True, unsupported_claims=claims,
+                 note="Drafted from your résumé and the job description, but these claims could not be traced to your material. Edit them out or correct them before using it: " + "; ".join(claims[:4]))
 
 
 _OWN_WORDS_RE = re.compile(

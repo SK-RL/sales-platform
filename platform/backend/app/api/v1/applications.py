@@ -1310,6 +1310,9 @@ async def list_applications(
             "gate": ("stale" if gate_result_is_stale(app.platform_response) else (app.platform_response or {}).get("gate")) if isinstance(app.platform_response, dict) else None,
             "gate_reason": ("The gate's rules changed since this dry run — run it again." if gate_result_is_stale(app.platform_response) else (app.platform_response or {}).get("reason")) if isinstance(app.platform_response, dict) else None,
             "gate_error": (app.platform_response or {}).get("error") if isinstance(app.platform_response, dict) else None,
+            # F403 — how many Needs-you questions already have a draft waiting.
+            "drafts_ready": sum(1 for d in ((app.platform_response or {}).get("drafts") or {}).values()
+                                if isinstance(d, dict) and (d.get("text") or "").strip() and not d.get("used")) if isinstance(app.platform_response, dict) else 0,
             # Feature C — expose provenance + top-level score on the list
             # view. Not including `applied_resume_text` here on purpose;
             # the text blob can be ~20KB and a 25-row list shouldn't ship
@@ -2256,8 +2259,32 @@ async def answer_gap(
     app.platform_response = pr
     if app.status == "needs_user" and not remaining:
         app.status = "prepared"
+
+    # F403 — the Answer Book is shared, so the same question now has an
+    # answer on every other application waiting on it. Clear it there too
+    # instead of leaving stale "Needs you" rows until each is re-run.
+    cleared_elsewhere = 0
+    others = (await db.execute(
+        select(Application).where(Application.user_id == user.id, Application.status == "needs_user", Application.id != app_id)
+    )).scalars().all()
+    q_norm = question.strip().lower()
+    for other in others:
+        opr = other.platform_response if isinstance(other.platform_response, dict) else {}
+        gaps = opr.get("blocking") or []
+        keep = [g for g in gaps if (g.get("label") or "").strip().lower() != q_norm and normalize_question_key(g.get("label") or "") != question_key]
+        if len(keep) == len(gaps):
+            continue
+        opr = {**opr, "blocking": keep}
+        if not keep:
+            opr["reason"] = "All questions answered — run a dry run or submit."
+            other.status = "prepared"
+        else:
+            opr["reason"] = f"{len(keep)} required field(s) need your answer"
+        other.platform_response = opr
+        cleared_elsewhere += 1
     await db.commit()
-    return {"entry_id": str(entry_id), "question_key": question_key, "remaining": remaining, "status": app.status}
+    return {"entry_id": str(entry_id), "question_key": question_key, "remaining": remaining, "status": app.status,
+            "cleared_elsewhere": cleared_elsewhere}
 
 
 @router.post("/{app_id}/promote-answer", response_model=PromoteAnswerResponse)
