@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 BATCH = 40
 PAUSE_SECONDS = 1.5
 MIN_SCORE = 70
+BLOCKED_STREAK_STOP = 3
 _STATUSES = ("new", "under_review", "accepted")
 
 
@@ -45,10 +46,20 @@ def resolve_aggregator_links(limit: int = BATCH) -> dict:
             .order_by(Job.relevance_score.desc(), Job.first_seen_at.desc())
             .limit(limit)
         ).scalars().all()
+        blocked_streak = 0
         for i, job in enumerate(jobs):
+            if blocked_streak >= BLOCKED_STREAK_STOP:
+                # Measured on production 2026-09-11: Himalayas answers the
+                # VM with Cloudflare's challenge on every page (6/6), and a
+                # real browser doesn't clear it either. Knocking 40 times an
+                # hour changes nothing; stop the run and leave the rest
+                # unresolved so a future change can pick them up.
+                counts["skipped_after_block"] = len(jobs) - i
+                break
             try:
                 out = resolve_job(session, job)
                 counts[out["status"]] = counts.get(out["status"], 0) + 1
+                blocked_streak = blocked_streak + 1 if out["status"] == "blocked" else 0
             except Exception:
                 session.rollback()
                 logger.warning("aggregator: unexpected failure on job %s", job.id, exc_info=True)
