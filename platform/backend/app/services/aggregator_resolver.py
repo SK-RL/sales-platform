@@ -18,7 +18,9 @@ can be measured instead of guessed:
 
   resolved  — landed on an ATS we read; ``resolved_job_id`` set
   external  — a real employer link, but not an ATS we read (Workday…)
-  blocked   — the aggregator challenged us (Cloudflare "Just a moment")
+  unmatched — page walled AND the company + title lookup (F375) found
+              nothing on the public ATS APIs
+  blocked   — (transitional) page walled, lookup not yet attempted
   no_link   — page fetched, no apply anchor found (candidates logged)
   error     — network / parse failure
 """
@@ -147,11 +149,17 @@ def _guess_platform(url: str) -> str | None:
     return None
 
 
-def resolve_job(session, job) -> dict:
-    """Resolve one aggregator job and record the outcome on the row (sync)."""
+def resolve_job(session, job, skip_page: bool = False) -> dict:
+    """Resolve one aggregator job and record the outcome on the row (sync).
+
+    Page first (the apply redirect); when that is walled, has no link,
+    or lands somewhere we can't drive, fall through to the company +
+    title lookup (F375), which never touches the aggregator.
+    """
+    from app.services.company_lookup import lookup
     from app.services.own_link import OwnLinkError, resolve_job_from_url
 
-    res = resolve_page(job.url)
+    res = Resolution("blocked", detail="page fetch skipped after repeated challenges") if skip_page else resolve_page(job.url)
     job.apply_resolve_status = res.status
     job.apply_resolved_at = datetime.now(timezone.utc)
     job.apply_url = res.apply_url
@@ -166,6 +174,20 @@ def resolve_job(session, job) -> dict:
             # private: a real employer link we can't drive after all.
             job.apply_resolve_status = "external"
             res.detail = exc.detail
+    if resolved_job_id is None:
+        try:
+            found = lookup(session, job)
+        except Exception:
+            logger.warning("company_lookup failed for job %s", job.id, exc_info=True)
+            found = None
+        if found:
+            job.apply_url = found["apply_url"]
+            job.apply_platform = found["platform"]
+            resolved_job_id = found.get("resolved_job_id")
+            job.apply_resolve_status = "resolved" if resolved_job_id else "external"
+            res.detail = f"matched by company + title via {found['via']}"
+        elif job.apply_resolve_status == "blocked":
+            job.apply_resolve_status = "unmatched"
     if resolved_job_id:
         import uuid as _uuid
 

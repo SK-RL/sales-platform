@@ -367,6 +367,41 @@ class FromUrlRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2000)
 
 
+def _resolve_repost(resolved):
+    """Run the aggregator resolver on a repost and return the employer's job.
+
+    Raises HTTPException(422) when nothing drivable was found, with the
+    reason — never a silent fallback to the repost.
+    """
+    from app.models.company import Company
+    from app.models.job import Job
+    from app.services.aggregator_resolver import resolve_job
+    from app.services.own_link import ResolvedJob
+    from app.workers.tasks._db import SyncSession
+
+    session = SyncSession()
+    try:
+        row = session.get(Job, UUID(resolved.job_id))
+        if row is None:
+            raise HTTPException(status_code=404, detail="The repost could not be loaded.")
+        out = resolve_job(session, row)
+        if not out.get("resolved_job_id"):
+            where = f" The employer's form is on {out['apply_platform']}, which needs an account on their site." if out.get("apply_platform") else ""
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Found the repost ({row.title}), but couldn't find that role on an ATS we can drive"
+                    f"{where} Open it on Himalayas and paste the employer's apply link instead."
+                ),
+            )
+        real = session.get(Job, UUID(out["resolved_job_id"]))
+        company = session.get(Company, real.company_id) if real else None
+        return ResolvedJob(str(real.id), real.platform, "", real.external_id, real.title,
+                           company.name if company else "", real.url, created=False)
+    finally:
+        session.close()
+
+
 @router.post("/from-url")
 async def application_from_url(
     body: FromUrlRequest,
@@ -390,6 +425,16 @@ async def application_from_url(
         resolved = await asyncio.to_thread(resolve_job_from_url, body.url)
     except OwnLinkError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail)
+
+    # F376 — a repost (Himalayas). The row we have is the aggregator's;
+    # the form lives on the employer's ATS. Resolve it now (page, then
+    # company + title against the public ATS APIs) and hand back the
+    # employer's posting — or say plainly that we couldn't find it.
+    from app.services.aggregator_resolver import AGGREGATOR_PLATFORMS
+
+    if resolved.platform in AGGREGATOR_PLATFORMS:
+        resolved = await asyncio.to_thread(_resolve_repost, resolved)
+
     return {
         "job_id": resolved.job_id,
         "platform": resolved.platform,
