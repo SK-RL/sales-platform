@@ -100,6 +100,18 @@ celery_app.conf.update(
         # the ``default`` queue unless explicitly routed here.
         "app.workers.tasks.maintenance_task.rescore_jobs": {"queue": "heavy"},
         "app.workers.tasks.maintenance_task.reclassify_and_rescore": {"queue": "heavy"},
+        # F401 — the long periodic sweeps leave the default queue so a
+        # person's dry run / submit / answer draft is picked up within
+        # seconds. The heavy worker runs one at a time, which is right for
+        # hourly and 8-hourly jobs. Interactive tasks (submit, drafts,
+        # single-board scans, one-off aggregator resolves) stay on default.
+        "app.workers.tasks.scan_task.scan_all_platforms": {"queue": "heavy"},
+        "app.workers.tasks.aggregator_task.resolve_aggregator_links": {"queue": "heavy"},
+        "app.workers.tasks.career_page_task.check_career_pages": {"queue": "heavy"},
+        "app.workers.tasks.discovery_task.discover_and_add_boards": {"queue": "heavy"},
+        "app.workers.tasks.discovery_task.fingerprint_existing_companies": {"queue": "heavy"},
+        "app.workers.tasks.enrichment_task.sync_sheet_contacts": {"queue": "heavy"},
+        "app.workers.tasks.enrichment_task.mine_jd_contact_emails": {"queue": "heavy"},
     },
 )
 
@@ -138,23 +150,28 @@ if SCAN_MODE == "aggressive":
         "sweep_auto_apply": {
             "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
             "schedule": crontab(minute=20),
+            "options": {"expires": 2400},
         },
         # F374 — turn aggregator reposts into forms we can drive.
         "resolve_aggregator_links": {
             "task": "app.workers.tasks.aggregator_task.resolve_aggregator_links",
             "schedule": crontab(minute=40),
+            "options": {"expires": 2400},
         },
         "sweep_stuck_in_flight": {
             "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
             "schedule": crontab(minute="*/15"),
+            "options": {"expires": 600},
         },
         "scan_all_platforms": {
             "task": "app.workers.tasks.scan_task.scan_all_platforms",
             "schedule": crontab(minute=0, hour="0,8,16"),  # F317: thrice daily (00:00, 08:00, 16:00 UTC)
+            "options": {"expires": 14400},
         },
         "check_career_pages": {
             "task": "app.workers.tasks.career_page_task.check_career_pages",
             "schedule": crontab(minute=0, hour="*/1"),  # Every hour
+            "options": {"expires": 2400},
         },
         # Discovery scheduler fix: historically we ran `run_discovery`
         # here, which only populated the `discovered_companies` table —
@@ -316,23 +333,28 @@ else:
         "sweep_auto_apply": {
             "task": "app.workers.tasks.auto_apply_task.sweep_auto_apply",
             "schedule": crontab(minute=20),
+            "options": {"expires": 2400},
         },
         # F374 — turn aggregator reposts into forms we can drive.
         "resolve_aggregator_links": {
             "task": "app.workers.tasks.aggregator_task.resolve_aggregator_links",
             "schedule": crontab(minute=40),
+            "options": {"expires": 2400},
         },
         "sweep_stuck_in_flight": {
             "task": "app.workers.tasks.apply_task.sweep_stuck_in_flight",
             "schedule": crontab(minute="*/15"),
+            "options": {"expires": 600},
         },
         "scan_all_platforms": {
             "task": "app.workers.tasks.scan_task.scan_all_platforms",
             "schedule": crontab(minute=0, hour="0,8,16"),  # F317: thrice daily
+            "options": {"expires": 14400},
         },
         "check_career_pages": {
             "task": "app.workers.tasks.career_page_task.check_career_pages",
             "schedule": crontab(minute=0, hour="*/4"),
+            "options": {"expires": 2400},
         },
         # Discovery scheduler fix: historically we ran `run_discovery`
         # here, which only populated the `discovered_companies` table —

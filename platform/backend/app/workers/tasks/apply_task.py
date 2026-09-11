@@ -91,7 +91,12 @@ APPLY_SOFT_TIME_LIMIT = 600
 APPLY_TIME_LIMIT = 720
 
 
-@celery_app.task(bind=True, max_retries=MAX_RETRIES, soft_time_limit=APPLY_SOFT_TIME_LIMIT, time_limit=APPLY_TIME_LIMIT)
+# acks_late=False (F401): the global acks_late re-runs a task whose
+# worker died mid-way. For a submit that could mean a second application
+# at the employer. A crash leaves the row in_flight and the sweeper fails
+# it with "check the employer's site" — the designed outcome.
+@celery_app.task(bind=True, max_retries=MAX_RETRIES, acks_late=False,
+                 soft_time_limit=APPLY_SOFT_TIME_LIMIT, time_limit=APPLY_TIME_LIMIT)
 def submit_application_task(self, application_id: str, dry_run: bool = False) -> dict:
     """Fill and submit one application server-side.
 

@@ -89,3 +89,28 @@ def test_f400_stale_pass_is_reported_as_stale():
     assert not gate_result_is_stale({"gate": "passed", "checked_at": "2026-09-11T14:00:00+00:00"})
     assert not gate_result_is_stale({"gate": "blocked", "checked_at": "2026-09-10T09:00:00+00:00"})
     assert GATE_RULES_CHANGED_AT.endswith("+00:00")
+
+
+def test_f401_periodic_sweeps_leave_the_default_queue_and_do_not_pile_up():
+    """Prod, 13:46 UTC: two copies of resolve_aggregator_links running side
+    by side on the default worker, 31 tasks queued behind them, a dry run
+    PENDING for 30 minutes. Long periodic jobs now run on the heavy worker,
+    expire if a restart delays them, and the aggregator run is non-reentrant.
+    A submit is never redelivered after a crash (that could apply twice)."""
+    from app.workers.celery_app import celery_app
+    from app.workers.tasks import aggregator_task, apply_task, draft_answers_task
+
+    routes = celery_app.conf.task_routes
+    for name in ("app.workers.tasks.scan_task.scan_all_platforms", "app.workers.tasks.aggregator_task.resolve_aggregator_links",
+                 "app.workers.tasks.career_page_task.check_career_pages"):
+        assert routes[name] == {"queue": "heavy"}, name
+    assert "app.workers.tasks.apply_task.submit_application_task" not in routes  # interactive: stays on default
+    beat = celery_app.conf.beat_schedule
+    assert beat["resolve_aggregator_links"]["options"]["expires"] <= 3600
+    assert beat["scan_all_platforms"]["options"]["expires"] <= 8 * 3600
+    assert apply_task.submit_application_task.acks_late is False
+    assert draft_answers_task.draft_gap_answers_task.acks_late is False
+    assert aggregator_task.resolve_aggregator_links.acks_late is False
+    import inspect
+    src = inspect.getsource(aggregator_task.resolve_aggregator_links)
+    assert 'acquire_scan_lock_sync("aggregator"' in src and 'release_scan_lock("aggregator")' in src
