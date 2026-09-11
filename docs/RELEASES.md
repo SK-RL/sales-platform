@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 5c02a25 · sha-5c02a25
+fix(own-link): re-point a same-platform twin whose id predates namespacing
+
+
 ## 2026-09-11 · a374425 · sha-a374425
 feat(own-link): a repost's resolution runs in the worker; the paste polls
 
