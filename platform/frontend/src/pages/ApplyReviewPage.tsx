@@ -269,6 +269,13 @@ export function ApplyReviewPage() {
         <RunningBanner queuedAt={gate.queued?.at} dryRun={gate.queued?.dry_run ?? true} inFlight={detailQ.data?.status === "in_flight"} />
       )}
 
+      {/* F400 — a pass from before the gate's rules changed proves nothing now. */}
+      {gate.gate === "stale" && !gate.queued && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-medium">An earlier dry run passed, but the rules have changed since — run it again before submitting.</p>
+        </div>
+      )}
+
       {/* F373 — a dry run that passed: the form was filled and read back,
           nothing was sent. The one bit of good news this page can carry. */}
       {gate.gate === "passed" && !gate.queued && (
@@ -530,7 +537,10 @@ function FieldRow({ q }: { q: PreparedQuestion }) {
       return "Legal or protected-class question — only ever answered from a saved answer, never inferred.";
     }
     if (q.match_source === "unmatched") return "No saved answer matched this field.";
-    if (q.confidence === "low") return "Guessed — not sent. Save the real answer in your Answer Book and it will be used from then on.";
+    if (q.confidence === "low") {
+      const g = (q.guess || "").trim();
+      return `Guessed${g ? ` "${g.length > 60 ? g.slice(0, 60) + "…" : g}"` : ""} — not sent. Save the real answer in your Answer Book and it will be used from then on.`;
+    }
     if (q.question_key) return `From your Answer Book · ${q.question_key}`;
     return "";
   }, [q]);

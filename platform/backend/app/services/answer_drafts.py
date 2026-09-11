@@ -124,7 +124,7 @@ def draft_answer(
 
 _OWN_WORDS_RE = re.compile(
     r"(refrain from|do not|don'?t|no|without|avoid) (the )?(use of |using |use )?(an? )?(ai|chatgpt|llm|generative)"
-    r"|in your own words|your own words|written by you|not (be )?ai[- ]generated|ai[- ]generated (answers|responses|content) (are|is|will be) not",
+    r"|(in )?(your|my) own words|written by you|not (be )?ai[- ]generated|ai[- ]generated (answers|responses|content) (are|is|will be) not",
     re.I,
 )
 

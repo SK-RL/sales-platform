@@ -22,6 +22,7 @@ from app.models.answer_book import AnswerBookEntry
 from app.models.pipeline_stage import PipelineStage
 from app.models.platform_credential import PlatformCredential
 from app.models.user import User
+from app.workers.tasks._answer_prep import gate_result_is_stale
 from app.api.deps import get_current_user, require_role
 from app.utils.audit import log_action
 from app.utils.sql import escape_like
@@ -1248,7 +1249,7 @@ async def list_applications(
     # cleanly, undeclared params are discarded by FastAPI without
     # warning. Literal-typing here gives a parse-time 422 on typos and
     # the matching WHERE below makes the filter actually bite.
-    submission_source: Literal["review_queue", "manual_prepare"] | None = None,
+    submission_source: Literal["review_queue", "manual_prepare", "routine"] | None = None,
     search: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
@@ -1304,8 +1305,10 @@ async def list_applications(
             "notes": app.notes,
             # F384 — the apply gate's verdict, so a list can say WHY a row
             # needs you / passed / failed without a detail fetch.
-            "gate": (app.platform_response or {}).get("gate") if isinstance(app.platform_response, dict) else None,
-            "gate_reason": (app.platform_response or {}).get("reason") if isinstance(app.platform_response, dict) else None,
+            # F400 — a pass recorded before the gate's rules changed is
+            # reported as ``stale``, not ``passed``.
+            "gate": ("stale" if gate_result_is_stale(app.platform_response) else (app.platform_response or {}).get("gate")) if isinstance(app.platform_response, dict) else None,
+            "gate_reason": ("The gate's rules changed since this dry run — run it again." if gate_result_is_stale(app.platform_response) else (app.platform_response or {}).get("reason")) if isinstance(app.platform_response, dict) else None,
             "gate_error": (app.platform_response or {}).get("error") if isinstance(app.platform_response, dict) else None,
             # Feature C — expose provenance + top-level score on the list
             # view. Not including `applied_resume_text` here on purpose;
@@ -1361,7 +1364,7 @@ async def preview_job_questions(
     """
     import logging
     from app.services.question_service import get_or_fetch_questions, auto_populate_answer_book
-    from app.workers.tasks._answer_prep import blocking_gaps, match_questions_to_answers
+    from app.workers.tasks._answer_prep import blocking_gaps, gate_result_is_stale, match_questions_to_answers
     from app.fetchers.questions import SUPPORTED_QUESTION_PLATFORMS, human_wall_for
     from app.services.submitters import auto_submittable_platforms
 
@@ -1545,7 +1548,10 @@ async def get_application(
         "prepared_answers": app.prepared_answers,
         "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
         "applied_at": app.applied_at.isoformat() if app.applied_at else None,
-        "platform_response": app.platform_response,
+        "platform_response": (
+            {**app.platform_response, "gate": "stale", "stale_reason": "The gate's rules changed since this dry run — run it again."}
+            if gate_result_is_stale(app.platform_response) else app.platform_response
+        ),
         "notes": app.notes,
         "created_at": app.created_at.isoformat(),
         # Feature C — apply-time snapshot. `applied_resume_text` can be

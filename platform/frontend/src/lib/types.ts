@@ -1131,6 +1131,9 @@ export interface PreparedQuestion {
   // "none" means nothing matched. Before F346 an absent answer and a
   // category-fallback guess both reported "low".
   confidence: "high" | "medium" | "low" | "none";
+  // F400 — what the category fallback would have used. Never the answer;
+  // shown so the person can see what was considered and save the real one.
+  guess?: string;
   // F346 — this field is a legal / EEO / compensation question, so we
   // only ever answer it from an exact saved answer.
   never_infer?: boolean;
