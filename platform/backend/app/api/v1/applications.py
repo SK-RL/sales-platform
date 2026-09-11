@@ -1273,6 +1273,11 @@ async def list_applications(
             "submitted_at": app.submitted_at.isoformat() if app.submitted_at else None,
             "created_at": app.created_at.isoformat(),
             "notes": app.notes,
+            # F384 — the apply gate's verdict, so a list can say WHY a row
+            # needs you / passed / failed without a detail fetch.
+            "gate": (app.platform_response or {}).get("gate") if isinstance(app.platform_response, dict) else None,
+            "gate_reason": (app.platform_response or {}).get("reason") if isinstance(app.platform_response, dict) else None,
+            "gate_error": (app.platform_response or {}).get("error") if isinstance(app.platform_response, dict) else None,
             # Feature C — expose provenance + top-level score on the list
             # view. Not including `applied_resume_text` here on purpose;
             # the text blob can be ~20KB and a 25-row list shouldn't ship

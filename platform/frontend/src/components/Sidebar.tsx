@@ -56,6 +56,7 @@ const navigation = [
   { name: "Resume Score", to: "/resume-score", icon: FileText },
   { name: "Answer Book", to: "/answer-book", icon: BookOpen },
   { name: "Credentials", to: "/credentials", icon: KeyRound },
+  { name: "Auto-apply", to: "/apply", icon: Bot },
   { name: "Applications", to: "/applications", icon: Send },
   // v6 Claude Routine Apply — operator panel. Kept near Applications
   // since that's its closest sibling (both view-apply state); the

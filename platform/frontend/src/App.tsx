@@ -17,6 +17,7 @@ import { MonitoringPage } from "./pages/MonitoringPage";
 import { ResumeScorePage } from "./pages/ResumeScorePage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { ApplyReviewPage } from "@/pages/ApplyReviewPage";
+import { AutoApplyPage } from "@/pages/AutoApplyPage";
 import { AnswerBookPage } from "./pages/AnswerBookPage";
 import { UserManagementPage } from "./pages/UserManagementPage";
 import { RoleClustersPage } from "./pages/RoleClustersPage";
@@ -159,6 +160,16 @@ export default function App() {
         element={
           <ProtectedLayout>
             <ApplyReviewPage />
+          </ProtectedLayout>
+        }
+      />
+      {/* F384 — the auto-apply home: paste a link, "Needs you", today's
+          cap, recent outcomes. Nothing else. */}
+      <Route
+        path="/apply"
+        element={
+          <ProtectedLayout>
+            <AutoApplyPage />
           </ProtectedLayout>
         }
       />

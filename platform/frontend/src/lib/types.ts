@@ -1000,6 +1000,10 @@ export interface Application {
   // (resume text + components) is only on GET /applications/{id}.
   submission_source?: ApplicationSubmissionSource;
   applied_resume_score_overall?: number | null;
+  // F384 — the apply gate's verdict (from platform_response), for lists.
+  gate?: string | null;
+  gate_reason?: string | null;
+  gate_error?: string | null;
 }
 
 // Full application detail — shape of GET /applications/{id}. Adds the
