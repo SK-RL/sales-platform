@@ -1523,6 +1523,14 @@ export async function getApplicationSubmission(appId: string): Promise<Submissio
   return request<SubmissionDetail>(`/applications/${appId}/submission`);
 }
 
+// F396 — answer a Needs-you question inline on the review page.
+export async function answerGap(
+  appId: string,
+  payload: { field_key: string; question: string; answer: string },
+): Promise<{ entry_id: string; question_key: string; remaining: { field_key: string }[]; status: string }> {
+  return request(`/applications/${appId}/answer-gap`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export async function promoteAnswer(
   appId: string,
   payload: { question: string; answer: string },

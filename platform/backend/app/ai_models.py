@@ -18,10 +18,11 @@ and redeploy — the probe is a one-liner:
       model='<id>', max_tokens=8, messages=[{'role':'user','content':'hi'}])"
 """
 
-# Sonnet tier — the default for the volume features (resume
-# customization, interview prep, insights). Cost-efficient, current.
-CLAUDE_SONNET = "claude-sonnet-4-6"
-
-# Opus tier — reserved for cover-letter generation, where output
-# quality justified the higher cost in the original design.
-CLAUDE_OPUS = "claude-opus-4-8"
+# F395 (2026-09-11) — Sarthak: "use opus 5 for everything for now". Every
+# feature calls Claude Opus 5 through ``app.ai_client.complete``, which
+# handles what changed with this model (thinking on by default, refusal
+# stop reason, text-block extraction). The three names are kept so call
+# sites read the same; they are one model.
+CLAUDE_OPUS = "claude-opus-5"
+CLAUDE_SONNET = CLAUDE_OPUS
+CLAUDE_HAIKU = CLAUDE_OPUS

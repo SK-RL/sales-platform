@@ -491,12 +491,10 @@ Format: Return ONLY a JSON array of insight strings, like:
 ["Insight 1 here.", "Insight 2 here.", ...]
 Each insight should be 1–2 sentences, specific, and reference actual numbers where useful."""
 
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text_content = message.content[0].text.strip()
+        from app.ai_client import complete
+
+        text_content, _ = complete(prompt, answer_tokens=600, client=client)
+        text_content = text_content.strip()
 
         # Parse JSON array
         import json

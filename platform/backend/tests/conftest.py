@@ -26,3 +26,22 @@ keeps working for manual smoke runs against prod / staging.
 # `"test_api.py"` matches `tests/test_api.py`. Glob form so a future
 # `tests/test_*_live.py` can join the ignore list with one line.
 collect_ignore_glob = ["test_api.py"]
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_broker_for_drafts(monkeypatch):
+    """F396 — the apply gate enqueues the answer-draft task when it halts.
+    Tests have no broker; without this every halt waited ~19 s on the
+    connection retry. Records calls so a test can assert on them."""
+    calls = []
+    try:
+        from app.workers.tasks import draft_answers_task
+
+        monkeypatch.setattr(draft_answers_task.draft_gap_answers_task, "apply_async",
+                            lambda *a, **k: calls.append((a, k)))
+    except Exception:
+        pass
+    return calls

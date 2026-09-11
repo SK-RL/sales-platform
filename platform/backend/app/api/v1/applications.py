@@ -1,3 +1,4 @@
+import logging
 """Application tracking endpoints."""
 
 import uuid
@@ -731,6 +732,21 @@ async def prepare_application(
             application = existing
         await db.commit()
         await db.refresh(application)
+
+    # F396 — if the form has required free-text questions we can't answer
+    # from the Answer Book, draft them in the worker now so the review
+    # page opens with something to approve. Cheap to skip: nothing to draft.
+    try:
+        from app.services.answer_drafts import draftable
+        from app.workers.tasks._answer_prep import blocking_gaps
+
+        _gap_keys = {g["field_key"] for g in blocking_gaps(prepared_answers, satisfied_field_keys={"resume"})}
+        if any(m["field_key"] in _gap_keys and draftable(m) for m in prepared_answers):
+            from app.workers.tasks.draft_answers_task import draft_gap_answers_task
+
+            draft_gap_answers_task.apply_async(args=[str(application.id)], retry=False)
+    except Exception:
+        logging.getLogger(__name__).info("prepare: could not enqueue drafts for %s", application.id, exc_info=True)
 
     return {
         "id": str(application.id),
@@ -1623,6 +1639,7 @@ from app.models.application_submission import ApplicationSubmission  # noqa: E40
 from app.models.routine_run import RoutineRun  # noqa: E402
 from app.models.humanization_corpus import HumanizationCorpus  # noqa: E402
 from app.schemas.routine import (  # noqa: E402
+    AnswerGapRequest,
     ConfirmSubmittedRequest,
     ConfirmSubmittedResponse,
     PromoteAnswerRequest,
@@ -2162,6 +2179,70 @@ async def submit_application(
         application_id=str(app_id),
         dry_run=body.dry_run,
     )
+
+
+@router.post("/{app_id}/answer-gap")
+async def answer_gap(
+    app_id: UUID,
+    body: AnswerGapRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """F396 — answer a Needs-you question inline on the review page.
+
+    Saves the answer in the Answer Book under the question's own text
+    (so the gate finds it at high confidence on every re-run) and, when
+    the application is parked on ``needs_user``, drops that field from
+    the stored gap list so the page clears it immediately. A typed
+    answer always wins over an existing entry for the same question —
+    the user just wrote it while looking at the form.
+    """
+    app = (await db.execute(
+        select(Application).where(Application.id == app_id, Application.user_id == user.id)
+    )).scalar_one_or_none()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    from app.api.v1.answer_book import normalize_question_key
+
+    question = body.question.strip()
+    answer = body.answer.strip()
+    question_key = normalize_question_key(question)
+    existing = (await db.execute(
+        select(AnswerBookEntry).where(
+            AnswerBookEntry.user_id == user.id,
+            AnswerBookEntry.resume_id.is_(None),
+            AnswerBookEntry.question_key == question_key,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        existing.answer = answer
+        if existing.source in ("ats_discovered", "generated"):
+            existing.source = "learned"
+        entry_id = existing.id
+    else:
+        entry = AnswerBookEntry(
+            id=uuid.uuid4(), user_id=user.id, resume_id=None, category="custom",
+            question=question, question_key=question_key, answer=answer, source="learned", is_locked=False,
+        )
+        db.add(entry)
+        await db.flush()
+        entry_id = entry.id
+
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    remaining = [g for g in (pr.get("blocking") or []) if g.get("field_key") != body.field_key]
+    if pr.get("blocking") is not None:
+        pr["blocking"] = remaining
+        if not remaining and pr.get("gate") == "blocked":
+            pr["reason"] = "All questions answered — run a dry run or submit."
+    drafts = dict(pr.get("drafts") or {})
+    if body.field_key in drafts:
+        drafts[body.field_key] = {**drafts[body.field_key], "used": True}
+        pr["drafts"] = drafts
+    app.platform_response = pr
+    if app.status == "needs_user" and not remaining:
+        app.status = "prepared"
+    await db.commit()
+    return {"entry_id": str(entry_id), "question_key": question_key, "remaining": remaining, "status": app.status}
 
 
 @router.post("/{app_id}/promote-answer", response_model=PromoteAnswerResponse)

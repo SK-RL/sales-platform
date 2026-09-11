@@ -57,14 +57,27 @@ MAX_RETRIES = 3
 def _halt(session, app_row, reason: str, gaps: list[dict] | None = None) -> dict:
     """Park an application on ``needs_user`` with a reason the UI can show."""
     app_row.status = STATUS_NEEDS_USER
+    previous = app_row.platform_response if isinstance(app_row.platform_response, dict) else {}
     app_row.platform_response = {
         "gate": "blocked",
         "reason": reason,
         "blocking": gaps or [],
         "checked_at": datetime.now(timezone.utc).isoformat(),
+        # F396 — drafts survive a re-run; the draft task skips fields that
+        # already have one.
+        **({"drafts": previous["drafts"]} if previous.get("drafts") else {}),
     }
     session.commit()
     logger.info("apply_task: application %s needs user — %s", app_row.id, reason)
+    if gaps:
+        # F396 — draft answers for the free-text gaps so Needs you opens
+        # with something to approve rather than a blank box.
+        try:
+            from app.workers.tasks.draft_answers_task import draft_gap_answers_task
+
+            draft_gap_answers_task.apply_async(args=[str(app_row.id)], retry=False)
+        except Exception:
+            logger.info("apply_task: could not enqueue drafts for %s", app_row.id, exc_info=True)
     return {"status": STATUS_NEEDS_USER, "reason": reason, "blocking": gaps or []}
 
 

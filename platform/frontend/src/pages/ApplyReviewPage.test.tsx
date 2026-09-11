@@ -40,9 +40,12 @@ vi.mock("@/lib/api", () => ({
   getJobQuestions: vi.fn(async () => questions),
   submitApplication: (...a: any[]) => submitApplication(...(a as [])),
   updateApplication: (...a: any[]) => updateApplication(...(a as [])),
+  answerGap: (...a: any[]) => answerGap(...(a as [string, any])),
 }));
 
 import { ApplyReviewPage } from "./ApplyReviewPage";
+
+const answerGap = vi.fn(async (_id: string, _p: any) => ({ entry_id: "e1", question_key: "k", remaining: [], status: "prepared" }));
 
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -399,5 +402,50 @@ describe("manual escape hatch", () => {
     await waitFor(() =>
       expect(updateApplication).toHaveBeenCalledWith("a1", { status: "applied" })
     );
+  });
+});
+
+
+describe("F396 — answering a gap inline", () => {
+  beforeEach(() => {
+    answerGap.mockClear();
+    appDetail = {
+      id: "a1", status: "needs_user",
+      platform_response: {
+        gate: "blocked", reason: "2 required field(s) need your answer",
+        blocking: [
+          { field_key: "q1", label: "Explain your Cloud Inference experience in 3-4 lines.", reason: "No saved answer matches this required field." },
+          { field_key: "q2", label: "Which office are you closest to?", reason: "No saved answer matches this required field." },
+        ],
+        drafts: { q1: { text: "At Acme I ran GPU inference clusters on Kubernetes.", enough_information: true, unsupported_claims: [], note: "Every claim traced back to your material. Edit freely, then save." } },
+      },
+    };
+    questions = {
+      ...questions,
+      questions: [
+        { field_key: "q1", label: "Explain your Cloud Inference experience in 3-4 lines.", field_type: "textarea", required: true, options: [], description: "", answer: "", match_source: "unmatched", question_key: "", confidence: "none", extraction_mode: "extracted", needs_user: true },
+        { field_key: "q2", label: "Which office are you closest to?", field_type: "select", required: true, options: ["Bristol", "London"], description: "", answer: "", match_source: "unmatched", question_key: "", confidence: "none", extraction_mode: "extracted", needs_user: true },
+      ],
+    };
+  });
+
+  it("pre-fills the draft with its fact-check note and saves it under the question", async () => {
+    renderPage();
+    const box = (await screen.findByLabelText("Explain your Cloud Inference experience in 3-4 lines.")) as HTMLTextAreaElement;
+    expect(box.value).toContain("GPU inference clusters");
+    expect(screen.getByText(/Every claim traced back/)).toBeTruthy();
+    fireEvent.click(screen.getByText("Use this answer"));
+    await waitFor(() => expect(answerGap).toHaveBeenCalled());
+    expect(answerGap.mock.calls[0][1]).toEqual({ field_key: "q1", question: "Explain your Cloud Inference experience in 3-4 lines.", answer: "At Acme I ran GPU inference clusters on Kubernetes." });
+  });
+
+  it("shows the form's options for a choice question", async () => {
+    renderPage();
+    const sel = (await screen.findByLabelText("Which office are you closest to?")) as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.value)).toEqual(["", "Bristol", "London"]);
+    fireEvent.change(sel, { target: { value: "London" } });
+    fireEvent.click(screen.getAllByText("Save answer")[0]);
+    await waitFor(() => expect(answerGap).toHaveBeenCalled());
+    expect(answerGap.mock.calls[0][1].answer).toBe("London");
   });
 });

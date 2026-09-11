@@ -81,13 +81,10 @@ Generate comprehensive interview preparation. Return ONLY valid JSON (no markdow
 Generate exactly: 8 questions (mix of categories), 4 talking points, 3 company research items, and 2 red flags.
 Base all suggested answers on ACTUAL resume content — never fabricate experience."""
 
-        message = client.messages.create(
-            model=CLAUDE_SONNET,
-            max_tokens=3000,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        from app.ai_client import complete
 
-        response_text = message.content[0].text.strip()
+        response_text, message = complete(prompt, answer_tokens=3000, model=CLAUDE_SONNET, client=client)
+        response_text = response_text.strip()
 
         # Parse JSON
         start = response_text.find("{")
