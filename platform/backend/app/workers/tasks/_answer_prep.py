@@ -211,6 +211,7 @@ def match_questions_to_answers(
 def blocking_gaps(
     matched: list[dict[str, Any]],
     satisfied_field_keys: frozenset[str] | set[str] | None = None,
+    unattended: bool = False,
 ) -> list[dict[str, str]]:
     """Required fields that must not be auto-submitted.
 
@@ -248,6 +249,18 @@ def blocking_gaps(
         if m.get("field_key") in satisfied:
             continue
         if (m.get("alternative_group") or "") in satisfied_groups and m.get("alternative_group"):
+            continue
+        # F385 — a guess is fine to SHOW a person (the review screen marks
+        # it), never to SEND with nobody looking. Seen on production: a
+        # Breezy "Summary" textarea auto-filled with an unrelated answer
+        # by the category fallback. The sweep treats such required fields
+        # as gaps; a person reviewing can still accept or change them.
+        if unattended and m.get("required") and m.get("confidence") == "low" and (m.get("answer") or "").strip():
+            gaps.append({
+                "field_key": m.get("field_key", ""),
+                "label": m.get("label") or m.get("field_key", ""),
+                "reason": "We only had a guess for this. Auto-apply doesn't send guesses — confirm the answer or save one in your Answer Book.",
+            })
             continue
         if not m.get("needs_user"):
             continue

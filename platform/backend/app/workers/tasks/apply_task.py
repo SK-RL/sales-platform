@@ -167,7 +167,13 @@ def submit_application_task(self, application_id: str, dry_run: bool = False) ->
             select(Resume).where(Resume.id == app_row.resume_id)
         ).scalar_one_or_none()
         satisfied = {"resume"} if getattr(resume_row, "file_data", None) else set()
-        gaps = blocking_gaps(matched, satisfied_field_keys=satisfied)
+        # F385 — with nobody looking (the sweep), a guessed answer on a
+        # required field is a gap, not a fill.
+        gaps = blocking_gaps(
+            matched,
+            satisfied_field_keys=satisfied,
+            unattended=(app_row.submission_source == "routine"),
+        )
         if gaps:
             return _halt(
                 session,
