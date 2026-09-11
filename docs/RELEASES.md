@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-11 · 13fa0c9 · sha-13fa0c9
+Merge: answer quality (F403)
+
+
 ## 2026-09-11 · e7ff396 · sha-e7ff396
 Merge: laptop backup job outside the checkout
 
