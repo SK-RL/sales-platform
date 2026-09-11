@@ -354,6 +354,51 @@ async def get_apply_readiness(
     }
 
 
+class FromUrlRequest(BaseModel):
+    """Body for ``POST /applications/from-url`` (F371, bring your own link)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=8, max_length=2000)
+
+
+@router.post("/from-url")
+async def application_from_url(
+    body: FromUrlRequest,
+    user: User = Depends(get_current_user),
+):
+    """Resolve a pasted posting URL into a Job the review queue can use.
+
+    F371. Returns the job (creating it from the ATS board when we never
+    scanned it) plus what we can do with it, so the UI can go straight
+    to ``/prepare`` and the review page. Refuses, with the reason and
+    without creating anything, when the link isn't a posting on an ATS
+    we can read — the Tsenta failure this exists to not repeat.
+    """
+    import asyncio
+
+    from app.fetchers.questions import human_wall_for
+    from app.services.own_link import OwnLinkError, resolve_job_from_url
+    from app.services.submitters import auto_submittable_platforms
+
+    try:
+        resolved = await asyncio.to_thread(resolve_job_from_url, body.url)
+    except OwnLinkError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail)
+    return {
+        "job_id": resolved.job_id,
+        "platform": resolved.platform,
+        "slug": resolved.slug,
+        "external_id": resolved.external_id,
+        "title": resolved.title,
+        "company_name": resolved.company_name,
+        "url": resolved.url,
+        "created": resolved.created,
+        "auto_submittable": resolved.platform in auto_submittable_platforms(),
+        "wall": human_wall_for(resolved.platform),
+    }
+
+
 @router.post("/prepare")
 async def prepare_application(
     body: PrepareApplicationRequest,

@@ -593,6 +593,31 @@ function PreferencesCard() {
                   Keep this above the score you&apos;d browse at.
                 </p>
               </div>
+              {/* F372 — standing instruction, subtractive only. */}
+              <div className="sm:col-span-2">
+                <label className="text-xs font-medium text-amber-900" htmlFor="excluded-title-keywords">
+                  Never auto-apply when the title contains
+                </label>
+                <input
+                  id="excluded-title-keywords"
+                  type="text"
+                  value={(draft.excluded_title_keywords ?? []).join(", ")}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      excluded_title_keywords: e.target.value
+                        .split(",")
+                        .map((k) => k.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder="clearance, contract, on-site"
+                  className="mt-1 w-full rounded-md border border-amber-300 px-2 py-1 text-sm"
+                />
+                <p className="mt-1 text-xs text-amber-700">
+                  Comma-separated. A score can&apos;t know what you won&apos;t do — this can.
+                </p>
+              </div>
             </div>
           )}
         </div>

@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -284,6 +284,22 @@ class RoutinePreferences(BaseModel):
     # is opt-in per user and requires an explicit non-zero cap — there is
     # deliberately no "sensible default" that starts applying for
     # someone who never asked.
+    # F372 — standing instruction, subtractive only (the one kind Tsenta
+    # honours too): never auto-apply when the title contains any of these,
+    # case-insensitive. "Clearance Required" scored 93 on a live sweep
+    # candidate list; the score can't know what a person won't do.
+    excluded_title_keywords: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("excluded_title_keywords")
+    @classmethod
+    def _clean_title_keywords(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for kw in v or []:
+            k = " ".join(str(kw or "").split()).strip()[:60]
+            if k and k.lower() not in {o.lower() for o in out}:
+                out.append(k)
+        return out
+
     auto_apply_enabled: bool = False
     # Ceiling on applications the sweeper may submit per rolling 24h.
     # 0 means auto-apply does nothing even when enabled.
