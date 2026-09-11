@@ -17,7 +17,9 @@ set -euo pipefail
 
 VM_HOST="${VM_HOST:-ubuntu@161.118.207.119}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/Sarthak-Betaque}"
-DEST="${DEST:-$(cd "$(dirname "$0")/../.." && pwd)/db-backups}"   # repo/db-backups (gitignored)
+# Where copies land. launchd passes DEST (the repo's gitignored db-backups/);
+# run by hand from the repo it defaults to the same place.
+DEST="${DEST:-$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)/db-backups}"
 KEEP="${KEEP:-3}"
 REMOTE_ROOT="/var/lib/docker/volumes/sales-platform_backups/_data"
 SSH=(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 "$VM_HOST")
