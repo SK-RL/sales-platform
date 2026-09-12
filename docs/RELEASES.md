@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-12 · 538ab9a · sha-538ab9a
+Merge: Show your work — project ideas, stage 1 (F406)
+
+
 ## 2026-09-11 · 4be90fc · sha-4be90fc
 Merge: outreach contact plausibility filter (F404b)
 
