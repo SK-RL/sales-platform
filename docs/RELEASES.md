@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-12 · 2641683 · sha-2641683
+test(proof): a grounded quote needs three real words; fix the fixture that used two (F406)
+
+
 ## 2026-09-12 · 538ab9a · sha-538ab9a
 Merge: Show your work — project ideas, stage 1 (F406)
 
