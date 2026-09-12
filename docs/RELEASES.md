@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-12 · 00d8b87 · sha-00d8b87
+Merge: interactive queue, enrichment to heavy, un-shadowed routes (F407)
+
+
 ## 2026-09-12 · 2641683 · sha-2641683
 test(proof): a grounded quote needs three real words; fix the fixture that used two (F406)
 
