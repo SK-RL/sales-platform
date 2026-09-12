@@ -104,7 +104,8 @@ def test_f401_periodic_sweeps_leave_the_default_queue_and_do_not_pile_up():
     for name in ("app.workers.tasks.scan_task.scan_all_platforms", "app.workers.tasks.aggregator_task.resolve_aggregator_links",
                  "app.workers.tasks.career_page_task.check_career_pages"):
         assert routes[name] == {"queue": "heavy"}, name
-    assert "app.workers.tasks.apply_task.submit_application_task" not in routes  # interactive: stays on default
+    # F407 — interactive tasks now have their own queue, consumed ahead of default; never heavy.
+    assert routes["app.workers.tasks.apply_task.submit_application_task"] == {"queue": "interactive"}
     beat = celery_app.conf.beat_schedule
     assert beat["resolve_aggregator_links"]["options"]["expires"] <= 3600
     assert beat["scan_all_platforms"]["options"]["expires"] <= 8 * 3600

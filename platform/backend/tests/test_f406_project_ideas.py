@@ -180,10 +180,33 @@ def test_tasks_registered_with_limits_and_no_code_generation():
 def test_endpoints_exist_and_choose_validates_idea():
     from app.api.v1 import applications
 
-    for name in ("get_project_ideas", "draft_project_ideas", "choose_project_idea", "project_ideas_library", "run_project_ideas_eval", "get_project_ideas_eval"):
+    from app.api.v1 import project_ideas
+
+    for name in ("get_project_ideas", "draft_project_ideas", "choose_project_idea"):
         assert hasattr(applications, name)
+    for name in ("project_ideas_library", "run_project_ideas_eval", "get_project_ideas_eval"):
+        assert hasattr(project_ideas, name)
     src = inspect.getsource(applications.choose_project_idea)
     assert "Idea not found" in src and "project_idea_chosen" in src
-    # library and eval routes are declared before the /{app_id} routes that could shadow them
-    whole = inspect.getsource(applications)
-    assert whole.index('"/project-ideas-library"') < whole.index('"/{app_id}/project-ideas"')
+    # library and eval live under their own prefix: under /applications they were
+    # shadowed by GET /applications/{app_id} and answered 422 on prod.
+    assert project_ideas.router.prefix == "/project-ideas"
+    assert "/project-ideas-library" not in inspect.getsource(applications)
+
+
+def test_interactive_tasks_have_their_own_queue_and_enrichment_is_heavy():
+    """Prod, 2026-09-12: 43 enrich_company messages sat in front of the
+    idea research on the default worker for 30+ minutes."""
+    from app.workers.celery_app import celery_app
+
+    routes = celery_app.conf.task_routes
+    for t in ("apply_task.submit_application_task", "draft_answers_task.draft_gap_answers_task", "outreach_task.draft_outreach_task",
+              "proof_task.project_ideas_task", "proof_task.generic_project_ideas_task", "proof_task.project_ideas_eval_task"):
+        assert routes[f"app.workers.tasks.{t}"] == {"queue": "interactive"}
+    for t in ("enrichment_task.enrich_company", "enrichment_task.enrich_target_companies_batch"):
+        assert routes[f"app.workers.tasks.{t}"] == {"queue": "heavy"}
+    assert celery_app.conf.broker_transport_options.get("queue_order_strategy") == "priority"
+    import pathlib
+
+    compose = pathlib.Path(__file__).resolve().parents[2].joinpath("docker-compose.prod.yml").read_text()
+    assert "--queues=interactive,default" in compose

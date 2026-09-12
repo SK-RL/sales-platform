@@ -95,6 +95,7 @@ celery_app.conf.update(
     # routed to ``heavy`` blows up its own worker without affecting the
     # 30-min scan cadence on the default worker.
     task_default_queue="default",
+    broker_transport_options={"queue_order_strategy": "priority"},
     task_routes={
         # The two batch tasks we know are heavy. New tasks default to
         # the ``default`` queue unless explicitly routed here.
@@ -110,6 +111,23 @@ celery_app.conf.update(
         "app.workers.tasks.career_page_task.check_career_pages": {"queue": "heavy"},
         "app.workers.tasks.discovery_task.discover_and_add_boards": {"queue": "heavy"},
         "app.workers.tasks.discovery_task.fingerprint_existing_companies": {"queue": "heavy"},
+        # F407 — the nightly enrichment fan-out (43 enrich_company messages
+        # at once, minutes each) filled the default queue and a person's
+        # idea research / drafts waited behind it for half an hour.
+        "app.workers.tasks.enrichment_task.enrich_company": {"queue": "heavy"},
+        "app.workers.tasks.enrichment_task.enrich_target_companies_batch": {"queue": "heavy"},
+        "app.workers.tasks.enrichment_task.verify_stale_emails": {"queue": "heavy"},
+        "app.workers.tasks.outreach_task.verify_company_contacts_task": {"queue": "heavy"},
+        # F407 — what a person is waiting for goes to ``interactive``; the
+        # default worker consumes ``interactive`` before ``default``
+        # (queue_order_strategy=priority), so these are picked up as soon
+        # as a slot frees regardless of what else is queued.
+        "app.workers.tasks.apply_task.submit_application_task": {"queue": "interactive"},
+        "app.workers.tasks.draft_answers_task.draft_gap_answers_task": {"queue": "interactive"},
+        "app.workers.tasks.outreach_task.draft_outreach_task": {"queue": "interactive"},
+        "app.workers.tasks.proof_task.project_ideas_task": {"queue": "interactive"},
+        "app.workers.tasks.proof_task.generic_project_ideas_task": {"queue": "interactive"},
+        "app.workers.tasks.proof_task.project_ideas_eval_task": {"queue": "interactive"},
         "app.workers.tasks.enrichment_task.sync_sheet_contacts": {"queue": "heavy"},
         "app.workers.tasks.enrichment_task.mine_jd_contact_emails": {"queue": "heavy"},
     },
