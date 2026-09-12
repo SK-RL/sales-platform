@@ -47,6 +47,12 @@ vi.mock("@/lib/api", () => ({
   draftOutreach: vi.fn(async () => ({ queued: true, running: true })),
   markOutreachSent: vi.fn(async () => ({ ok: true })),
   editOutreach: vi.fn(async () => ({ ok: true })),
+  // F406
+  getProjectIdeas: vi.fn(async () => ({ application_id: "a1", ideas: [], running: false })),
+  draftProjectIdeas: vi.fn(async () => ({ queued: true, running: true })),
+  chooseProjectIdea: vi.fn(async () => ({ ok: true })),
+  getProjectIdeasLibrary: vi.fn(async () => ({ ideas: [], running: false })),
+  draftProjectIdeasLibrary: vi.fn(async () => ({ queued: true })),
 }));
 
 import { ApplyReviewPage } from "./ApplyReviewPage";

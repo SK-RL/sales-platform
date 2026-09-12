@@ -46,6 +46,10 @@ def _no_broker_for_drafts(monkeypatch):
 
         monkeypatch.setattr(outreach_task.draft_outreach_task, "apply_async",
                             lambda *a, **k: calls.append((a, k)))
+        from app.workers.tasks import proof_task
+
+        for t in (proof_task.project_ideas_task, proof_task.generic_project_ideas_task, proof_task.project_ideas_eval_task):
+            monkeypatch.setattr(t, "apply_async", lambda *a, **k: calls.append((a, k)))
     except Exception:
         pass
     return calls

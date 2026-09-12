@@ -2582,3 +2582,154 @@ def _is_uuid(value: str) -> bool:
         return True
     except (ValueError, TypeError):
         return False
+
+
+# ---------------------------------------------------------------------------
+# F406 — a project that shows the candidate's skills (stage 1: ideas only)
+# ---------------------------------------------------------------------------
+def _proof_redis():
+    import redis
+
+    from app.config import get_settings
+
+    return redis.Redis.from_url(get_settings().redis_url, decode_responses=True, socket_timeout=3)
+
+
+@router.get("/project-ideas-library")
+async def project_ideas_library(user: User = Depends(get_current_user)):
+    """Ideas that fit most of the openings we track, with the share of
+    job descriptions each covers (computed from our corpus)."""
+    import json
+
+    from app.workers.tasks.proof_task import GENERIC_KEY
+
+    try:
+        raw = _proof_redis().get(GENERIC_KEY.format(user_id=user.id))
+    except Exception:
+        raw = None
+    return json.loads(raw) if raw else {"ideas": [], "running": False}
+
+
+@router.post("/project-ideas-library/draft")
+async def draft_project_ideas_library(user: User = Depends(get_current_user)):
+    import json
+
+    from app.workers.tasks.proof_task import GENERIC_KEY, generic_project_ideas_task
+
+    task = generic_project_ideas_task.apply_async(args=[str(user.id)], retry=False)
+    try:
+        r = _proof_redis()
+        prev = json.loads(r.get(GENERIC_KEY.format(user_id=user.id)) or "{}")
+        r.set(GENERIC_KEY.format(user_id=user.id), json.dumps({**prev, "running": True, "task_id": task.id}), ex=14 * 24 * 3600)
+    except Exception:
+        pass
+    return {"queued": True, "task_id": task.id}
+
+
+class ProjectIdeasEvalRequest(BaseModel):
+    application_ids: list[str] | None = None
+    limit: int = 10
+
+
+@router.post("/project-ideas-eval")
+async def run_project_ideas_eval(
+    body: ProjectIdeasEvalRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stage-1 test: run the idea pipeline over the user's applications
+    (newest first, distinct companies) and keep a report."""
+    from app.workers.tasks.proof_task import project_ideas_eval_task
+
+    ids = [i for i in (body.application_ids or []) if _is_uuid(i)]
+    if not ids:
+        rows = (await db.execute(
+            select(Application.id, Job.company_id).join(Job, Job.id == Application.job_id)
+            .where(Application.user_id == user.id).order_by(Application.created_at.desc()).limit(200)
+        )).all()
+        seen: set = set()
+        for app_id, company_id in rows:
+            if company_id in seen:
+                continue
+            seen.add(company_id)
+            ids.append(str(app_id))
+            if len(ids) >= max(1, min(body.limit, 40)):
+                break
+    if not ids:
+        raise HTTPException(status_code=400, detail="No applications to evaluate")
+    task = project_ideas_eval_task.apply_async(args=[str(user.id), ids], retry=False)
+    return {"queued": True, "task_id": task.id, "applications": ids}
+
+
+@router.get("/project-ideas-eval")
+async def get_project_ideas_eval(user: User = Depends(get_current_user)):
+    import json
+
+    from app.workers.tasks.proof_task import EVAL_KEY
+
+    try:
+        raw = _proof_redis().get(EVAL_KEY.format(user_id=user.id))
+    except Exception:
+        raw = None
+    return json.loads(raw) if raw else {"rows": [], "running": False}
+
+
+@router.get("/{app_id}/project-ideas")
+async def get_project_ideas(
+    app_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    app = await _owned_application(db, app_id, user)
+    pr = app.platform_response if isinstance(app.platform_response, dict) else {}
+    return {"application_id": str(app_id), **(pr.get("project_ideas") or {"ideas": [], "running": False})}
+
+
+@router.post("/{app_id}/project-ideas/draft")
+async def draft_project_ideas(
+    app_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Research the company and the role, then propose three project
+    ideas. Never writes project code (stage 2 is not built)."""
+    from app.workers.tasks.proof_task import project_ideas_task
+
+    app = await _owned_application(db, app_id, user)
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    if (pr.get("project_ideas") or {}).get("running"):
+        return {"queued": False, "running": True}
+    task = project_ideas_task.apply_async(args=[str(app_id)], retry=False)
+    pr["project_ideas"] = {**(pr.get("project_ideas") or {}), "running": True, "task_id": task.id, "error": "",
+                           "queued_at": datetime.now(timezone.utc).isoformat()}
+    app.platform_response = pr
+    await db.commit()
+    return {"queued": True, "running": True, "task_id": task.id}
+
+
+class ChooseIdeaRequest(BaseModel):
+    idea_id: str | None = None   # None clears the choice
+    note: str = ""
+
+
+@router.post("/{app_id}/project-ideas/choose")
+async def choose_project_idea(
+    app_id: UUID,
+    body: ChooseIdeaRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record which idea the user wants built. Stage 2 (building it) is
+    not implemented yet; this is the signal that tells us which ideas
+    are worth it."""
+    app = await _owned_application(db, app_id, user)
+    pr = dict(app.platform_response) if isinstance(app.platform_response, dict) else {}
+    pi = dict(pr.get("project_ideas") or {})
+    if body.idea_id and body.idea_id not in {i.get("id") for i in pi.get("ideas") or []} and not body.idea_id.startswith("generic-"):
+        raise HTTPException(status_code=404, detail="Idea not found")
+    pi["chosen"] = {"idea_id": body.idea_id, "note": body.note.strip()[:1000], "at": datetime.now(timezone.utc).isoformat()} if body.idea_id else None
+    pr["project_ideas"] = pi
+    app.platform_response = pr
+    await log_action(db, user, "project_idea_chosen", f"application:{app_id}", metadata={"idea_id": body.idea_id})
+    await db.commit()
+    return {"ok": True, "chosen": pi["chosen"]}

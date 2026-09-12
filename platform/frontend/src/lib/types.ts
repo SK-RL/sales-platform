@@ -1237,6 +1237,58 @@ export interface OutreachResponse {
   running: boolean;
 }
 
+// F406 — project ideas (stage 1: ideas only, no code)
+export interface IdeaEvidence { source: string; quote: string; grounded: boolean; source_title: string; url: string }
+export interface ProjectIdea {
+  id: string;
+  title: string;
+  angle: string; // pain | initiative | stack_match | generic
+  summary: string;
+  evidence: IdeaEvidence[];
+  build: string[];
+  deliverable: string;
+  skills_shown: string[];
+  recipient_role: string;
+  why_them?: string;
+  effort_hours?: number;
+  risks?: string;
+  specificity: "company" | "role" | "ungrounded";
+  grounded_evidence: number;
+  total_evidence: number;
+}
+export interface ProjectIdeasResponse {
+  application_id: string;
+  running?: boolean;
+  error?: string;
+  at?: string;
+  seconds?: number;
+  research?: { found: { github: boolean; status: boolean; blog: boolean; errors: string[] }; jd_terms: string[];
+    sources: { id: string; kind: string; title: string; url: string; chars: number }[] };
+  research_verdict?: string;
+  ideas: ProjectIdea[];
+  chosen?: { idea_id: string; note: string; at: string } | null;
+}
+export interface GenericProjectIdea {
+  id: string;
+  title: string;
+  terms: string[];
+  term_labels: string[];
+  coverage_pct: number;
+  summary: string;
+  build: string[];
+  deliverable: string;
+  skills_shown: string[];
+  effort_hours?: number;
+  recipient_role?: string;
+}
+export interface ProjectIdeasLibrary {
+  ideas: GenericProjectIdea[];
+  jobs_in_corpus?: number;
+  computed_at?: string;
+  running?: boolean;
+  error?: string;
+}
+
 export interface ApplyGateResult {
   // F396 — drafts keyed by field_key, written by the worker.
   drafts?: Record<string, AnswerDraft>;

@@ -91,6 +91,8 @@ import type { ResolvedJobFromUrl,
   InterviewQuestionSet,
   InterviewQuestionSetPayload,
   OutreachResponse,
+  ProjectIdeasLibrary,
+  ProjectIdeasResponse,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "/api/v1";
@@ -1570,6 +1572,23 @@ export async function verifyCompanyContacts(
 
 export async function redraftAnswers(appId: string, fieldKey?: string): Promise<{ queued: boolean; cleared: string[] }> {
   return request(`/applications/${appId}/redraft`, { method: "POST", body: JSON.stringify({ field_key: fieldKey ?? null }) });
+}
+
+// F406 — project ideas (stage 1). Nothing here writes code.
+export async function getProjectIdeas(appId: string): Promise<ProjectIdeasResponse> {
+  return request(`/applications/${appId}/project-ideas`);
+}
+export async function draftProjectIdeas(appId: string): Promise<{ queued: boolean; running: boolean }> {
+  return request(`/applications/${appId}/project-ideas/draft`, { method: "POST" });
+}
+export async function chooseProjectIdea(appId: string, ideaId: string | null, note = ""): Promise<{ ok: boolean }> {
+  return request(`/applications/${appId}/project-ideas/choose`, { method: "POST", body: JSON.stringify({ idea_id: ideaId, note }) });
+}
+export async function getProjectIdeasLibrary(): Promise<ProjectIdeasLibrary> {
+  return request(`/applications/project-ideas-library`);
+}
+export async function draftProjectIdeasLibrary(): Promise<{ queued: boolean }> {
+  return request(`/applications/project-ideas-library/draft`, { method: "POST" });
 }
 
 export async function promoteAnswer(
