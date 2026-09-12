@@ -308,7 +308,36 @@ def _json_block(text: str) -> dict:
     start, end = text.find("{"), text.rfind("}") + 1
     if start < 0 or end <= start:
         raise ValueError("no JSON object in model output")
-    return json.loads(text[start:end])
+    try:
+        return json.loads(text[start:end])
+    except json.JSONDecodeError:
+        return _salvage_ideas(text[start:])
+
+
+def _salvage_ideas(text: str) -> dict:
+    """The model ran out of room mid-array (prod: 'Expecting , delimiter
+    at char 7901'). Keep every complete object in "ideas"; drop the cut
+    one rather than the whole answer."""
+    i = text.find('"ideas"')
+    arr = text.find("[", i) if i >= 0 else -1
+    if arr < 0:
+        raise ValueError("no ideas array to salvage")
+    dec = json.JSONDecoder()
+    pos, ideas = arr + 1, []
+    while True:
+        while pos < len(text) and text[pos] in " \n\r\t,":
+            pos += 1
+        if pos >= len(text) or text[pos] != "{":
+            break
+        try:
+            obj, pos = dec.raw_decode(text, pos)
+        except json.JSONDecodeError:
+            break
+        ideas.append(obj)
+    if not ideas:
+        raise ValueError("no complete idea object to salvage")
+    logger.info("proof_project: salvaged %d complete idea(s) from a truncated answer", len(ideas))
+    return {"ideas": ideas, "research_verdict": "", "salvaged": True}
 
 
 def _research_text(research: dict) -> str:
@@ -324,7 +353,7 @@ def generate_ideas(research: dict, resume_text: str, client=None) -> dict:
     prompt = (f"RESEARCH ON {research.get('company')} — ROLE: {research.get('job_title')}\n\n{_research_text(research)}\n\n"
               f"CANDIDATE RÉSUMÉ:\n{(resume_text or '')[:9000]}")
     try:
-        text, _ = complete(prompt, system=_IDEAS_SYSTEM, answer_tokens=2500, client=client)
+        text, _ = complete(prompt, system=_IDEAS_SYSTEM, answer_tokens=4000, client=client)
         data = _json_block(text)
     except AIUnavailable:
         return {"ideas": [], "error": "AI is not configured"}
@@ -426,7 +455,7 @@ def generate_generic_ideas(corpus: dict, resume_text: str, client=None) -> dict:
     listing = "\n".join(f"- {k}: {SKILL_TERMS[k][0]} — in {v}% of {corpus['jobs']} postings" for k, v in top)
     prompt = f"MOST-ASKED SKILLS (term id: label — share of postings):\n{listing}\n\nCANDIDATE RÉSUMÉ:\n{(resume_text or '')[:9000]}"
     try:
-        text, _ = complete(prompt, system=_GENERIC_SYSTEM, answer_tokens=2500, client=client)
+        text, _ = complete(prompt, system=_GENERIC_SYSTEM, answer_tokens=4000, client=client)
         data = _json_block(text)
     except AIUnavailable:
         return {"ideas": [], "error": "AI is not configured"}

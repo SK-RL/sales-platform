@@ -106,7 +106,7 @@ def generic_project_ideas_task(self, user_id: str, resume_id: str | None = None)
     session = SyncSession()
     try:
         resume = session.get(Resume, resume_id) if resume_id else session.execute(
-            select(Resume).where(Resume.user_id == user_id).order_by(Resume.created_at.desc())).scalars().first()
+            select(Resume).where(Resume.user_id == user_id).order_by(Resume.uploaded_at.desc())).scalars().first()
         corpus = corpus_term_coverage(session)
         result = generate_generic_ideas(corpus, getattr(resume, "text_content", "") or "")
         payload = {**result, "coverage": corpus["coverage"], "resume_id": str(getattr(resume, "id", "") or ""), "running": False}
