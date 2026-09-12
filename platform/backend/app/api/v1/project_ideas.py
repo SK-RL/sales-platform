@@ -74,16 +74,22 @@ async def run_project_ideas_eval(
     ids = [i for i in (body.application_ids or []) if _is_uuid(i)]
     if not ids:
         rows = (await db.execute(
-            select(Application.id, Job.company_id).join(Job, Job.id == Application.job_id)
-            .where(Application.user_id == user.id).order_by(Application.created_at.desc()).limit(200)
+            select(Application.id, Job.company_id, Job.role_cluster).join(Job, Job.id == Application.job_id)
+            .where(Application.user_id == user.id).order_by(Application.created_at.desc()).limit(300)
         )).all()
+        # Relevant roles first (the first run spent a call judging a Direct
+        # Care Worker posting); unrelated ones only fill remaining slots.
         seen: set = set()
-        for app_id, company_id in rows:
-            if company_id in seen:
-                continue
-            seen.add(company_id)
-            ids.append(str(app_id))
-            if len(ids) >= max(1, min(body.limit, 40)):
+        cap = max(1, min(body.limit, 40))
+        for relevant_only in (True, False):
+            for app_id, company_id, cluster in rows:
+                if company_id in seen or (relevant_only and cluster not in ("infra", "security")):
+                    continue
+                seen.add(company_id)
+                ids.append(str(app_id))
+                if len(ids) >= cap:
+                    break
+            if len(ids) >= cap:
                 break
     if not ids:
         raise HTTPException(status_code=400, detail="No applications to evaluate")

@@ -121,6 +121,29 @@ class TestGenerateIdeas:
         assert r["ideas"][0]["coverage_pct"] >= r["ideas"][1]["coverage_pct"] and r["jobs_in_corpus"] == 4
 
 
+class TestTruncatedAnswer:
+    def test_complete_ideas_are_salvaged_from_a_cut_array(self):
+        text = '{"ideas": [{"title": "A", "angle": "pain"}, {"title": "B", "angle": "generic"}, {"title": "C", "ang'
+        d = pp._json_block(text)
+        assert [i["title"] for i in d["ideas"]] == ["A", "B"] and d["salvaged"] is True
+
+    def test_nothing_complete_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            pp._json_block('{"ideas": [{"title": "A", "ang')
+
+    def test_eval_prefers_relevant_roles(self):
+        from app.api.v1 import project_ideas
+
+        assert 'cluster not in ("infra", "security")' in inspect.getsource(project_ideas.run_project_ideas_eval)
+
+    def test_generic_task_orders_resumes_by_uploaded_at(self):
+        from app.workers.tasks import proof_task
+
+        assert "Resume.uploaded_at" in inspect.getsource(proof_task.generic_project_ideas_task) and "created_at" not in inspect.getsource(proof_task.generic_project_ideas_task)
+
+
 class TestResearchHelpers:
     def test_domain_and_slugs(self):
         co = SimpleNamespace(domain="", website="https://www.acme-corp.io/about", name="Acme Corp")
