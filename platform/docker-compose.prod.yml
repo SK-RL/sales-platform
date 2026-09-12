@@ -162,7 +162,7 @@ services:
     # task, both of which hold a child for the duration. A third child
     # keeps a slot free for the person waiting at the screen. Per-child
     # recycling threshold lowered to match (celery_app.py).
-    command: celery -A app.workers.celery_app worker -l info --concurrency=${CELERY_CONCURRENCY:-3} --queues=default
+    command: celery -A app.workers.celery_app worker -l info --concurrency=${CELERY_CONCURRENCY:-3} --queues=interactive,default
     depends_on:
       postgres:
         condition: service_healthy

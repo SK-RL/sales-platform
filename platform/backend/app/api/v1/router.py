@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth, jobs, reviews, pipeline, analytics,
     companies, career_pages, discovery, rules, export, platforms, monitoring,
-    resume, users, role_config, credentials, answer_book, applications, feedback,
+    resume, users, role_config, credentials, answer_book, applications, project_ideas, feedback,
     alerts, cover_letter, interview_prep, intelligence, audit, ai, insights,
     training_data, saved_filters, profiles, routine, work_window,
     interview_questions, notices,
@@ -30,6 +30,7 @@ api_router.include_router(role_config.router)
 api_router.include_router(credentials.router)
 api_router.include_router(answer_book.router)
 api_router.include_router(applications.router)
+api_router.include_router(project_ideas.router)
 api_router.include_router(feedback.router)
 api_router.include_router(alerts.router)
 api_router.include_router(cover_letter.router)

@@ -42,7 +42,7 @@ services:
 
   # F262 — default-queue worker. Handles the high-frequency steady-
   # state tasks (30-min scans, hourly career-page checks, enrichment
-  # fan-out, AI insights, backups). Explicit ``--queues=default`` so
+  # fan-out, AI insights, backups). Explicit ``--queues=interactive,default`` so
   # this worker ignores anything routed to ``heavy`` — those tasks
   # belong to ``celery-worker-heavy`` below. Memory bumped to 1.5GB
   # (was implicitly 1GB) to absorb the worker-baseline footprint

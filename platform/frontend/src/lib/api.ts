@@ -1585,10 +1585,10 @@ export async function chooseProjectIdea(appId: string, ideaId: string | null, no
   return request(`/applications/${appId}/project-ideas/choose`, { method: "POST", body: JSON.stringify({ idea_id: ideaId, note }) });
 }
 export async function getProjectIdeasLibrary(): Promise<ProjectIdeasLibrary> {
-  return request(`/applications/project-ideas-library`);
+  return request(`/project-ideas/library`);
 }
 export async function draftProjectIdeasLibrary(): Promise<{ queued: boolean }> {
-  return request(`/applications/project-ideas-library/draft`, { method: "POST" });
+  return request(`/project-ideas/library/draft`, { method: "POST" });
 }
 
 export async function promoteAnswer(
