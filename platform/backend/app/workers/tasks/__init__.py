@@ -20,6 +20,7 @@ from app.workers.tasks.auto_apply_task import sweep_auto_apply
 from app.workers.tasks.aggregator_task import resolve_aggregator_links, resolve_one_aggregator_job
 from app.workers.tasks.draft_answers_task import draft_gap_answers_task
 from app.workers.tasks.outreach_task import draft_outreach_task, verify_company_contacts_task
+from app.workers.tasks.proof_task import generic_project_ideas_task, project_ideas_eval_task, project_ideas_task
 from app.workers.tasks.alert_task import check_and_send_alerts
 # F356 — these three were beat-scheduled in celery_app.py but never
 # imported here, so their @celery_app.task decorators never ran and
@@ -51,6 +52,9 @@ __all__ = [
     "draft_gap_answers_task",
     "draft_outreach_task",
     "verify_company_contacts_task",
+    "project_ideas_task",
+    "generic_project_ideas_task",
+    "project_ideas_eval_task",
     "check_and_send_alerts",
     "sweep_auto_apply",
     "enrich_target_companies_batch",

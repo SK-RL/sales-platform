@@ -662,6 +662,35 @@ export function DocsPage() {
         </div>
       </Section>
 
+      {/* ── Show your work: a project for the hiring manager (F406) ─────── */}
+      <Section title="Show your work: a small project for the people hiring" icon={Bot} id="show-your-work">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Below <strong>Reach out</strong> on every review page is <strong>Show your work</strong>: a small project (one or two days, public repo plus a two-minute write-up) you can send to the DevOps lead, hiring manager or product engineer for the role, to show a skill instead of claiming it.
+          </p>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">What is researched</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li>The job description (fetched if the posting had none on file), the company profile and tech stack, and the company&apos;s other open roles (a cluster of similar openings says what they are building).</li>
+              <li>Public sources, read without logging in: the company&apos;s GitHub organisation (top repositories, languages), its status page (recent incidents are real pain), and its engineering blog or changelog titles. Each is listed under &ldquo;Looked at&rdquo;, and what was not found is said too.</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">The ideas, and how far to trust them</h3>
+            <ul className="text-sm text-gray-600 space-y-1 ml-4 list-disc">
+              <li>Three ideas, best first. Each cites its evidence as a quote from a named source. Every quote is checked against that source by the platform, not by the model: a quote that is not in the source is shown in red as unverified.</li>
+              <li><strong>Company-specific</strong> means a verified quote comes from a company source (GitHub, status page, blog, other openings, profile). <strong>Role-specific</strong> means only the job description supports it. <strong>Evidence not verified</strong> means nothing checked out; treat it as a guess.</li>
+              <li>Ideas use only skills your résumé shows, never assume access to the company&apos;s private systems, and are scoped to 4–16 hours.</li>
+              <li>When nothing company-specific turns up, the panel falls back to <strong>ideas that fit most openings</strong>. Their coverage percentage is computed from the infra and security postings we track: the share whose description asks for at least two of the idea&apos;s skills.</li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">What happens when you pick one</h3>
+            <p className="text-sm text-gray-600">Picking an idea records it on the application. This is stage one: ideas only, tested across many postings first. Building the project&apos;s code is the next stage and is not switched on yet.</p>
+          </div>
+        </div>
+      </Section>
+
       {/* ── Reach out: the people behind an application (F404) ─────────── */}
       <Section title="Reach out: the people behind an application" icon={Bot} id="reach-out">
         <div className="space-y-4">

@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { BackendErrorBanner } from "@/components/BackendErrorBanner";
 import { OutreachPanel } from "@/components/OutreachPanel";
+import { ProjectIdeasPanel } from "@/components/ProjectIdeasPanel";
 import type { AnswerDraft, ApplyGateResult, BlockingGap, JobQuestionsPreview, PreparedQuestion } from "@/lib/types";
 
 /**
@@ -416,6 +417,8 @@ export function ApplyReviewPage() {
       )}
       {/* F404 — reach the people behind the application. */}
       {current?.id && <OutreachPanel appId={current.id} />}
+      {/* F406 — a project that shows the skills (ideas only for now). */}
+      {current?.id && <ProjectIdeasPanel appId={current.id} />}
     </div>
   );
 }
