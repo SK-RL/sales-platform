@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-09-12 · 5c009fe · sha-5c009fe
+Merge: F406b eval fixes
+
+
 ## 2026-09-12 · 00d8b87 · sha-00d8b87
 Merge: interactive queue, enrichment to heavy, un-shadowed routes (F407)
 
