@@ -39,7 +39,7 @@ class TestGrounding:
         ]}
         result = {"ideas": [
             {"id": "idea-1", "title": "Generic", "evidence": [{"source": "JD", "quote": "Own our Kubernetes platform"}]},
-            {"id": "idea-2", "title": "Pain", "evidence": [{"source": "STATUS", "quote": "Elevated API latency in eu-west"}, {"source": "JD", "quote": "CI/CD pipelines"}]},
+            {"id": "idea-2", "title": "Pain", "evidence": [{"source": "STATUS", "quote": "Elevated API latency in eu-west"}, {"source": "JD", "quote": "Kubernetes platform and CI/CD pipelines"}]},
             {"id": "idea-3", "title": "Made up", "evidence": [{"source": "BLOG", "quote": "we love Nomad"}, {"source": "JD", "quote": "migrating to Nomad"}]},
         ]}
         g = pp.ground_ideas(result, research)["ideas"]
