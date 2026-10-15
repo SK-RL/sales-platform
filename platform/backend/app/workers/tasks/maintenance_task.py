@@ -149,7 +149,7 @@ def prune_scan_logs():
 _RESCORE_CHUNK = 2000
 
 
-@celery_app.task(name="app.workers.tasks.maintenance_task.rescore_jobs")
+@celery_app.task(name="app.workers.tasks.maintenance_task.rescore_jobs", acks_late=False, soft_time_limit=3600, time_limit=3900)
 def rescore_jobs():
     """Recalculate relevance_score for all active (non-expired, non-archived) jobs.
 
@@ -271,7 +271,7 @@ def rescore_jobs():
         session.close()
 
 
-@celery_app.task(name="app.workers.tasks.maintenance_task.reclassify_and_rescore")
+@celery_app.task(name="app.workers.tasks.maintenance_task.reclassify_and_rescore", acks_late=False, soft_time_limit=10500, time_limit=10800)
 def reclassify_and_rescore():
     """Re-run role matching, geography classification, and scoring for all active jobs.
 

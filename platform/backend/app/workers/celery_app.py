@@ -95,7 +95,16 @@ celery_app.conf.update(
     # routed to ``heavy`` blows up its own worker without affecting the
     # 30-min scan cadence on the default worker.
     task_default_queue="default",
-    broker_transport_options={"queue_order_strategy": "priority"},
+    # F408. Redis redelivers any unacked message after ``visibility_timeout``
+    # (default 3600s). With task_acks_late=True that means a task still
+    # running at the one-hour mark is handed out AGAIN while it runs, and the
+    # worker starts the redelivered copy the moment the first finishes: an
+    # endless loop that pinned the single heavy slot for 6 days. Set it above
+    # the longest time_limit in the codebase (scan_all_platforms: 11100s) so
+    # redelivery only ever means "the worker died", never "still working".
+    # Heavy tasks are also acks_late=False now (see test_f408), so this is the
+    # backstop for the remaining default-queue tasks.
+    broker_transport_options={"queue_order_strategy": "priority", "visibility_timeout": 4 * 3600},
     task_routes={
         # The two batch tasks we know are heavy. New tasks default to
         # the ``default`` queue unless explicitly routed here.
