@@ -30,6 +30,10 @@ long-form writeups (one `.md` per notable round). This file is the index.
 
 <!-- RELEASES_LOG_START -->
 
+## 2026-10-16 · 963ecbb · sha-963ecbb
+Merge: pin SQLAlchemy below 2.1 (unblocks deploy)
+
+
 ## 2026-09-12 · 5c009fe · sha-5c009fe
 Merge: F406b eval fixes
 
