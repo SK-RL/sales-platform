@@ -25,10 +25,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python deps via pip (extract deps from pyproject.toml)
 COPY pyproject.toml .
+# SQLAlchemy is bounded <2.1 on purpose (2026-10-16). 2.1 changed the default
+# driver for plain "postgresql://" URLs from psycopg2 to psycopg v3, which this
+# image does not install, so every container fails at import with
+# ModuleNotFoundError: No module named "psycopg". Production runs 2.0.52. Move
+# to 2.1 deliberately (install psycopg or use postgresql+psycopg2://), not by
+# letting an unpinned ">=" drift. The same bound is in ci.yml and deploy.yml.
 RUN pip install --no-cache-dir \
     "fastapi[standard]>=0.115" \
     "uvicorn[standard]>=0.32" \
-    "sqlalchemy[asyncio]>=2.0" \
+    "sqlalchemy[asyncio]>=2.0,<2.1" \
     "asyncpg>=0.30" \
     "alembic>=1.14" \
     "pydantic-settings>=2.6" \
