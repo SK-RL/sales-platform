@@ -10,10 +10,12 @@ from app.workers.tasks._db import SyncSession
 from app.models.company import Company
 from app.config import get_settings
 
+from celery.exceptions import SoftTimeLimitExceeded
+
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="app.workers.tasks.enrichment_task.enrich_company", bind=True, max_retries=2)
+@celery_app.task(name="app.workers.tasks.enrichment_task.enrich_company", acks_late=False, soft_time_limit=900, time_limit=1200, bind=True, max_retries=2)
 def enrich_company(self, company_id: str):
     """Enrich a company record using the self-contained enrichment engine."""
     session = SyncSession()
@@ -36,6 +38,28 @@ def enrich_company(self, company_id: str):
         logger.info("Enriched company %s: %s", company.name, result)
         return {"company_id": company_id, "status": company.enrichment_status, **result}
 
+    except SoftTimeLimitExceeded:
+        # F408. A company whose enrichment runs past the soft limit is
+        # abandoned, NOT retried. The generic handler below would catch this
+        # (SoftTimeLimitExceeded is an Exception) and retry up to twice, so a
+        # 15-minute cap would quietly become 45+ minutes of the single heavy
+        # slot. One company like that took the slot for 6 days: 145 runs of
+        # ~64 minutes each, redelivered by Redis, while every scan queued
+        # behind it. Mark it failed and move on; the nightly batch retries it.
+        logger.error("enrich_company timed out for %s; abandoning without retry", company_id)
+        try:
+            session.rollback()
+            company = session.execute(
+                select(Company).where(Company.id == company_id)
+            ).scalar_one_or_none()
+            if company:
+                company.enrichment_status = "failed"
+                company.enrichment_error = "timed out (soft limit); will be retried by the nightly batch"
+                session.commit()
+        except Exception:
+            session.rollback()
+        return {"company_id": company_id, "status": "timeout"}
+
     except Exception as exc:
         logger.exception("enrich_company failed for %s: %s", company_id, exc)
         try:
@@ -53,7 +77,7 @@ def enrich_company(self, company_id: str):
         session.close()
 
 
-@celery_app.task(name="app.workers.tasks.enrichment_task.enrich_target_companies_batch")
+@celery_app.task(name="app.workers.tasks.enrichment_task.enrich_target_companies_batch", acks_late=False, soft_time_limit=600, time_limit=660)
 def enrich_target_companies_batch():
     """Nightly: enrich companies that are stale or never enriched.
 
@@ -122,7 +146,7 @@ def enrich_target_companies_batch():
         session.close()
 
 
-@celery_app.task(name="app.workers.tasks.enrichment_task.verify_stale_emails")
+@celery_app.task(name="app.workers.tasks.enrichment_task.verify_stale_emails", acks_late=False, soft_time_limit=1800, time_limit=2100)
 def verify_stale_emails():
     """Re-verify contact emails that are older than the verification threshold."""
     from app.models.company_contact import CompanyContact
@@ -321,7 +345,7 @@ def _upsert_contact(
     return True
 
 
-@celery_app.task(name="app.workers.tasks.enrichment_task.sync_sheet_contacts", bind=True, max_retries=1)
+@celery_app.task(name="app.workers.tasks.enrichment_task.sync_sheet_contacts", acks_late=False, soft_time_limit=1800, time_limit=2100, bind=True, max_retries=1)
 def sync_sheet_contacts(self):
     """F354a — promote recruiter POCs from team Google-Sheet rows into
     CompanyContact.
@@ -388,7 +412,7 @@ def sync_sheet_contacts(self):
         session.close()
 
 
-@celery_app.task(name="app.workers.tasks.enrichment_task.mine_jd_contact_emails", bind=True, max_retries=1)
+@celery_app.task(name="app.workers.tasks.enrichment_task.mine_jd_contact_emails", acks_late=False, soft_time_limit=1800, time_limit=2100, bind=True, max_retries=1)
 def mine_jd_contact_emails(self, batch_size: int = 5000):
     """F354b — mine employer-published emails out of stored JDs.
 

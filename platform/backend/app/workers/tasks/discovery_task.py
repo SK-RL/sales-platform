@@ -532,7 +532,7 @@ def run_discovery(self, run_id: str | None = None):
         session.close()
 
 
-@celery_app.task(name="app.workers.tasks.discovery_task.discover_and_add_boards", bind=True, max_retries=1)
+@celery_app.task(name="app.workers.tasks.discovery_task.discover_and_add_boards", acks_late=False, soft_time_limit=1800, time_limit=2100, bind=True, max_retries=1)
 def discover_and_add_boards(self, source: str = "scheduled"):
     """Discovery + auto-add: Find new company boards and automatically add them to scanning.
 
@@ -763,6 +763,7 @@ def discover_and_add_boards(self, source: str = "scheduled"):
     name="app.workers.tasks.discovery_task.fingerprint_existing_companies",
     bind=True,
     max_retries=1,
+    acks_late=False, soft_time_limit=3000, time_limit=3300,
 )
 def fingerprint_existing_companies(self, limit: int = 50, only_unfingerprinted: bool = True):
     """Reverse-discovery via ATS fingerprinting.
